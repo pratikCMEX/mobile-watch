@@ -5,7 +5,7 @@
   "main": "build/app.js",
   "scripts": {
     "build": "tsc",
-    "start": "nodemon --ignore uploads/ --exec ts-node app/app.ts",
+    "start": "nodemon --ignore uploads/ --exec \"tsc && node build/app.js\"",
     "dev": "nodemon --exec ts-node app/app.ts"
   },
   "keywords": [],
