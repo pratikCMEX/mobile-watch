@@ -299,6 +299,38 @@ class TcpServer {
         this.handleHeartRate(client, parsed);
         break;
 
+      case "UD_LTE":
+        this.handleLteLocation(client, parsed);
+        break;
+
+      case "bphrt":
+        this.handleBloodPressureHeartRate(client, parsed);
+        break;
+
+      case "oxygen":
+        this.handleOxygen(client, parsed);
+        break;
+
+      case "btemp2":
+        this.handleTemperature(client, parsed);
+        break;
+
+      case "calllog":
+        this.handleCallLog(client, parsed);
+        break;
+
+      case "CONFIG":
+        this.handleConfig(client, parsed);
+        break;
+
+      case "ICCID":
+        this.handleIccid(client, parsed);
+        break;
+
+      case "RYIMEI":
+        this.handleRyimei(client, parsed);
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -375,7 +407,7 @@ class TcpServer {
 
     Logging.info(`LK response sent to device ${packet.deviceId}`);
 
-    this.markDeviceOnline(packet.deviceId, packet.payload).catch(
+    this.markDeviceOnline(packet.deviceId).catch(
       (error: Error) =>
         Logging.error(
           `Failed to update device ${packet.deviceId} from LK: ${error.message}`
@@ -592,6 +624,390 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // UD_LTE - GPS location (LTE watches: decimal-degree coordinates
+  // plus cell/WiFi positioning info, unlike the plain UD command)
+  // ───────────────────────────────────────────────────────────
+
+  private handleLteLocation(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `UD_LTE location packet received from device ${packet.deviceId}`
+    );
+
+    const location = this.parseLteLocation(packet.payload);
+
+    if (!location) {
+      Logging.error(
+        `Unable to parse UD_LTE location packet from device ${packet.deviceId}`
+      );
+
+      return;
+    }
+
+    Logging.info(
+      `LTE LOCATION | Device: ${packet.deviceId} | ` +
+        `Lat: ${location.latitude} ${location.latitudeDirection} | ` +
+        `Lng: ${location.longitude} ${location.longitudeDirection} | ` +
+        `Battery: ${location.battery} | Signal: ${location.gsmSignal}`
+    );
+
+    this.saveLteLocation(packet.deviceId, location).catch((error: Error) =>
+      Logging.error(
+        `Failed to save LTE location for device ${packet.deviceId}: ${error.message}`
+      )
+    );
+  }
+
+  /**
+   * UD_LTE payload fields we can confirm from real device traffic:
+   *
+   * 0 date (DDMMYY), 1 time (HHMMSS), 2 GPS status, 3 latitude (decimal
+   * degrees - NOT ddmm.mm like plain UD), 4 lat direction, 5 longitude
+   * (decimal degrees), 6 lon direction, 7 speed, 8 course, 9 altitude,
+   * 10 satellites, 11 battery %, 12 GSM signal.
+   *
+   * Fields after index 12 (status flags, cell tower MCC/MNC/LAC/CID,
+   * nearby WiFi AP MAC/RSSI list) are present but not confidently
+   * mapped yet - left unparsed rather than guessed.
+   */
+  private parseLteLocation(payload: string): GpsLocation | null {
+    const parts = payload.split(",");
+
+    if (parts.length < 13) {
+      return null;
+    }
+
+    return {
+      date: parts[0],
+      time: parts[1],
+
+      gpsStatus: parts[2],
+
+      latitude: parts[3],
+      latitudeDirection: parts[4],
+
+      longitude: parts[5],
+      longitudeDirection: parts[6],
+
+      speed: parts[7],
+      direction: parts[8],
+      altitude: parts[9],
+
+      satellites: parts[10],
+      battery: parts[11],
+      gsmSignal: parts[12],
+
+      rawFields: parts,
+    };
+  }
+
+  private async saveLteLocation(
+    deviceId: string,
+    location: GpsLocation
+  ): Promise<void> {
+    const device = await this.findDevice(deviceId);
+
+    if (!device) return;
+
+    const latitude = this.convertDecimalCoordinate(
+      location.latitude,
+      location.latitudeDirection
+    );
+    const longitude = this.convertDecimalCoordinate(
+      location.longitude,
+      location.longitudeDirection
+    );
+
+    if (latitude === null || longitude === null) {
+      Logging.error(
+        `Could not convert LTE coordinates for device ${deviceId}: ` +
+          `${location.latitude}${location.latitudeDirection}, ` +
+          `${location.longitude}${location.longitudeDirection}`
+      );
+
+      return;
+    }
+
+    await db.Location.create({
+      device_id: device.id,
+      latitude,
+      longitude,
+      speed_kmh: parseFloat(location.speed) || null,
+      direction: location.direction || null,
+      is_valid_fix: location.gpsStatus === "A",
+      recorded_at: this.parseRecordedAt(location.date, location.time),
+    });
+
+    const battery = parseInt(location.battery || "", 10);
+
+    await device.update({
+      last_updated_at: new Date(),
+      gps_strength:
+        parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
+      signal_status: location.gsmSignal || null,
+      is_online: true,
+      connection_status: "online",
+      ...(Number.isInteger(battery) && battery >= 0 && battery <= 100
+        ? { battery_percentage: battery }
+        : {}),
+    });
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // bphrt - Blood pressure + heart rate
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Payload: bphrt,systolic,diastolic,heartRateBpm,,,,
+   * (trailing empty fields observed but not mapped yet)
+   */
+  private handleBloodPressureHeartRate(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    Logging.info(
+      `bphrt packet received from device ${packet.deviceId}: ${packet.payload}`
+    );
+
+    const parts = packet.payload.split(",");
+    const systolic = parseInt(parts[0], 10);
+    const diastolic = parseInt(parts[1], 10);
+    const heartRate = parseInt(parts[2], 10);
+    const recordedAt = new Date();
+
+    if (Number.isInteger(systolic) && Number.isInteger(diastolic)) {
+      this.saveHealthMetric(
+        packet.deviceId,
+        "blood_pressure",
+        systolic,
+        diastolic,
+        "mmHg",
+        recordedAt
+      ).catch((error: Error) =>
+        Logging.error(
+          `Failed to save blood pressure for device ${packet.deviceId}: ${error.message}`
+        )
+      );
+    }
+
+    if (Number.isInteger(heartRate)) {
+      this.saveHealthMetric(
+        packet.deviceId,
+        "heart_rate",
+        heartRate,
+        null,
+        "bpm",
+        recordedAt
+      ).catch((error: Error) =>
+        Logging.error(
+          `Failed to save heart rate for device ${packet.deviceId}: ${error.message}`
+        )
+      );
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // oxygen - SpO2
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Payload: oxygen,<unknown flag>,spo2Percent
+   */
+  private handleOxygen(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `oxygen packet received from device ${packet.deviceId}: ${packet.payload}`
+    );
+
+    const parts = packet.payload.split(",");
+    const spo2 = parseInt(parts[1], 10);
+
+    if (!Number.isInteger(spo2)) return;
+
+    this.saveHealthMetric(
+      packet.deviceId,
+      "spo2",
+      spo2,
+      null,
+      "%",
+      new Date()
+    ).catch((error: Error) =>
+      Logging.error(
+        `Failed to save SpO2 for device ${packet.deviceId}: ${error.message}`
+      )
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // btemp2 - Body temperature
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Payload: btemp2,<unknown flag>,temperatureCelsius
+   */
+  private handleTemperature(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `btemp2 packet received from device ${packet.deviceId}: ${packet.payload}`
+    );
+
+    const parts = packet.payload.split(",");
+    const temperature = parseFloat(parts[1]);
+
+    if (isNaN(temperature)) return;
+
+    this.saveHealthMetric(
+      packet.deviceId,
+      "temperature",
+      temperature,
+      null,
+      "C",
+      new Date()
+    ).catch((error: Error) =>
+      Logging.error(
+        `Failed to save temperature for device ${packet.deviceId}: ${error.message}`
+      )
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // calllog - Call log entry
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Payload: calllog,phoneNumber,,type,flag,unixTimestamp,durationSeconds
+   *
+   * There is no dedicated call-log table, so this is stored as a
+   * Notification (generic, already surfaced to the app) rather than
+   * dropped.
+   */
+  private handleCallLog(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `calllog packet received from device ${packet.deviceId}: ${packet.payload}`
+    );
+
+    const parts = packet.payload.split(",");
+    const phoneNumber = parts[0] || "unknown";
+
+    this.findDevice(packet.deviceId)
+      .then((device) => {
+        if (!device) return;
+
+        return db.Notification.create({
+          device_id: device.id,
+          user_id: null,
+          type: "general",
+          title: "Call log",
+          body: phoneNumber,
+          metadata: { kind: "call_log", raw: packet.payload, fields: parts },
+          is_read: "0",
+        });
+      })
+      .catch((error: Error) =>
+        Logging.error(
+          `Failed to save call log for device ${packet.deviceId}: ${error.message}`
+        )
+      );
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // CONFIG - Device configuration dump
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Payload is a long key:value,key:value list. We only trust the
+   * upload interval (UL, in seconds) since it maps directly onto an
+   * existing Device field; the rest is logged raw (already done by
+   * the caller logging packet.raw) rather than guessed at.
+   */
+  private handleConfig(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `CONFIG packet received from device ${packet.deviceId}`
+    );
+
+    const uploadSecondsMatch = packet.payload.match(/(?:^|,)UL:(\d+)/);
+
+    if (!uploadSecondsMatch) return;
+
+    const uploadMinutes = Math.round(parseInt(uploadSecondsMatch[1], 10) / 60);
+
+    if (!Number.isInteger(uploadMinutes) || uploadMinutes <= 0) return;
+
+    this.findDevice(packet.deviceId)
+      .then((device) => {
+        if (!device) return;
+
+        return device.update({ location_interval_minutes: uploadMinutes });
+      })
+      .catch((error: Error) =>
+        Logging.error(
+          `Failed to update config for device ${packet.deviceId}: ${error.message}`
+        )
+      );
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // ICCID / RYIMEI - Device identity
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Payload: ICCID,iccid,imei,imsi,
+   */
+  private handleIccid(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `ICCID packet received from device ${packet.deviceId}: ${packet.payload}`
+    );
+
+    const parts = packet.payload.split(",");
+    const imei = parts[1];
+
+    if (imei) {
+      this.linkDeviceIdentity(packet.deviceId, imei);
+    }
+  }
+
+  /**
+   * Payload: RYIMEI,imei
+   */
+  private handleRyimei(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `RYIMEI packet received from device ${packet.deviceId}: ${packet.payload}`
+    );
+
+    const imei = packet.payload.split(",")[0];
+
+    if (imei) {
+      client.imei = imei;
+
+      this.linkDeviceIdentity(packet.deviceId, imei);
+    }
+  }
+
+  /**
+   * The bracket protocol's deviceId is a short serial, not the real
+   * IMEI a Device is registered with. Once we learn the real IMEI
+   * (via ICCID/RYIMEI), find the Device by that IMEI and backfill
+   * its serial_number with the short protocol ID, so future packets
+   * -- which only ever carry the short ID -- can be matched via
+   * findDevice() without waiting for another ICCID/RYIMEI packet.
+   */
+  private async linkDeviceIdentity(
+    deviceId: string,
+    imei: string
+  ): Promise<void> {
+    const device = await db.Device.findOne({ where: { imei } });
+
+    if (!device) {
+      Logging.info(
+        `No registered Device found for imei ${imei} (protocol id ${deviceId})`
+      );
+
+      return;
+    }
+
+    if (device.serial_number !== deviceId) {
+      await device.update({ serial_number: deviceId });
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Unknown command
   // ───────────────────────────────────────────────────────────
 
@@ -619,45 +1035,49 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   /**
-   * The bracket protocol identifies devices by the "deviceId" field
-   * in [3G*deviceId*len*content]. We match that against Device.imei.
-   * If no matching Device row exists, we log and skip persistence
-   * instead of auto-creating a Device (unregistered/unowned devices
-   * should not silently start writing rows).
+   * The bracket protocol identifies devices by a short "deviceId"
+   * field in [3G*deviceId*len*content] - this is NOT the same as the
+   * real IMEI a Device is registered with (which only arrives later,
+   * via ICCID/RYIMEI packets - see linkDeviceIdentity()). We match
+   * primarily on Device.serial_number (backfilled from ICCID/RYIMEI),
+   * falling back to Device.imei for device families that put the
+   * short ID there directly. If neither matches, we log and skip
+   * persistence instead of auto-creating a Device (unregistered
+   * devices should not silently start writing rows).
    */
   private async findDevice(deviceId: string): Promise<any | null> {
-    const device = await db.Device.findOne({ where: { imei: deviceId } });
+    let device = await db.Device.findOne({
+      where: { serial_number: deviceId },
+    });
 
     if (!device) {
-      Logging.info(`No registered Device found for imei ${deviceId}`);
+      device = await db.Device.findOne({ where: { imei: deviceId } });
+    }
+
+    if (!device) {
+      Logging.info(`No registered Device found for protocol id ${deviceId}`);
     }
 
     return device;
   }
 
-  private async markDeviceOnline(
-    deviceId: string,
-    payload: string
-  ): Promise<void> {
+  private async markDeviceOnline(deviceId: string): Promise<void> {
     const device = await this.findDevice(deviceId);
 
     if (!device) return;
 
     /**
-     * LK payload (when present) is battery,step,turnovers for this
-     * protocol family. We only trust the battery field, and only
-     * when it looks like a percentage.
+     * Real device traffic (LK,0,0,57) doesn't match the
+     * battery,step,turnovers layout we originally assumed - the
+     * last field lines up with GSM signal in UD_LTE instead. Rather
+     * than keep guessing and writing a wrong battery %, LK now only
+     * updates online status; battery comes from UD_LTE, which
+     * reports it at a confirmed field position.
      */
-    const parts = payload.split(",");
-    const battery = parseInt(parts[0], 10);
-
     await device.update({
       is_online: true,
       connection_status: "online",
       last_updated_at: new Date(),
-      ...(Number.isInteger(battery) && battery >= 0 && battery <= 100
-        ? { battery_percentage: battery }
-        : {}),
     });
   }
 
@@ -688,6 +1108,22 @@ class TcpServer {
     const decimal = degrees + minutes / 60;
 
     return direction === "S" || direction === "W" ? -decimal : decimal;
+  }
+
+  /**
+   * UD_LTE reports latitude/longitude as plain decimal degrees
+   * already (unlike the plain UD command's ddmm.mm format) - only
+   * the N/S/E/W sign needs applying.
+   */
+  private convertDecimalCoordinate(
+    raw: string,
+    direction: string
+  ): number | null {
+    const value = parseFloat(raw);
+
+    if (isNaN(value)) return null;
+
+    return direction === "S" || direction === "W" ? -value : value;
   }
 
   /**
@@ -775,6 +1211,28 @@ class TcpServer {
     });
   }
 
+  private async saveHealthMetric(
+    deviceId: string,
+    metricType: string,
+    valuePrimary: number,
+    valueSecondary: number | null,
+    unit: string,
+    recordedAt: Date
+  ): Promise<void> {
+    const device = await this.findDevice(deviceId);
+
+    if (!device) return;
+
+    await db.HealthMetric.create({
+      device_id: device.id,
+      metric_type: metricType,
+      value_primary: valuePrimary,
+      value_secondary: valueSecondary,
+      unit,
+      recorded_at: recordedAt,
+    });
+  }
+
   private async saveAlarm(deviceId: string, payload: string): Promise<void> {
     const device = await this.findDevice(deviceId);
 
@@ -783,10 +1241,10 @@ class TcpServer {
     await db.Notification.create({
       device_id: device.id,
       user_id: null,
-      type: "alarm",
+      type: "general",
       title: "Device alarm",
       body: payload,
-      metadata: { raw: payload },
+      metadata: { kind: "alarm", raw: payload },
       is_read: "0",
     });
   }
@@ -987,6 +1445,9 @@ interface GpsLocation {
   altitude: string;
 
   satellites: string;
+
+  battery?: string;
+  gsmSignal?: string;
 
   rawFields: string[];
 }
