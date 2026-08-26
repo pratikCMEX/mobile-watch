@@ -2,7 +2,7 @@
   "name": "monitorimi",
   "version": "1.0.0",
   "description": "",
-  "main": "app/app.ts",
+  "main": "build/app.js",
   "scripts": {
     "build": "tsc",
     "start": "nodemon --ignore uploads/ --exec ts-node app/app.ts",
