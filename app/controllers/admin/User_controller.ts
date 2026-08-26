@@ -7,6 +7,7 @@ import {
 } from "../../library/Response";
 import { Op } from "sequelize";
 import bcrypt from "bcrypt";
+
 import { generateAuthToken } from "../../helper/Helper";
 
 async function createUser(req: Request, res: Response, next: NextFunction) {
