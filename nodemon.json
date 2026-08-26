@@ -1,0 +1,12 @@
+{
+  "watch": ["app"],
+  "ext": "ts,json",
+  "ignore": [
+    "node_modules/**/*",
+    "uploads/**/*",
+    "dist/**/*",
+    "logs/**/*",
+    "*.log"
+  ],
+  "exec": "ts-node app/app.ts"
+}

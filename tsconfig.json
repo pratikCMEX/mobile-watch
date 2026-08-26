@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES6",
+    "lib": ["ES6"],
+    "types": ["node"],
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "module": "commonjs",
+    "esModuleInterop": true,
+    "resolveJsonModule": true
+  }
+}
