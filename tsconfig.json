@@ -6,6 +6,9 @@
     "typeRoots": ["./node_modules/@types", "./src/types"],
     "module": "commonjs",
     "esModuleInterop": true,
-    "resolveJsonModule": true
-  }
+    "resolveJsonModule": true,
+    "outDir": "./build",
+    "rootDir": "./app"
+  },
+  "exclude": ["node_modules", "build"]
 }
