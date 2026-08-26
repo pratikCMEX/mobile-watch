@@ -1,5 +1,6 @@
 import net from "net";
 import Logging from "../library/Logging";
+import db from "../models";
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -140,6 +141,14 @@ class TcpServer {
 
     socket.on("close", () => {
       this.removeClient(client);
+
+      if (client.deviceId) {
+        this.markDeviceOffline(client.deviceId).catch((error: Error) =>
+          Logging.error(
+            `Failed to mark device ${client.deviceId} offline: ${error.message}`
+          )
+        );
+      }
 
       Logging.info(
         `GPS TCP client disconnected: ${connectionId} ` +
@@ -365,6 +374,13 @@ class TcpServer {
     this.send(client, packet.raw);
 
     Logging.info(`LK response sent to device ${packet.deviceId}`);
+
+    this.markDeviceOnline(packet.deviceId, packet.payload).catch(
+      (error: Error) =>
+        Logging.error(
+          `Failed to update device ${packet.deviceId} from LK: ${error.message}`
+        )
+    );
   }
 
   // ───────────────────────────────────────────────────────────
@@ -389,6 +405,12 @@ class TcpServer {
         `Lat: ${location.latitude} ${location.latitudeDirection} | ` +
         `Lng: ${location.longitude} ${location.longitudeDirection} | ` +
         `GPS: ${location.gpsStatus}`
+    );
+
+    this.saveLocation(packet.deviceId, location).catch((error: Error) =>
+      Logging.error(
+        `Failed to save location for device ${packet.deviceId}: ${error.message}`
+      )
     );
   }
 
@@ -470,6 +492,12 @@ class TcpServer {
         `BPM: ${heartRate.bpm} | ` +
         `Unit: ${heartRate.unit}`
     );
+
+    this.saveHeartRate(packet.deviceId, heartRate).catch((error: Error) =>
+      Logging.error(
+        `Failed to save heart rate for device ${packet.deviceId}: ${error.message}`
+      )
+    );
   }
 
   private parseHeartRate(payload: string): {
@@ -540,12 +568,11 @@ class TcpServer {
       `ALARM received from device ${packet.deviceId}: ` + packet.payload
     );
 
-    /**
-     * TODO:
-     *
-     * Parse alarm according to the protocol and
-     * save it to your alarms table.
-     */
+    this.saveAlarm(packet.deviceId, packet.payload).catch((error: Error) =>
+      Logging.error(
+        `Failed to save alarm for device ${packet.deviceId}: ${error.message}`
+      )
+    );
   }
 
   // ───────────────────────────────────────────────────────────
@@ -585,6 +612,183 @@ class TcpServer {
      * Add a response only after confirming it in the
      * supplier protocol.
      */
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Database persistence
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * The bracket protocol identifies devices by the "deviceId" field
+   * in [3G*deviceId*len*content]. We match that against Device.imei.
+   * If no matching Device row exists, we log and skip persistence
+   * instead of auto-creating a Device (unregistered/unowned devices
+   * should not silently start writing rows).
+   */
+  private async findDevice(deviceId: string): Promise<any | null> {
+    const device = await db.Device.findOne({ where: { imei: deviceId } });
+
+    if (!device) {
+      Logging.info(`No registered Device found for imei ${deviceId}`);
+    }
+
+    return device;
+  }
+
+  private async markDeviceOnline(
+    deviceId: string,
+    payload: string
+  ): Promise<void> {
+    const device = await this.findDevice(deviceId);
+
+    if (!device) return;
+
+    /**
+     * LK payload (when present) is battery,step,turnovers for this
+     * protocol family. We only trust the battery field, and only
+     * when it looks like a percentage.
+     */
+    const parts = payload.split(",");
+    const battery = parseInt(parts[0], 10);
+
+    await device.update({
+      is_online: true,
+      connection_status: "online",
+      last_updated_at: new Date(),
+      ...(Number.isInteger(battery) && battery >= 0 && battery <= 100
+        ? { battery_percentage: battery }
+        : {}),
+    });
+  }
+
+  private async markDeviceOffline(deviceId: string): Promise<void> {
+    const device = await this.findDevice(deviceId);
+
+    if (!device) return;
+
+    await device.update({
+      is_online: false,
+      connection_status: "offline",
+      last_updated_at: new Date(),
+    });
+  }
+
+  /**
+   * Converts "ddmm.mmmm" (degrees + minutes) to decimal degrees,
+   * applying sign for S/W directions. This is the coordinate format
+   * used by the NMEA-derived GPS watch protocols in this family.
+   */
+  private convertCoordinate(raw: string, direction: string): number | null {
+    const value = parseFloat(raw);
+
+    if (isNaN(value)) return null;
+
+    const degrees = Math.floor(value / 100);
+    const minutes = value - degrees * 100;
+    const decimal = degrees + minutes / 60;
+
+    return direction === "S" || direction === "W" ? -decimal : decimal;
+  }
+
+  /**
+   * Date/time fields are DDMMYY / HHMMSS (matches $GPRMC-derived
+   * encoding used by this protocol family).
+   */
+  private parseRecordedAt(date: string, time: string): Date {
+    if (date.length === 6 && time.length === 6) {
+      const day = date.substring(0, 2);
+      const month = date.substring(2, 4);
+      const year = `20${date.substring(4, 6)}`;
+      const hours = time.substring(0, 2);
+      const minutes = time.substring(2, 4);
+      const seconds = time.substring(4, 6);
+
+      const parsed = new Date(
+        `${year}-${month}-${day}T${hours}:${minutes}:${seconds}Z`
+      );
+
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+
+    return new Date();
+  }
+
+  private async saveLocation(
+    deviceId: string,
+    location: GpsLocation
+  ): Promise<void> {
+    const device = await this.findDevice(deviceId);
+
+    if (!device) return;
+
+    const latitude = this.convertCoordinate(
+      location.latitude,
+      location.latitudeDirection
+    );
+    const longitude = this.convertCoordinate(
+      location.longitude,
+      location.longitudeDirection
+    );
+
+    if (latitude === null || longitude === null) {
+      Logging.error(
+        `Could not convert coordinates for device ${deviceId}: ` +
+          `${location.latitude}${location.latitudeDirection}, ` +
+          `${location.longitude}${location.longitudeDirection}`
+      );
+
+      return;
+    }
+
+    await db.Location.create({
+      device_id: device.id,
+      latitude,
+      longitude,
+      speed_kmh: parseFloat(location.speed) || null,
+      direction: location.direction || null,
+      is_valid_fix: location.gpsStatus === "A",
+      recorded_at: this.parseRecordedAt(location.date, location.time),
+    });
+
+    await device.update({
+      last_updated_at: new Date(),
+      gps_strength:
+        parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
+    });
+  }
+
+  private async saveHeartRate(
+    deviceId: string,
+    heartRate: { bpm: number; unit: string; recordedAt: Date }
+  ): Promise<void> {
+    const device = await this.findDevice(deviceId);
+
+    if (!device) return;
+
+    await db.HealthMetric.create({
+      device_id: device.id,
+      metric_type: "heart_rate",
+      value_primary: heartRate.bpm,
+      value_secondary: null,
+      unit: heartRate.unit,
+      recorded_at: heartRate.recordedAt,
+    });
+  }
+
+  private async saveAlarm(deviceId: string, payload: string): Promise<void> {
+    const device = await this.findDevice(deviceId);
+
+    if (!device) return;
+
+    await db.Notification.create({
+      device_id: device.id,
+      user_id: null,
+      type: "alarm",
+      title: "Device alarm",
+      body: payload,
+      metadata: { raw: payload },
+      is_read: "0",
+    });
   }
 
   // ───────────────────────────────────────────────────────────

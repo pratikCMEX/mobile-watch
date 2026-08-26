@@ -7,7 +7,7 @@ const serviceAccount = require(path.join(
 ));
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.cert(serviceAccount),
 });
 
 export default admin;
