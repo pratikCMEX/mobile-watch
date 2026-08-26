@@ -3,11 +3,11 @@ dotenv.config();
 const MONGO_USERNAME = process.env.DB_USER || "";
 const MONGO_PASSWORD = process.env.DB_PASSWORD || "";
 
-const MONGO_URL = `mongodb://localshot/digitaInterpreter`;
+const MONGO_URL = `mongodb://localhost/digitaInterpreter`;
 
-const SERVER_PORT = process.env.PORT ? Number(process.env.PORT) : 3006;
+const SERVER_PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
-const TCP_PORT = process.env.TCP_PORT ? Number(process.env.TCP_PORT) : 9090;
+const TCP_PORT = process.env.TCP_PORT ? Number(process.env.TCP_PORT) : 9000;
 
 export const config = {
     mongo: {
