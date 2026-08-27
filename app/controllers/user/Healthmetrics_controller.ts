@@ -106,7 +106,7 @@ const getAnalytics = async (
   next: NextFunction
 ) => {
   try {
-    const { device_id, metric_type, range = "daily", date } = req.body;
+    const { device_id, metric_type, range = "daily", date = null } = req.body;
 
     if (!device_id || !metric_type) {
       return errorMessage(res, "device_id and metric_type are required");
