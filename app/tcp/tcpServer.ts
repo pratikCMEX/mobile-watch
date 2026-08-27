@@ -390,9 +390,9 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleHeartbeat(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(`LK heartbeat data received. ${packet}`);
-
-    Logging.info(`LK heartbeat received from device ${packet.deviceId}`);
+    Logging.info(
+      `LK heartbeat received from device ${packet.deviceId}: ${packet.payload}`
+    );
 
     /**
      * Protocol requirement:

@@ -209,7 +209,6 @@ export const Schemas = {
         .valid("daily", "weekly", "monthly")
         .optional()
         .default("daily"),
-      date: Joi.string().optional().allow(null),
     }),
   },
   snapshot: {
