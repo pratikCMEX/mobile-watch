@@ -68,6 +68,9 @@ const METRIC_TYPES = [
   "distance",
   "steps_daily",
   "steps_cumulative",
+  "battery",
+  "steps",
+  "turnovers",
 ];
 
 function startOfDay(d: Date) {

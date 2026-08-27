@@ -179,7 +179,10 @@ export const Schemas = {
           "temperature",
           "distance",
           "steps_daily",
-          "steps_cumulative"
+          "steps_cumulative",
+          "battery",
+          "steps",
+          "turnovers"
         )
         .required(),
       value_primary: Joi.alternatives()
@@ -202,13 +205,17 @@ export const Schemas = {
           "temperature",
           "distance",
           "steps_daily",
-          "steps_cumulative"
+          "steps_cumulative",
+          "battery",
+          "steps",
+          "turnovers"
         )
         .required(),
       range: Joi.string()
         .valid("daily", "weekly", "monthly")
         .optional()
         .default("daily"),
+      date: Joi.string().optional().allow(null, ""),
     }),
   },
   snapshot: {
