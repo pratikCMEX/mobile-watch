@@ -407,11 +407,10 @@ class TcpServer {
 
     Logging.info(`LK response sent to device ${packet.deviceId}`);
 
-    this.markDeviceOnline(packet.deviceId).catch(
-      (error: Error) =>
-        Logging.error(
-          `Failed to update device ${packet.deviceId} from LK: ${error.message}`
-        )
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to update device ${packet.deviceId} from LK: ${error.message}`
+      )
     );
   }
 
@@ -741,8 +740,7 @@ class TcpServer {
 
     await device.update({
       last_updated_at: new Date(),
-      gps_strength:
-        parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
+      gps_strength: parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
       signal_status: location.gsmSignal || null,
       is_online: true,
       connection_status: "online",
@@ -918,9 +916,7 @@ class TcpServer {
    * the caller logging packet.raw) rather than guessed at.
    */
   private handleConfig(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(
-      `CONFIG packet received from device ${packet.deviceId}`
-    );
+    Logging.info(`CONFIG packet received from device ${packet.deviceId}`);
 
     const uploadSecondsMatch = packet.payload.match(/(?:^|,)UL:(\d+)/);
 
@@ -987,23 +983,89 @@ class TcpServer {
    * its serial_number with the short protocol ID, so future packets
    * -- which only ever carry the short ID -- can be matched via
    * findDevice() without waiting for another ICCID/RYIMEI packet.
+   *
+   * If no Device is found by IMEI, we also check for a placeholder
+   * Device that was auto-created by findDevice() (identified by
+   * serial_number = deviceId and imei = null). If found, we update
+   * its imei so it becomes a fully registered device.
    */
   private async linkDeviceIdentity(
     deviceId: string,
     imei: string
   ): Promise<void> {
-    const device = await db.Device.findOne({ where: { imei } });
+    let device = await db.Device.findOne({ where: { imei } });
+
+    if (!device) {
+      /**
+       * No device found by IMEI. Check if there is a placeholder
+       * device that was auto-created for this protocol deviceId.
+       */
+      device = await db.Device.findOne({
+        where: { serial_number: deviceId, imei: null },
+      });
+    }
 
     if (!device) {
       Logging.info(
-        `No registered Device found for imei ${imei} (protocol id ${deviceId})`
+        `No registered Device found for imei ${imei} (protocol id ${deviceId}) - ` +
+          `creating placeholder.`
       );
 
-      return;
+      try {
+        device = await db.Device.create({
+          serial_number: deviceId,
+          imei: imei,
+          owner_id: null,
+          device_name: `Device ${deviceId}`,
+          email: `${deviceId}@placeholder.local`,
+          phone_number: null,
+          country_code: null,
+          network_carrier: null,
+          network_type: null,
+          profile_image: null,
+          connection_status: "offline",
+          signal_status: null,
+          battery_percentage: null,
+          gps_strength: null,
+          is_online: false,
+          last_updated_at: null,
+          location_interval_minutes: 1,
+          height_cm: null,
+          gender: null,
+          age: null,
+          weight_kg: null,
+        });
+
+        Logging.info(
+          `Placeholder Device created for protocol id ${deviceId} ` +
+            `with imei ${imei} (DB id: ${device.id})`
+        );
+      } catch (error: any) {
+        Logging.error(
+          `Failed to create placeholder Device for ${deviceId}: ` +
+            `${error.message}`
+        );
+        return;
+      }
+    }
+
+    const updates: any = {};
+
+    if (device.imei !== imei) {
+      updates.imei = imei;
     }
 
     if (device.serial_number !== deviceId) {
-      await device.update({ serial_number: deviceId });
+      updates.serial_number = deviceId;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await device.update(updates);
+
+      Logging.info(
+        `Device ${device.id} linked: imei=${imei}, ` +
+          `serial_number=${deviceId}`
+      );
     }
   }
 
@@ -1038,12 +1100,15 @@ class TcpServer {
    * The bracket protocol identifies devices by a short "deviceId"
    * field in [3G*deviceId*len*content] - this is NOT the same as the
    * real IMEI a Device is registered with (which only arrives later,
-   * via ICCID/RYIMEI packets - see linkDeviceIdentity()). We match
-   * primarily on Device.serial_number (backfilled from ICCID/RYIMEI),
-   * falling back to Device.imei for device families that put the
-   * short ID there directly. If neither matches, we log and skip
-   * persistence instead of auto-creating a Device (unregistered
-   * devices should not silently start writing rows).
+   * via ICCID/RYIMEI packets - see linkDeviceIdentity()).
+   *
+   * We match primarily on Device.serial_number (backfilled from
+   * ICCID/RYIMEI), falling back to Device.imei. If neither matches,
+   * we auto-create a placeholder Device so that incoming data is not
+   * lost. The placeholder has:
+   *   - serial_number = the short protocol deviceId
+   *   - imei = null (filled later via ICCID/RYIMEI)
+   *   - owner_id = null (assigned later via admin API)
    */
   private async findDevice(deviceId: string): Promise<any | null> {
     let device = await db.Device.findOne({
@@ -1055,7 +1120,47 @@ class TcpServer {
     }
 
     if (!device) {
-      Logging.info(`No registered Device found for protocol id ${deviceId}`);
+      Logging.info(
+        `No registered Device found for protocol id ${deviceId} - ` +
+          `creating placeholder.`
+      );
+
+      try {
+        device = await db.Device.create({
+          serial_number: deviceId,
+          imei: null,
+          owner_id: null,
+          device_name: `Device ${deviceId}`,
+          email: `${deviceId}@placeholder.local`,
+          phone_number: null,
+          country_code: null,
+          network_carrier: null,
+          network_type: null,
+          profile_image: null,
+          connection_status: "offline",
+          signal_status: null,
+          battery_percentage: null,
+          gps_strength: null,
+          is_online: false,
+          last_updated_at: null,
+          location_interval_minutes: 1,
+          height_cm: null,
+          gender: null,
+          age: null,
+          weight_kg: null,
+        });
+
+        Logging.info(
+          `Placeholder Device created for protocol id ${deviceId} ` +
+            `(DB id: ${device.id})`
+        );
+      } catch (error: any) {
+        Logging.error(
+          `Failed to create placeholder Device for ${deviceId}: ` +
+            `${error.message}`
+        );
+        return null;
+      }
     }
 
     return device;
@@ -1188,8 +1293,7 @@ class TcpServer {
 
     await device.update({
       last_updated_at: new Date(),
-      gps_strength:
-        parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
+      gps_strength: parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
     });
   }
 

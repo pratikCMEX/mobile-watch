@@ -27,21 +27,20 @@ const createDevice = async function (
       weight_kg,
     } = req.body;
 
-    if (!owner_id || !imei) {
-      unlinkUploadedFiles(req);
-      return errorMessage(res, "owner_id and imei are required");
+    if (owner_id) {
+      const owner = await db.User.findByPk(owner_id);
+      if (!owner) {
+        unlinkUploadedFiles(req);
+        return errorMessage(res, "owner_id does not match any existing user");
+      }
     }
 
-    const owner = await db.User.findByPk(owner_id);
-    if (!owner) {
-      unlinkUploadedFiles(req);
-      return errorMessage(res, "owner_id does not match any existing user");
-    }
-
-    const existing = await db.Device.findOne({ where: { imei } });
-    if (existing) {
-      unlinkUploadedFiles(req);
-      return errorMessage(res, "A device with this imei already exists");
+    if (imei) {
+      const existing = await db.Device.findOne({ where: { imei } });
+      if (existing) {
+        unlinkUploadedFiles(req);
+        return errorMessage(res, "A device with this imei already exists");
+      }
     }
 
     const files = (req as any).files as { [fieldname: string]: any[] };
@@ -229,9 +228,125 @@ const getDeviceSettings = async function (
     return errorMessage(res, "Error fetching device settings");
   }
 };
+const listUnlinkedDevices = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { search = "", page = 1, limit = 20 } = req.body;
+
+    const offset = (page - 1) * limit;
+
+    const where: any = {
+      owner_id: null,
+    };
+
+    if (search) {
+      where.serial_number = { [Op.like]: `%${search}%` };
+    }
+
+    const { rows, count } = await db.Device.findAndCountAll({
+      where,
+      limit: Number(limit),
+      offset: Number(offset),
+      order: [["createdAt", "DESC"]],
+    });
+
+    return successMessage(res, "Unlinked devices fetched successfully", {
+      devices: rows,
+      total: count,
+      page: Number(page),
+      limit: Number(limit),
+      totalPages: Math.ceil(count / Number(limit)),
+    });
+  } catch (err) {
+    console.error("listUnlinkedDevices error:", err);
+    return errorMessage(res, "Error fetching unlinked devices");
+  }
+};
+
+const assignOwner = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, owner_id } = req.body;
+
+    if (!device_id || !owner_id) {
+      return errorMessage(res, "device_id and owner_id are required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const owner = await db.User.findByPk(owner_id);
+    if (!owner) {
+      return errorMessage(res, "owner_id does not match any existing user");
+    }
+
+    await device.update({ owner_id });
+
+    return successMessage(res, "Owner assigned successfully", device);
+  } catch (err) {
+    console.error("assignOwner error:", err);
+    return errorMessage(res, "Error assigning owner");
+  }
+};
+
+const updateDeviceIdentity = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, imei, serial_number } = req.body;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const updates: any = {};
+
+    if (imei !== undefined) {
+      if (imei) {
+        const existing = await db.Device.findOne({
+          where: { imei, id: { [Op.ne]: device_id } },
+        });
+        if (existing) {
+          return errorMessage(res, "A device with this imei already exists");
+        }
+      }
+      updates.imei = imei;
+    }
+
+    if (serial_number !== undefined) {
+      updates.serial_number = serial_number;
+    }
+
+    await device.update(updates);
+
+    return successMessage(res, "Device identity updated successfully", device);
+  } catch (err) {
+    console.error("updateDeviceIdentity error:", err);
+    return errorMessage(res, "Error updating device identity");
+  }
+};
+
 export default {
   createDevice,
   updateDevice,
   deleteDevice,
   getDeviceSettings,
+  listUnlinkedDevices,
+  assignOwner,
+  updateDeviceIdentity,
 };

@@ -5,9 +5,9 @@ import bcrypt from "bcrypt";
 // ── Interfaces ──────────────────────────────────────────────
 export interface DeviceAttributes {
   id: string;
-  owner_id: string;
-  imei: string;
-  serial_number: string;
+  owner_id?: string | null;
+  imei?: string | null;
+  serial_number?: string | null;
   device_name: string;
   email: string;
   phone_number: string;
@@ -38,9 +38,9 @@ class Device
   implements DeviceAttributes
 {
   public id!: string;
-  public owner_id!: string;
-  public imei!: string;
-  public serial_number!: string;
+  public owner_id?: string | null;
+  public imei?: string | null;
+  public serial_number?: string | null;
   public device_name!: string;
   public network_type!: string;
   public email!: string;
@@ -118,11 +118,11 @@ export default (sequelize: Sequelize, DataTypes: any) => {
 
       owner_id: {
         type: DataTypes.UUID,
-        allowNull: false,
+        allowNull: true,
         references: { model: "Users", key: "id" },
         onDelete: "CASCADE",
       },
-      imei: { type: DataTypes.STRING, allowNull: false, unique: true },
+      imei: { type: DataTypes.STRING, allowNull: true, unique: true },
       serial_number: { type: DataTypes.STRING, allowNull: true },
       device_name: {
         type: DataTypes.STRING,

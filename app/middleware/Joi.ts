@@ -73,8 +73,8 @@ export const Schemas = {
   },
   device: {
     create: Joi.object({
-      owner_id: Joi.string().required(),
-      imei: Joi.string().required(),
+      owner_id: Joi.string().optional().allow(null),
+      imei: Joi.string().optional().allow(null),
       serial_number: Joi.string().optional().allow(null),
       device_name: Joi.string().optional().allow(null),
       email: Joi.string().email().optional().allow(null),
@@ -118,6 +118,20 @@ export const Schemas = {
     }),
     getSettings: Joi.object({
       device_id: Joi.string().required(),
+    }),
+    listUnlinked: Joi.object({
+      page: Joi.number().integer().min(1).optional().default(1),
+      limit: Joi.number().integer().min(1).optional().default(20),
+      search: Joi.string().optional().allow(""),
+    }),
+    assignOwner: Joi.object({
+      device_id: Joi.string().required(),
+      owner_id: Joi.string().required(),
+    }),
+    updateIdentity: Joi.object({
+      device_id: Joi.string().required(),
+      imei: Joi.string().optional().allow(null),
+      serial_number: Joi.string().optional().allow(null),
     }),
   },
   deviceSetting: {

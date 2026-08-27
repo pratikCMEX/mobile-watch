@@ -36,4 +36,25 @@ router.get(
   Device_controller.getDeviceSettings
 );
 
+router.post(
+  "/list_unlinked_devices",
+  checkToken,
+  ValidateJoi(Schemas.device.listUnlinked),
+  Device_controller.listUnlinkedDevices
+);
+
+router.post(
+  "/assign_owner",
+  checkToken,
+  ValidateJoi(Schemas.device.assignOwner),
+  Device_controller.assignOwner
+);
+
+router.post(
+  "/update_device_identity",
+  checkToken,
+  ValidateJoi(Schemas.device.updateIdentity),
+  Device_controller.updateDeviceIdentity
+);
+
 module.exports = router;
