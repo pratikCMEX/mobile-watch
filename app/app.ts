@@ -17,6 +17,7 @@ const userRoutes = require("./routes/userRoutes");
 const authRoutes = require("./routes/authRoutes");
 const healthRoutes = require("./routes/healthmetricsRoutes");
 const deviceRoutes = require("./routes/deviceRoutes");
+const logRoutes = require("./routes/logRoutes");
 const userDeviceRoutes = require("./routes/userDeviceRoutes");
 const snapshotRoutes = require("./routes/snapshotRoutes");
 
@@ -97,6 +98,7 @@ app.use("/device", deviceRoutes);
 app.use("/user/device", userDeviceRoutes);
 app.use("/health", healthRoutes);
 app.use("/snapshot", snapshotRoutes);
+app.use("/log", logRoutes);
 
 // ─── Healthcheck ───────────────────────────────────────────────
 app.get("/ping", (req: Request, res: Response) => {
