@@ -70,10 +70,10 @@ export default (sequelize: Sequelize, DataTypes: any) => {
           "temperature",
           "distance",
           "steps_daily",
-          "steps_cumulative",
-          "battery",
-          "steps",
-          "turnovers"
+          "steps_cumulative"
+          // "battery",
+          // "steps",
+          // "turnovers"
         ),
         allowNull: false,
       },
