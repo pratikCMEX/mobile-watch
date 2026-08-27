@@ -42,6 +42,13 @@ const getLog = (req: Request, res: Response) => {
       return errorMessage(res, "Log file not found");
     }
 
+    if (req.query.clear === "true") {
+      fs.truncateSync(filePath, 0);
+
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.status(200).send(`${filename} cleared`);
+    }
+
     const linesParam =
       typeof req.query.lines === "string" ? req.query.lines : "";
     const requestedLines = parseInt(linesParam, 10);
