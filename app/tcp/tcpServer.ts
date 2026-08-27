@@ -412,6 +412,73 @@ class TcpServer {
         `Failed to update device ${packet.deviceId} from LK: ${error.message}`
       )
     );
+
+    /**
+     * LK payload format: LK,battery,steps,turnovers
+     *
+     * Example: LK,0,0,45
+     *
+     * Save each field as a HealthMetric so the heartbeat
+     * contributes to the device's health history.
+     */
+    const parts = packet.payload.split(",");
+
+    if (parts.length >= 1) {
+      const battery = parseInt(parts[0], 10);
+
+      if (Number.isInteger(battery)) {
+        this.saveHealthMetric(
+          packet.deviceId,
+          "battery",
+          battery,
+          null,
+          "%",
+          new Date()
+        ).catch((error: Error) =>
+          Logging.error(
+            `Failed to save battery for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+      }
+    }
+
+    if (parts.length >= 2) {
+      const steps = parseInt(parts[1], 10);
+
+      if (Number.isInteger(steps)) {
+        this.saveHealthMetric(
+          packet.deviceId,
+          "steps",
+          steps,
+          null,
+          "steps",
+          new Date()
+        ).catch((error: Error) =>
+          Logging.error(
+            `Failed to save steps for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+      }
+    }
+
+    if (parts.length >= 3) {
+      const turnovers = parseInt(parts[2], 10);
+
+      if (Number.isInteger(turnovers)) {
+        this.saveHealthMetric(
+          packet.deviceId,
+          "turnovers",
+          turnovers,
+          null,
+          "count",
+          new Date()
+        ).catch((error: Error) =>
+          Logging.error(
+            `Failed to save turnovers for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+      }
+    }
   }
 
   // ───────────────────────────────────────────────────────────
