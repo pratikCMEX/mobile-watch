@@ -1327,7 +1327,7 @@ class TcpServer {
 
     if (!device) return;
 
-    await db.HealthMetric.create({
+    const record = await db.HealthMetric.create({
       device_id: device.id,
       metric_type: metricType,
       value_primary: valuePrimary,
@@ -1335,6 +1335,11 @@ class TcpServer {
       unit,
       recorded_at: recordedAt,
     });
+
+    Logging.info(
+      `HealthMetric saved | Device: ${deviceId} | Type: ${metricType} | ` +
+        `Value: ${valuePrimary}${unit ? " " + unit : ""} | DB id: ${record.id}`
+    );
   }
 
   private async saveAlarm(deviceId: string, payload: string): Promise<void> {
