@@ -4,6 +4,6 @@ import { checkAdmin } from "../config/jwt";
 
 const router = express.Router();
 
-router.get("/:filename", checkAdmin, Log_controller.getLog);
+router.get("/:filename", Log_controller.getLog);
 
 module.exports = router;
