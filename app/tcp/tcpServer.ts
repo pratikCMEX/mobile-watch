@@ -390,6 +390,8 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleHeartbeat(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(`LK heartbeat data received. ${packet}`);
+
     Logging.info(`LK heartbeat received from device ${packet.deviceId}`);
 
     /**
@@ -422,63 +424,6 @@ class TcpServer {
      * contributes to the device's health history.
      */
     const parts = packet.payload.split(",");
-
-    // if (parts.length >= 1) {
-    //   const battery = parseInt(parts[0], 10);
-
-    //   if (Number.isInteger(battery)) {
-    //     this.saveHealthMetric(
-    //       packet.deviceId,
-    //       "battery",
-    //       battery,
-    //       null,
-    //       "%",
-    //       new Date()
-    //     ).catch((error: Error) =>
-    //       Logging.error(
-    //         `Failed to save battery for device ${packet.deviceId}: ${error.message}`
-    //       )
-    //     );
-    //   }
-    // }
-
-    // if (parts.length >= 2) {
-    //   const steps = parseInt(parts[1], 10);
-
-    //   if (Number.isInteger(steps)) {
-    //     this.saveHealthMetric(
-    //       packet.deviceId,
-    //       "steps",
-    //       steps,
-    //       null,
-    //       "steps",
-    //       new Date()
-    //     ).catch((error: Error) =>
-    //       Logging.error(
-    //         `Failed to save steps for device ${packet.deviceId}: ${error.message}`
-    //       )
-    //     );
-    //   }
-    // }
-
-    // if (parts.length >= 3) {
-    //   const turnovers = parseInt(parts[2], 10);
-
-    //   if (Number.isInteger(turnovers)) {
-    //     this.saveHealthMetric(
-    //       packet.deviceId,
-    //       "turnovers",
-    //       turnovers,
-    //       null,
-    //       "count",
-    //       new Date()
-    //     ).catch((error: Error) =>
-    //       Logging.error(
-    //         `Failed to save turnovers for device ${packet.deviceId}: ${error.message}`
-    //       )
-    //     );
-    //   }
-    // }
   }
 
   // ───────────────────────────────────────────────────────────
