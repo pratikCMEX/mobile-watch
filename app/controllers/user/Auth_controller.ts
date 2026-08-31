@@ -3,6 +3,7 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import bcrypt from "bcrypt";
 import { generateAuthToken } from "../../helper/Helper";
+import { SELECT } from "sequelize/lib/query-types";
 const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
@@ -33,8 +34,8 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     const userData = user.toJSON();
     delete userData.password;
 
-    // Fetch the first device of the owner
     const firstDevice = await db.Device.findOne({
+      attributes: ["id"],
       where: { owner_id: user.id },
       order: [["createdAt", "ASC"]],
     });
