@@ -82,6 +82,54 @@ const updateDeviceSettings = async function (
   }
 };
 
+const aboutDevice = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { device_id } = req.params;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const deviceData = device.toJSON();
+
+    return successMessage(res, "Device details fetched successfully", {
+      // Device Info
+      id: deviceData.id,
+      device_name: deviceData.device_name,
+      connection_status: deviceData.connection_status,
+      country_code: deviceData.country_code,
+      phone_number: deviceData.phone_number,
+      network_carrier: deviceData.network_carrier,
+      network_type: deviceData.network_type,
+      signal_status: deviceData.signal_status,
+      battery_percentage: deviceData.battery_percentage,
+      gps_strength: deviceData.gps_strength,
+      is_online: deviceData.is_online,
+      imei: deviceData.imei,
+      serial_number: deviceData.serial_number,
+      email: deviceData.email,
+      profile_image: deviceData.profile_image,
+      last_updated_at: deviceData.last_updated_at,
+      location_interval_minutes: deviceData.location_interval_minutes,
+      // User Profile Info
+      height_cm: deviceData.height_cm,
+      gender: deviceData.gender,
+      age: deviceData.age,
+      weight_kg: deviceData.weight_kg,
+      // Device Settings
+    });
+  } catch (err) {
+    console.error("aboutDevice error:", err);
+    return errorMessage(res, "Error fetching device details");
+  }
+};
+
 export default {
   updateDeviceSettings,
+  aboutDevice,
 };

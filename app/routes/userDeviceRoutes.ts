@@ -14,6 +14,13 @@ router.post(
   Device_controller.updateDeviceSettings
 );
 
+// Get device details (about device)
+router.get(
+  "/about_device/:device_id",
+  checkToken,
+  Device_controller.aboutDevice
+);
+
 router.post(
   "/add_family_member",
   checkToken,
