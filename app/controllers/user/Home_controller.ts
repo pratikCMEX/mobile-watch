@@ -113,11 +113,22 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
     });
 
     const healthOverview = await getHealthOverview(device.id);
-
+    const firstDevice = await db.Device.findAll({
+      attributes: [
+        "id",
+        "device_name",
+        "profile_image",
+        "connection_status",
+        "last_updated_at",
+      ],
+      where: { owner_id: device.owner_id },
+      order: [["createdAt", "ASC"]],
+    });
     return successMessage(res, "Home data fetched successfully", {
       device: formatDevice(device),
       last_location: formatLocation(lastLocation),
       health_overview: healthOverview,
+      all_devices: firstDevice,
     });
   } catch (err) {
     console.error("getHome error:", err);
