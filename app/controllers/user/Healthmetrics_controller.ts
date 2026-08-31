@@ -267,4 +267,101 @@ const getAnalytics = async (
   }
 };
 
-export default { AddMetrics, getAnalytics };
+const getHealthOverview = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id } = req.params;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id as string);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const metricTypes = [
+      "heart_rate",
+      "blood_pressure",
+      "sleep",
+      "spo2",
+      "calories",
+      "temperature",
+      "distance",
+      "steps_daily",
+    ];
+
+    const overview: any = {};
+
+    for (const metricType of metricTypes) {
+      // Get latest reading
+      const latest = await db.HealthMetric.findOne({
+        where: { device_id: device_id, metric_type: metricType },
+        order: [["recorded_at", "DESC"]],
+      });
+
+      // Get previous day's reading (from 24-48 hours ago)
+      const now = new Date();
+      const previousDayStart = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+      const previousDayEnd = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+      const previousDayMetric = await db.HealthMetric.findOne({
+        where: {
+          device_id: device_id,
+          metric_type: metricType,
+          recorded_at: {
+            [Op.between]: [previousDayStart, previousDayEnd],
+          },
+        },
+        order: [["recorded_at", "DESC"]],
+      });
+
+      const latestValue = latest ? Number(latest.value_primary) : null;
+      const previousValue = previousDayMetric
+        ? Number(previousDayMetric.value_primary)
+        : null;
+      const delta =
+        latestValue !== null && previousValue !== null
+          ? latestValue - previousValue
+          : null;
+      const direction =
+        delta !== null
+          ? delta > 0
+            ? "up"
+            : delta < 0
+            ? "down"
+            : "stable"
+          : null;
+
+      // Map steps_daily to steps in response
+      const responseKey = metricType === "steps_daily" ? "steps" : metricType;
+
+      overview[responseKey] = {
+        latest: latestValue,
+        latest_secondary: latest
+          ? Number(latest.value_secondary) || null
+          : null,
+        unit: latest?.unit || null,
+        recorded_at: latest?.recorded_at || null,
+        previous_day_value: previousValue,
+        delta: delta,
+        direction: direction,
+      };
+    }
+
+    return successMessage(
+      res,
+      "Health overview fetched successfully",
+      overview
+    );
+  } catch (err) {
+    console.error("getHealthOverview error:", err);
+    return errorMessage(res, "Error fetching health overview");
+  }
+};
+
+export default { AddMetrics, getAnalytics, getHealthOverview };

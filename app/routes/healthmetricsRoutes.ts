@@ -18,4 +18,10 @@ router.post(
   Healthmetrics_controller.getAnalytics
 );
 
+router.get(
+  "/health_overview/:device_id",
+  checkToken,
+  Healthmetrics_controller.getHealthOverview
+);
+
 module.exports = router;
