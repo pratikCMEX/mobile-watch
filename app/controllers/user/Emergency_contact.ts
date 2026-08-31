@@ -39,17 +39,17 @@ async function createOrUpdateEmergencyContact(
       );
     } else {
       // Create new emergency contact
-      const emergency_contact = await db.EmergencyContact.create({
-        name,
-        country_code,
-        phone_number,
-        device_id,
-      });
+      // const emergency_contact = await db.EmergencyContact.create({
+      //   name,
+      //   country_code,
+      //   phone_number,
+      //   device_id,
+      // });
 
       return successMessage(
         res,
-        "Emergency contact created successfully",
-        emergency_contact
+        "Emergency contact created successfully"
+        // emergency_contact
       );
     }
   } catch (err) {
