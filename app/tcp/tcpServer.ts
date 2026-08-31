@@ -450,10 +450,11 @@ class TcpServer {
         `GPS: ${location.gpsStatus}`
     );
 
-    this.saveLocation(packet.deviceId, location).catch((error: Error) =>
-      Logging.error(
-        `Failed to save location for device ${packet.deviceId}: ${error.message}`
-      )
+    this.saveLocation(packet.deviceId, location, packet.command).catch(
+      (error: Error) =>
+        Logging.error(
+          `Failed to save location for device ${packet.deviceId}: ${error.message}`
+        )
     );
   }
 
@@ -660,6 +661,7 @@ class TcpServer {
         `Lng: ${location.longitude} ${location.longitudeDirection} | ` +
         `Battery: ${location.battery} | Signal: ${location.gsmSignal}`
     );
+    Logging.info(`packet.command: ${packet.command}`);
 
     this.saveLteLocation(packet.deviceId, location, packet.command).catch(
       (error: Error) =>
@@ -718,7 +720,7 @@ class TcpServer {
     networkType: string
   ): Promise<void> {
     const device = await this.findDevice(deviceId);
-
+    Logging.info(`saveLteLocation networkType: ${networkType}`);
     if (!device) return;
 
     const latitude = this.convertDecimalCoordinate(
@@ -1271,7 +1273,8 @@ class TcpServer {
 
   private async saveLocation(
     deviceId: string,
-    location: GpsLocation
+    location: GpsLocation,
+    networkType: string
   ): Promise<void> {
     const device = await this.findDevice(deviceId);
 
@@ -1309,6 +1312,7 @@ class TcpServer {
     await device.update({
       last_updated_at: new Date(),
       gps_strength: parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
+      network_type: networkType,
     });
   }
 
