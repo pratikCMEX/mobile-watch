@@ -48,7 +48,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     return successMessage(res, "Login successful", {
       token,
       user: userData,
-      device: firstDevice ? firstDevice.toJSON() : null,
+      device: firstDevice,
     });
   } catch (error) {
     console.error("login error:", error);
