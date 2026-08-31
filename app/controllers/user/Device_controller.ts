@@ -107,20 +107,10 @@ const aboutDevice = async (req: Request, res: Response, next: NextFunction) => {
       network_carrier: deviceData.network_carrier,
       network_type: deviceData.network_type,
       signal_status: deviceData.signal_status,
-      battery_percentage: deviceData.battery_percentage,
       gps_strength: deviceData.gps_strength,
-      is_online: deviceData.is_online,
       imei: deviceData.imei,
       serial_number: deviceData.serial_number,
-      email: deviceData.email,
-      profile_image: deviceData.profile_image,
-      last_updated_at: deviceData.last_updated_at,
-      location_interval_minutes: deviceData.location_interval_minutes,
-      // User Profile Info
-      height_cm: deviceData.height_cm,
-      gender: deviceData.gender,
-      age: deviceData.age,
-      weight_kg: deviceData.weight_kg,
+
       // Device Settings
     });
   } catch (err) {
