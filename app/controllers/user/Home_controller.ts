@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
+import { Op } from "sequelize";
 
 const formatDevice = (device: any) => {
   const d = device.toJSON ? device.toJSON() : device;
@@ -29,6 +30,67 @@ const formatLocation = (location: any) => {
   };
 };
 
+const getHealthOverview = async (deviceId: string) => {
+  const metricTypes = ["heart_rate", "blood_pressure", "sleep", "steps_daily"];
+  const overview: any = {};
+
+  for (const metricType of metricTypes) {
+    // Get latest reading
+    const latest = await db.HealthMetric.findOne({
+      where: { device_id: deviceId, metric_type: metricType },
+      order: [["recorded_at", "DESC"]],
+    });
+
+    // Get previous day's reading (from 24-48 hours ago)
+    const now = new Date();
+    const previousDayStart = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    const previousDayEnd = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const previousDayMetric = await db.HealthMetric.findOne({
+      where: {
+        device_id: deviceId,
+        metric_type: metricType,
+        recorded_at: {
+          [Op.between]: [previousDayStart, previousDayEnd],
+        },
+      },
+      order: [["recorded_at", "DESC"]],
+    });
+
+    const latestValue = latest ? Number(latest.value_primary) : null;
+    const previousValue = previousDayMetric
+      ? Number(previousDayMetric.value_primary)
+      : null;
+    const delta =
+      latestValue !== null && previousValue !== null
+        ? latestValue - previousValue
+        : null;
+    const direction =
+      delta !== null
+        ? delta > 0
+          ? "up"
+          : delta < 0
+          ? "down"
+          : "stable"
+        : null;
+
+    // Map steps_daily to steps in response
+    const responseKey = metricType === "steps_daily" ? "steps" : metricType;
+
+    overview[responseKey] = {
+      latest: latestValue,
+      latest_secondary: latest ? Number(latest.value_secondary) || null : null,
+      unit: latest?.unit || null,
+      recorded_at: latest?.recorded_at || null,
+      previous_day_value: previousValue,
+      delta: delta,
+      direction: direction,
+    };
+  }
+
+  return overview;
+};
+
 const getHome = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const deviceId = (req.query.device_id as string) || null;
@@ -50,9 +112,12 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
       order: [["recorded_at", "DESC"]],
     });
 
+    const healthOverview = await getHealthOverview(device.id);
+
     return successMessage(res, "Home data fetched successfully", {
       device: formatDevice(device),
       last_location: formatLocation(lastLocation),
+      health_overview: healthOverview,
     });
   } catch (err) {
     console.error("getHome error:", err);
