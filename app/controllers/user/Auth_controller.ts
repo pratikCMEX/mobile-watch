@@ -33,9 +33,16 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     const userData = user.toJSON();
     delete userData.password;
 
+    // Fetch the first device of the owner
+    const firstDevice = await db.Device.findOne({
+      where: { owner_id: user.id },
+      order: [["createdAt", "ASC"]],
+    });
+
     return successMessage(res, "Login successful", {
       token,
       user: userData,
+      device: firstDevice ? firstDevice.toJSON() : null,
     });
   } catch (error) {
     console.error("login error:", error);
