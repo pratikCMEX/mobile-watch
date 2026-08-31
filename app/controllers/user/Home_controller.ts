@@ -44,7 +44,7 @@ const formatLocation = (location: any) => {
  */
 const getHome = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const deviceId = (req.params.device_id as string) || null;
+    const deviceId = (req.query.device_id as string) || null;
 
     if (!deviceId) {
       return errorMessage(res, "device_id is required");
