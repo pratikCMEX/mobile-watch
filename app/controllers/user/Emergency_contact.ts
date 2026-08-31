@@ -7,56 +7,54 @@ import {
 } from "../../library/Response";
 import { Op } from "sequelize";
 
-async function createEmergencyContact(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
-  try {
-    const { name, country_code, phone_number, device_id } = req.body;
-
-    const emergency_contact = await db.EmergencyContact.create({
-      name,
-      country_code,
-      phone_number,
-      device_id,
-    });
-
-    return successMessage(
-      res,
-      "Emergency contact created successfully",
-      emergency_contact
-    );
-  } catch (err) {
-    console.error("createEmergencyContact error:", err);
-    return errorMessage(res, "Error creating emergency contact");
-  }
-}
-
-async function updateEmergencyContact(
+async function createOrUpdateEmergencyContact(
   req: Request,
   res: Response,
   next: NextFunction
 ) {
   try {
     const { id, name, country_code, phone_number, device_id } = req.body;
-    const emergency_contact = await db.EmergencyContact.update(
-      {
+
+    if (id) {
+      // Update existing emergency contact
+      const [affectedCount] = await db.EmergencyContact.update(
+        {
+          name,
+          country_code,
+          phone_number,
+          device_id,
+        },
+        { where: { id } }
+      );
+
+      if (affectedCount === 0) {
+        return errorMessage(res, "Emergency contact not found", 404);
+      }
+
+      const updatedContact = await db.EmergencyContact.findByPk(id);
+      return successMessage(
+        res,
+        "Emergency contact updated successfully",
+        updatedContact
+      );
+    } else {
+      // Create new emergency contact
+      const emergency_contact = await db.EmergencyContact.create({
         name,
         country_code,
         phone_number,
         device_id,
-      },
-      { where: { id } }
-    );
-    return successMessage(
-      res,
-      "Emergency contact updated successfully",
-      emergency_contact
-    );
+      });
+
+      return successMessage(
+        res,
+        "Emergency contact created successfully",
+        emergency_contact
+      );
+    }
   } catch (err) {
-    console.error("updateEmergencyContact error:", err);
-    return errorMessage(res, "Error updating emergency contact");
+    console.error("createOrUpdateEmergencyContact error:", err);
+    return errorMessage(res, "Error saving emergency contact");
   }
 }
 
@@ -149,8 +147,7 @@ const getEmergencyContact = async (req: Request, res: Response) => {
   }
 };
 export {
-  createEmergencyContact,
-  updateEmergencyContact,
+  createOrUpdateEmergencyContact,
   deleteEmergencyContact,
   allEmergencyContact,
   getEmergencyContact,

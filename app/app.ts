@@ -21,6 +21,7 @@ const logRoutes = require("./routes/logRoutes");
 const userDeviceRoutes = require("./routes/userDeviceRoutes");
 const homeRoutes = require("./routes/homeRoutes");
 const snapshotRoutes = require("./routes/snapshotRoutes");
+const emergencyContactRoutes = require("./routes/emergencyContactRoutes");
 
 // ─── Security Middleware ────────────────────────────────────────
 const allowedOrigins = (
@@ -101,6 +102,7 @@ app.use("/user", homeRoutes);
 app.use("/health", healthRoutes);
 app.use("/snapshot", snapshotRoutes);
 app.use("/log", logRoutes);
+app.use("/emergency_contact", emergencyContactRoutes);
 
 // ─── Healthcheck ───────────────────────────────────────────────
 app.get("/ping", (req: Request, res: Response) => {
