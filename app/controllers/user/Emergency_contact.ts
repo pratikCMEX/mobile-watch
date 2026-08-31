@@ -15,7 +15,7 @@ async function createOrUpdateEmergencyContact(
   try {
     const { id, name, country_code, phone_number, device_id } = req.body;
 
-    if (id) {
+    if (id || id !== "") {
       // Update existing emergency contact
       const [affectedCount] = await db.EmergencyContact.update(
         {
