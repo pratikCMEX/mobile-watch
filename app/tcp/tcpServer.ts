@@ -661,10 +661,11 @@ class TcpServer {
         `Battery: ${location.battery} | Signal: ${location.gsmSignal}`
     );
 
-    this.saveLteLocation(packet.deviceId, location).catch((error: Error) =>
-      Logging.error(
-        `Failed to save LTE location for device ${packet.deviceId}: ${error.message}`
-      )
+    this.saveLteLocation(packet.deviceId, location, packet.command).catch(
+      (error: Error) =>
+        Logging.error(
+          `Failed to save LTE location for device ${packet.deviceId}: ${error.message}`
+        )
     );
   }
 
@@ -713,7 +714,8 @@ class TcpServer {
 
   private async saveLteLocation(
     deviceId: string,
-    location: GpsLocation
+    location: GpsLocation,
+    networkType: string
   ): Promise<void> {
     const device = await this.findDevice(deviceId);
 
@@ -756,6 +758,7 @@ class TcpServer {
       signal_status: location.gsmSignal || null,
       is_online: true,
       connection_status: "online",
+      network_type: networkType,
       ...(Number.isInteger(battery) && battery >= 0 && battery <= 100
         ? { battery_percentage: battery }
         : {}),
