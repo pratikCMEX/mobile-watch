@@ -2,9 +2,6 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 
-/**
- * Build a normalized device payload matching the home screen contract.
- */
 const formatDevice = (device: any) => {
   const d = device.toJSON ? device.toJSON() : device;
   return {
@@ -21,9 +18,6 @@ const formatDevice = (device: any) => {
   };
 };
 
-/**
- * Build a normalized last-location payload.
- */
 const formatLocation = (location: any) => {
   if (!location) return null;
   const l = location.toJSON ? location.toJSON() : location;
@@ -35,13 +29,6 @@ const formatLocation = (location: any) => {
   };
 };
 
-/**
- * GET /user/home?device_id=<uuid>
- * Returns the requested device along with its latest known location.
- * Mirrors the mobile home-screen contract:
- *   { device, last_location }
- * The lookup is driven purely by device_id (no user dependency).
- */
 const getHome = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const deviceId = (req.query.device_id as string) || null;
