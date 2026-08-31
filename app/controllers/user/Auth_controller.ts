@@ -3,7 +3,6 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import bcrypt from "bcrypt";
 import { generateAuthToken } from "../../helper/Helper";
-import { SELECT } from "sequelize/lib/query-types";
 const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
