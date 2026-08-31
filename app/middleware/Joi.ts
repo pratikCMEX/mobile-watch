@@ -195,22 +195,22 @@ export const Schemas = {
     }),
     analytics: Joi.object({
       device_id: Joi.string().required(),
-      metric_type: Joi.string()
-        .valid(
-          "heart_rate",
-          "blood_pressure",
-          "sleep",
-          "spo2",
-          "calories",
-          "temperature",
-          "distance",
-          "steps_daily",
-          "steps_cumulative",
-          "battery",
-          "steps",
-          "turnovers"
-        )
-        .required(),
+      // metric_type: Joi.string()
+      //   .valid(
+      //     "heart_rate",
+      //     "blood_pressure",
+      //     "sleep",
+      //     "spo2",
+      //     "calories",
+      //     "temperature",
+      //     "distance",
+      //     "steps_daily",
+      //     "steps_cumulative",
+      //     "battery",
+      //     "steps",
+      //     "turnovers"
+      //   )
+      //   .required(),
       range: Joi.string()
         .valid("daily", "weekly", "monthly")
         .optional()
