@@ -19,6 +19,7 @@ const healthRoutes = require("./routes/healthmetricsRoutes");
 const deviceRoutes = require("./routes/deviceRoutes");
 const logRoutes = require("./routes/logRoutes");
 const userDeviceRoutes = require("./routes/userDeviceRoutes");
+const homeRoutes = require("./routes/homeRoutes");
 const snapshotRoutes = require("./routes/snapshotRoutes");
 
 // ─── Security Middleware ────────────────────────────────────────
@@ -96,6 +97,7 @@ app.use("/admin", userRoutes);
 app.use("/auth", authRoutes);
 app.use("/device", deviceRoutes);
 app.use("/user/device", userDeviceRoutes);
+app.use("/user", homeRoutes);
 app.use("/health", healthRoutes);
 app.use("/snapshot", snapshotRoutes);
 app.use("/log", logRoutes);
