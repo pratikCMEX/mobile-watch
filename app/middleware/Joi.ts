@@ -211,11 +211,11 @@ export const Schemas = {
       //     "turnovers"
       //   )
       //   .required(),
-      range: Joi.string()
-        .valid("daily", "weekly", "monthly")
-        .optional()
-        .default("daily"),
-      date: Joi.string().optional().allow(null, ""),
+      // range: Joi.string()
+      //   .valid("daily", "weekly", "monthly")
+      //   .optional()
+      //   .default("daily"),
+      // date: Joi.string().optional().allow(null, ""),
     }),
   },
   snapshot: {
