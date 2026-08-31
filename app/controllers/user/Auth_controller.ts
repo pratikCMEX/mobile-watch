@@ -33,8 +33,14 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     const userData = user.toJSON();
     delete userData.password;
 
-    const firstDevice = await db.Device.findOne({
-      attributes: ["id"],
+    const firstDevice = await db.Device.findAll({
+      attributes: [
+        "id",
+        "device_name",
+        "profile_image",
+        "connection_status",
+        "last_updated_at",
+      ],
       where: { owner_id: user.id },
       order: [["createdAt", "ASC"]],
     });
