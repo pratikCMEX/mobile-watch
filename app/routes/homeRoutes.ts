@@ -4,6 +4,6 @@ import Home_controller from "../controllers/user/Home_controller";
 
 const router = express.Router();
 
-router.get("/home", Home_controller.getHome);
+router.get("/home/:device_id", checkToken, Home_controller.getHome);
 
 module.exports = router;
