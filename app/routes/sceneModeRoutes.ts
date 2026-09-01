@@ -13,7 +13,7 @@ const router = express.Router();
 
 // Update scene mode - Send command to device
 router.post(
-  "/update",
+  "/scene_mode_update",
   checkToken,
   ValidateJoi(Schemas.sceneMode.update),
   SceneMode_controller.updateSceneMode
