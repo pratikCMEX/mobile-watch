@@ -32,7 +32,7 @@ router.delete(
 router.get(
   "/get_device_settings/:device_id",
   checkToken,
-  ValidateJoi(Schemas.device.getSettings, "query"),
+  ValidateJoi(Schemas.device.getSettings, "params"),
   Device_controller.getDeviceSettings
 );
 
