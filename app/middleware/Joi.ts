@@ -149,6 +149,21 @@ export const Schemas = {
       fall_down_level: Joi.number().integer().min(1).max(10).optional(),
     }),
   },
+  sceneMode: {
+    update: Joi.object({
+      device_id: Joi.string().required().messages({
+        "string.empty": "device_id is required",
+        "any.required": "device_id is required",
+      }),
+      scene_mode: Joi.number().integer().valid(1, 2, 3, 4).required().messages({
+        "number.base": "scene_mode must be a number",
+        "number.integer": "scene_mode must be an integer",
+        "any.only":
+          "scene_mode must be 1 (vibration+ringing), 2 (ringing), 3 (vibration), or 4 (silence)",
+        "any.required": "scene_mode is required",
+      }),
+    }),
+  },
   familyMember: {
     create: Joi.object({
       name: Joi.string().required(),
@@ -255,6 +270,15 @@ export const Schemas = {
       sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
       start_date: Joi.string().optional().allow(null),
       end_date: Joi.string().optional().allow(null),
+    }),
+  },
+  auth: {
+    updateProfile: Joi.object({
+      name: Joi.string().optional().allow(""),
+      email: Joi.string().email().optional().allow(""),
+      phone_number: Joi.string().optional().allow(""),
+      country_code: Joi.string().optional().allow(""),
+      password: Joi.string().min(6).optional().allow(""),
     }),
   },
   geofence: {

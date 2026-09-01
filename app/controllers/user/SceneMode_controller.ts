@@ -1,0 +1,214 @@
+import { NextFunction, Request, Response } from "express";
+import db from "../../models";
+import { errorMessage, successMessage } from "../../library/Response";
+import Logging from "../../library/Logging";
+
+// Import TCP server instance
+import { tcpServer } from "../../app";
+
+/**
+ * Scene Mode Controller
+ *
+ * Scene Modes:
+ * - 1: Vibration and ringing
+ * - 2: Ringing only
+ * - 3: Vibration only
+ * - 4: Silence
+ */
+
+// Scene mode descriptions for response
+const SCENE_MODE_DESCRIPTIONS: Record<number, string> = {
+  1: "Vibration and ringing",
+  2: "Ringing only",
+  3: "Vibration only",
+  4: "Silence",
+};
+
+/**
+ * Send scene mode command to a device
+ *
+ * API: POST /api/scene_mode/update
+ *
+ * Request Body:
+ * - device_id: string (required) - The device ID
+ * - scene_mode: number (required) - 1, 2, 3, or 4
+ *
+ * Response:
+ * - success: true/false
+ * - message: string
+ * - data: { device_id, scene_mode, scene_mode_description, command_sent, timestamp }
+ */
+const updateSceneMode = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id, scene_mode } = req.body;
+
+    // Validate required fields
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    if (scene_mode === undefined || scene_mode === null) {
+      return errorMessage(res, "scene_mode is required");
+    }
+
+    // Validate scene mode value
+    if (![1, 2, 3, 4].includes(scene_mode)) {
+      return errorMessage(
+        res,
+        "scene_mode must be 1 (vibration+ringing), 2 (ringing), 3 (vibration), or 4 (silence)"
+      );
+    }
+
+    // Check if device exists in database
+    const device = await db.Device.findByPk(device_id);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // Check if device is online
+    const tcpClient = tcpServer.getDevice(device_id);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Send scene mode command via TCP
+    const commandSent = tcpServer.sendSceneModeCommand(device_id, scene_mode);
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send scene mode command. Device may be disconnected."
+      );
+    }
+
+    // Log the command
+    Logging.info(
+      `Scene mode command sent to device ${device_id}: mode ${scene_mode} (${SCENE_MODE_DESCRIPTIONS[scene_mode]})`
+    );
+
+    // Return success response
+    return successMessage(res, "Scene mode command sent successfully", {
+      device_id,
+      scene_mode,
+      scene_mode_description: SCENE_MODE_DESCRIPTIONS[scene_mode],
+      command_sent: true,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("updateSceneMode error:", err);
+    return errorMessage(res, "Error sending scene mode command");
+  }
+};
+
+/**
+ * Get current scene mode status for a device
+ *
+ * API: GET /api/scene_mode/status/:device_id
+ *
+ * Response:
+ * - success: true/false
+ * - message: string
+ * - data: { device_id, is_online, last_scene_mode }
+ */
+const getSceneModeStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const deviceIdParam = req.params.device_id;
+    const device_id = Array.isArray(deviceIdParam)
+      ? deviceIdParam[0]
+      : deviceIdParam;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    // Check if device exists
+    const device = await db.Device.findByPk(device_id);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // Check if device is online
+    const tcpClient = tcpServer.getDevice(device_id);
+    const isOnline = !!tcpClient;
+
+    // Get last scene mode notification (if any)
+    const lastNotification = await db.Notification.findOne({
+      where: {
+        device_id: device.id,
+        metadata: { kind: "scene_mode" },
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    return successMessage(res, "Scene mode status retrieved", {
+      device_id,
+      is_online: isOnline,
+      device_name: device.device_name,
+      last_scene_mode_notification: lastNotification
+        ? {
+            title: lastNotification.title,
+            body: lastNotification.body,
+            created_at: lastNotification.createdAt,
+          }
+        : null,
+    });
+  } catch (err) {
+    console.error("getSceneModeStatus error:", err);
+    return errorMessage(res, "Error retrieving scene mode status");
+  }
+};
+
+/**
+ * Get available scene modes
+ *
+ * API: GET /api/scene_mode/list
+ *
+ * Response:
+ * - success: true/false
+ * - message: string
+ * - data: Array of scene modes with id and description
+ */
+const listSceneModes = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const sceneModes = [
+      {
+        id: 1,
+        name: "vibration_and_ringing",
+        description: "Vibration and ringing",
+      },
+      { id: 2, name: "ringing_only", description: "Ringing only" },
+      { id: 3, name: "vibration_only", description: "Vibration only" },
+      { id: 4, name: "silence", description: "Silence" },
+    ];
+
+    return successMessage(
+      res,
+      "Scene modes retrieved successfully",
+      sceneModes
+    );
+  } catch (err) {
+    console.error("listSceneModes error:", err);
+    return errorMessage(res, "Error retrieving scene modes");
+  }
+};
+
+export default {
+  updateSceneMode,
+  getSceneModeStatus,
+  listSceneModes,
+};

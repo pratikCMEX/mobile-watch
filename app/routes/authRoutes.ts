@@ -11,4 +11,12 @@ router.post("/user_login", ValidateJoi(Schemas.login), Auth_controller.login);
 // Logout — invalidates the current session by clearing the stored token
 router.post("/logout", checkToken, Auth_controller.logout);
 
+// Update authenticated user's profile
+router.post(
+  "/update_profile",
+  checkToken,
+  ValidateJoi(Schemas.auth.updateProfile),
+  Auth_controller.updateProfile
+);
+
 module.exports = router;

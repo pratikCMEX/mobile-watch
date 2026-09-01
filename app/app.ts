@@ -23,6 +23,7 @@ const homeRoutes = require("./routes/homeRoutes");
 const snapshotRoutes = require("./routes/snapshotRoutes");
 const emergencyContactRoutes = require("./routes/emergencyContactRoutes");
 const geofenceRoutes = require("./routes/geofenceRoutes");
+const sceneModeRoutes = require("./routes/sceneModeRoutes");
 
 // ─── Security Middleware ────────────────────────────────────────
 const allowedOrigins = (
@@ -105,6 +106,7 @@ app.use("/snapshot", snapshotRoutes);
 app.use("/log", logRoutes);
 app.use("/emergency_contact", emergencyContactRoutes);
 app.use("/geofence", geofenceRoutes);
+app.use("/scene_mode", sceneModeRoutes);
 
 // ─── Healthcheck ───────────────────────────────────────────────
 app.get("/ping", (req: Request, res: Response) => {
@@ -146,6 +148,9 @@ const tcpServer = new TcpServer({ port: config.tcp.port });
 tcpServer.start().catch((err: any) => {
   Logging.error(`Failed to start TCP server: ${err.message}`);
 });
+
+// Export tcpServer for use in controllers
+export { tcpServer };
 
 // ─── Unhandled Rejection & Uncaught Exception Handlers ────────
 process.on("unhandledRejection", (reason: any, promise: any) => {

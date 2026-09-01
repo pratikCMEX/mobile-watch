@@ -323,6 +323,10 @@ class TcpServer {
         this.handleConfig(client, parsed);
         break;
 
+      case "CS":
+        this.handleSceneModeResponse(client, parsed);
+        break;
+
       case "ICCID":
         this.handleIccid(client, parsed);
         break;
@@ -957,6 +961,50 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // CS - Scene Mode Response
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Device response after receiving scene mode command.
+   *
+   * Server sends: [CS*YYYYYYYYYY*LEN*profile,x]
+   * Device responds: [CS*YYYYYYYYYY*LEN*profile]
+   *
+   * This handler processes the device's acknowledgment.
+   */
+  private handleSceneModeResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    Logging.info(
+      `Scene mode response received from device ${packet.deviceId}: ${packet.raw}`
+    );
+
+    // Device acknowledged the scene mode command
+    // You can update database or trigger callbacks here if needed
+    this.findDevice(packet.deviceId)
+      .then((device) => {
+        if (!device) return;
+
+        // Optionally save a notification that scene mode was applied
+        return db.Notification.create({
+          device_id: device.id,
+          user_id: null,
+          type: "general",
+          title: "Scene mode applied",
+          body: `Device ${packet.deviceId} acknowledged scene mode change`,
+          metadata: { kind: "scene_mode", deviceId: packet.deviceId },
+          is_read: "0",
+        });
+      })
+      .catch((error: Error) =>
+        Logging.error(
+          `Failed to save scene mode notification for device ${packet.deviceId}: ${error.message}`
+        )
+      );
+  }
+
+  // ───────────────────────────────────────────────────────────
   // ICCID / RYIMEI - Device identity
   // ───────────────────────────────────────────────────────────
 
@@ -1413,6 +1461,57 @@ class TcpServer {
     }
 
     this.send(client, message);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Scene Mode command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send scene mode command to a specific device.
+   *
+   * Protocol format: [CS*YYYYYYYYYY*LEN*profile,x]
+   *
+   * Scene modes:
+   * - 1: Vibration and ringing
+   * - 2: Ringing only
+   * - 3: Vibration only
+   * - 4: Silence
+   *
+   * @param deviceId - The device ID (e.g., 8800000015)
+   * @param sceneMode - The scene mode (1, 2, 3, or 4)
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendSceneModeCommand(deviceId: string, sceneMode: number): boolean {
+    // Validate scene mode
+    if (![1, 2, 3, 4].includes(sceneMode)) {
+      Logging.error(`Invalid scene mode: ${sceneMode}. Must be 1, 2, 3, or 4.`);
+      return false;
+    }
+
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send scene mode command.`
+      );
+      return false;
+    }
+
+    // Calculate length: "profile,X" where X is the scene mode
+    const payload = `profile,${sceneMode}`;
+    const length = payload.length.toString().padStart(4, "0");
+
+    // Build the command packet
+    const command = `[CS*${deviceId}*${length}*${payload}]`;
+
+    Logging.info(
+      `Sending scene mode command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
 
     return true;
   }

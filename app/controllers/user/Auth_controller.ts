@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import bcrypt from "bcrypt";
+import { Op } from "sequelize";
 import { generateAuthToken } from "../../helper/Helper";
 const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -83,7 +84,63 @@ const logout = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+const updateProfile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any)?.userinfo?.payload?.id;
+    if (!userId) {
+      return errorMessage(res, "Invalid token payload", 401);
+    }
+
+    const user = await db.User.findByPk(userId);
+    if (!user) {
+      return errorMessage(res, "User not found", 404);
+    }
+
+    const { name, email, phone_number, country_code, password } = req.body;
+
+    // If email is being changed, ensure it isn't taken by another user
+    if (email && email !== user.email) {
+      const existing = await db.User.findOne({
+        where: { email, id: { [Op.ne]: userId } },
+      });
+      if (existing) {
+        return errorMessage(res, "Email already in use by another account");
+      }
+      user.email = email;
+    }
+
+    if (name !== undefined && name !== "") user.name = name;
+    if (phone_number !== undefined) user.phone_number = phone_number;
+    if (country_code !== undefined) user.country_code = country_code;
+
+    // Optional password change — hash if provided
+    if (password !== undefined && password !== "") {
+      user.password = await bcrypt.hash(password, 10);
+    }
+
+    await user.save();
+
+    const userData = user.toJSON();
+    delete userData.password;
+
+    return successMessage(res, "Profile updated successfully", userData);
+  } catch (err: any) {
+    console.error("updateProfile error:", err);
+    return errorMessage(
+      res,
+      err?.message
+        ? `Error updating profile: ${err.message}`
+        : "Error updating profile"
+    );
+  }
+};
+
 export default {
   login,
   logout,
+  updateProfile,
 };
