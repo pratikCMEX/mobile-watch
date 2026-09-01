@@ -15,7 +15,7 @@ router.post(
 
 // List geofences with pagination/filter
 router.post(
-  "/list",
+  "/list_geofence",
   checkToken,
   ValidateJoi(Schemas.geofence.list),
   Geofence_controller.listGeofences
