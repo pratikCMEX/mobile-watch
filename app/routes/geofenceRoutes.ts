@@ -31,7 +31,7 @@ router.post(
 
 // Delete geofence by ID
 router.delete(
-  "/delete/:id",
+  "/delete_geofence/:id",
   checkToken,
   ValidateJoi(Schemas.geofence.delete, "params"),
   Geofence_controller.deleteGeofence
