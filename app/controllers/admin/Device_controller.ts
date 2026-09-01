@@ -189,7 +189,7 @@ const getDeviceSettings = async function (
   next: NextFunction
 ) {
   try {
-    const { device_id } = req.query;
+    const { device_id } = req.params;
 
     if (!device_id) {
       return errorMessage(res, "device_id is required");

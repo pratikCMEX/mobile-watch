@@ -14,6 +14,7 @@ export interface DeviceSettingAttributes {
   fall_down_alert_enabled: boolean;
   fall_down_reminder_call: boolean;
   fall_down_level: number;
+  scene_mode: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -37,6 +38,7 @@ class DeviceSetting
   public fall_down_alert_enabled!: boolean;
   public fall_down_reminder_call!: boolean;
   public fall_down_level!: number;
+  public scene_mode!: number;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -122,6 +124,15 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.INTEGER,
         allowNull: false,
         defaultValue: 5,
+      },
+      scene_mode: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 1,
+        validate: {
+          min: 1,
+          max: 4,
+        },
       },
 
       createdAt: {

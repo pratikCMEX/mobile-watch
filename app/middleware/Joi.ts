@@ -147,6 +147,7 @@ export const Schemas = {
       fall_down_alert_enabled: Joi.string().valid("1", "0").optional(),
       fall_down_reminder_call: Joi.string().valid("1", "0").optional(),
       fall_down_level: Joi.number().integer().min(1).max(10).optional(),
+      scene_mode: Joi.number().integer().min(1).max(4).optional(),
     }),
   },
   sceneMode: {

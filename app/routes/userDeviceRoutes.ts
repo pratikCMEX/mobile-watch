@@ -21,6 +21,13 @@ router.get(
   Device_controller.aboutDevice
 );
 
+// Get all device settings including scene_mode
+router.get(
+  "/settings/:device_id",
+  checkToken,
+  Device_controller.getDeviceSettings
+);
+
 router.post(
   "/add_family_member",
   checkToken,

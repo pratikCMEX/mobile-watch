@@ -20,6 +20,7 @@ const updateDeviceSettings = async function (
       fall_down_alert_enabled,
       fall_down_reminder_call,
       fall_down_level,
+      scene_mode,
     } = req.body;
 
     if (!device_id) {
@@ -48,6 +49,7 @@ const updateDeviceSettings = async function (
         fall_down_alert_enabled: fall_down_alert_enabled ?? true,
         fall_down_reminder_call: fall_down_reminder_call ?? true,
         fall_down_level: fall_down_level ?? 5,
+        scene_mode: scene_mode ?? 1,
       });
     } else {
       if (sms_alert_enabled !== undefined)
@@ -67,6 +69,7 @@ const updateDeviceSettings = async function (
         deviceSetting.fall_down_reminder_call = fall_down_reminder_call;
       if (fall_down_level !== undefined)
         deviceSetting.fall_down_level = fall_down_level;
+      if (scene_mode !== undefined) deviceSetting.scene_mode = scene_mode;
 
       await deviceSetting.save();
     }
@@ -119,7 +122,91 @@ const aboutDevice = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+/**
+ * Get all device settings including scene_mode
+ *
+ * API: GET /api/device/settings/:device_id
+ *
+ * Response:
+ * - success: true/false
+ * - message: string
+ * - data: All device settings including scene_mode
+ */
+const getDeviceSettings = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id } = req.params;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id },
+    });
+
+    // If no settings exist, create default settings
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: true,
+        fall_down_reminder_call: true,
+        fall_down_level: 5,
+        scene_mode: 1,
+      });
+    }
+
+    // Scene mode descriptions
+    const sceneModeDescriptions: Record<number, string> = {
+      1: "Vibration and ringing",
+      2: "Ringing only",
+      3: "Vibration only",
+      4: "Silence",
+    };
+
+    return successMessage(res, "Device settings fetched successfully", {
+      device_id: device.id,
+      device_name: device.device_name,
+      serial_number: device.serial_number,
+      settings: {
+        sms_alert_enabled: deviceSetting.sms_alert_enabled,
+        take_off_device_alert: deviceSetting.take_off_device_alert,
+        safe_mode: deviceSetting.safe_mode,
+        talking_clock: deviceSetting.talking_clock,
+        night_power_saving: deviceSetting.night_power_saving,
+        volume: deviceSetting.volume,
+        brightness: deviceSetting.brightness,
+        fall_down_alert_enabled: deviceSetting.fall_down_alert_enabled,
+        fall_down_reminder_call: deviceSetting.fall_down_reminder_call,
+        fall_down_level: deviceSetting.fall_down_level,
+        scene_mode: deviceSetting.scene_mode,
+        scene_mode_description:
+          sceneModeDescriptions[deviceSetting.scene_mode] || "Unknown",
+      },
+    });
+  } catch (err) {
+    console.error("getDeviceSettings error:", err);
+    return errorMessage(res, "Error fetching device settings");
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
+  getDeviceSettings,
 };
