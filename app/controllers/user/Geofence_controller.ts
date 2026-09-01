@@ -13,7 +13,8 @@ const saveGeofence = async function (
   next: NextFunction
 ) {
   try {
-    const { id, device_id, name, latitude, longitude, radius } = req.body;
+    const { id, device_id, name, latitude, longitude, radius_meters } =
+      req.body;
 
     // Update if id is a non-empty string
     if (id && id !== "") {
@@ -36,7 +37,7 @@ const saveGeofence = async function (
       if (name !== undefined) geofence.name = name;
       if (latitude !== undefined) geofence.latitude = latitude;
       if (longitude !== undefined) geofence.longitude = longitude;
-      if (radius !== undefined) geofence.radius = radius;
+      if (radius_meters !== undefined) geofence.radius_meters = radius_meters;
 
       await geofence.save();
 
@@ -55,7 +56,7 @@ const saveGeofence = async function (
       name,
       latitude,
       longitude,
-      radius,
+      radius_meters,
       is_active: true,
     });
 
@@ -110,7 +111,7 @@ const listGeofences = async (
         "name",
         "latitude",
         "longitude",
-        "radius",
+        "radius_meters",
         "is_active",
         "createdAt",
       ],

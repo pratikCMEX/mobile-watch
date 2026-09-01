@@ -9,7 +9,7 @@ export interface GeofenceAttributes {
   name: string;
   latitude: number;
   longitude: number;
-  radius: number;
+  radius_meters: number;
   is_active: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -27,7 +27,7 @@ class Geofence
   public name!: string;
   public latitude!: number;
   public longitude!: number;
-  public radius!: number;
+  public radius_meters!: number;
   public is_active!: boolean;
 
   public readonly createdAt!: Date;
@@ -74,7 +74,7 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.DECIMAL(10, 7),
         allowNull: false,
       },
-      radius: {
+      radius_meters: {
         type: DataTypes.DECIMAL(6, 2),
         allowNull: false,
       },

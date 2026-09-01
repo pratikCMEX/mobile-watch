@@ -264,7 +264,7 @@ export const Schemas = {
       name: Joi.string().optional().allow(null, ""),
       latitude: Joi.number().optional(),
       longitude: Joi.number().optional(),
-      radius: Joi.number().optional(),
+      radius_meters: Joi.number().optional(),
     }),
     list: Joi.object({
       search: Joi.string().optional().allow(""),
