@@ -8,6 +8,7 @@ const formatDevice = (device: any) => {
   return {
     id: d.id,
     device_name: d.device_name,
+    serialNumber: d.serial_number,
     profile_image: d.profile_image,
     connection_status: d.connection_status,
     is_online: d.is_online,
@@ -116,6 +117,7 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
     const firstDevice = await db.Device.findAll({
       attributes: [
         "id",
+        "serial_number",
         "device_name",
         "profile_image",
         "connection_status",
