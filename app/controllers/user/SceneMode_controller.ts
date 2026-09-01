@@ -101,6 +101,47 @@ const updateSceneMode = async (
       `Scene mode command sent to device ${serial_number}: mode ${scene_mode} (${SCENE_MODE_DESCRIPTIONS[scene_mode]})`
     );
 
+    // Also update scene_mode in DeviceSetting table
+    try {
+      let deviceSetting = await db.DeviceSetting.findOne({
+        where: { device_id: device.id },
+      });
+
+      if (deviceSetting) {
+        // Update existing settings
+        deviceSetting.scene_mode = scene_mode;
+        await deviceSetting.save();
+        Logging.info(
+          `Scene mode updated in DeviceSetting for device ${device.id}: mode ${scene_mode}`
+        );
+      } else {
+        // Create new settings with scene_mode
+        deviceSetting = await db.DeviceSetting.create({
+          device_id: device.id,
+          sms_alert_enabled: "0",
+          take_off_device_alert: "0",
+          safe_mode: "0",
+          talking_clock: "0",
+          night_power_saving: "0",
+          volume: 50,
+          brightness: 50,
+          fall_down_alert_enabled: true,
+          fall_down_reminder_call: true,
+          fall_down_level: 5,
+          scene_mode: scene_mode,
+        });
+        Logging.info(
+          `DeviceSetting created with scene mode for device ${device.id}: mode ${scene_mode}`
+        );
+      }
+    } catch (settingErr) {
+      // Log error but don't fail the request since command was sent successfully
+      console.error("Error updating DeviceSetting:", settingErr);
+      Logging.error(
+        `Failed to update DeviceSetting for device ${device.id}: ${settingErr}`
+      );
+    }
+
     // Return success response
     return successMessage(res, "Scene mode command sent successfully", {
       serial_number,
@@ -109,6 +150,7 @@ const updateSceneMode = async (
       scene_mode,
       scene_mode_description: SCENE_MODE_DESCRIPTIONS[scene_mode],
       command_sent: true,
+      saved_to_database: true,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
