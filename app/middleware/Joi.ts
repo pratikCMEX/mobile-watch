@@ -151,9 +151,9 @@ export const Schemas = {
   },
   sceneMode: {
     update: Joi.object({
-      device_id: Joi.string().required().messages({
-        "string.empty": "device_id is required",
-        "any.required": "device_id is required",
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
       }),
       scene_mode: Joi.number().integer().valid(1, 2, 3, 4).required().messages({
         "number.base": "scene_mode must be a number",

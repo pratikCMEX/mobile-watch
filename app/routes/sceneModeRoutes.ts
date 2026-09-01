@@ -21,7 +21,7 @@ router.post(
 
 // Get scene mode status for a device
 router.get(
-  "/status/:device_id",
+  "/status/:serial_number",
   checkToken,
   SceneMode_controller.getSceneModeStatus
 );

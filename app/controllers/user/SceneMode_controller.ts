@@ -30,13 +30,13 @@ const SCENE_MODE_DESCRIPTIONS: Record<number, string> = {
  * API: POST /api/scene_mode/update
  *
  * Request Body:
- * - device_id: string (required) - The device ID
+ * - serial_number: string (required) - The device serial number (e.g., "8800000015")
  * - scene_mode: number (required) - 1, 2, 3, or 4
  *
  * Response:
  * - success: true/false
  * - message: string
- * - data: { device_id, scene_mode, scene_mode_description, command_sent, timestamp }
+ * - data: { serial_number, scene_mode, scene_mode_description, command_sent, timestamp }
  */
 const updateSceneMode = async (
   req: Request,
@@ -44,11 +44,11 @@ const updateSceneMode = async (
   next: NextFunction
 ) => {
   try {
-    const { device_id, scene_mode } = req.body;
+    const { serial_number, scene_mode } = req.body;
 
     // Validate required fields
-    if (!device_id) {
-      return errorMessage(res, "device_id is required");
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
     }
 
     if (scene_mode === undefined || scene_mode === null) {
@@ -63,14 +63,19 @@ const updateSceneMode = async (
       );
     }
 
-    // Check if device exists in database
-    const device = await db.Device.findByPk(device_id);
+    // Check if device exists in database by serial_number
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
     }
 
-    // Check if device is online
-    const tcpClient = tcpServer.getDevice(device_id);
+    // Check if device is online (TCP connection exists)
+    const tcpClient = tcpServer.getDevice(serial_number);
     if (!tcpClient) {
       return errorMessage(
         res,
@@ -79,7 +84,10 @@ const updateSceneMode = async (
     }
 
     // Send scene mode command via TCP
-    const commandSent = tcpServer.sendSceneModeCommand(device_id, scene_mode);
+    const commandSent = tcpServer.sendSceneModeCommand(
+      serial_number,
+      scene_mode
+    );
 
     if (!commandSent) {
       return errorMessage(
@@ -90,12 +98,14 @@ const updateSceneMode = async (
 
     // Log the command
     Logging.info(
-      `Scene mode command sent to device ${device_id}: mode ${scene_mode} (${SCENE_MODE_DESCRIPTIONS[scene_mode]})`
+      `Scene mode command sent to device ${serial_number}: mode ${scene_mode} (${SCENE_MODE_DESCRIPTIONS[scene_mode]})`
     );
 
     // Return success response
     return successMessage(res, "Scene mode command sent successfully", {
-      device_id,
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
       scene_mode,
       scene_mode_description: SCENE_MODE_DESCRIPTIONS[scene_mode],
       command_sent: true,
@@ -110,12 +120,12 @@ const updateSceneMode = async (
 /**
  * Get current scene mode status for a device
  *
- * API: GET /api/scene_mode/status/:device_id
+ * API: GET /api/scene_mode/status/:serial_number
  *
  * Response:
  * - success: true/false
  * - message: string
- * - data: { device_id, is_online, last_scene_mode }
+ * - data: { serial_number, is_online, last_scene_mode }
  */
 const getSceneModeStatus = async (
   req: Request,
@@ -123,23 +133,28 @@ const getSceneModeStatus = async (
   next: NextFunction
 ) => {
   try {
-    const deviceIdParam = req.params.device_id;
-    const device_id = Array.isArray(deviceIdParam)
-      ? deviceIdParam[0]
-      : deviceIdParam;
+    const serialNumberParam = req.params.serial_number;
+    const serial_number = Array.isArray(serialNumberParam)
+      ? serialNumberParam[0]
+      : serialNumberParam;
 
-    if (!device_id) {
-      return errorMessage(res, "device_id is required");
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
     }
 
-    // Check if device exists
-    const device = await db.Device.findByPk(device_id);
+    // Check if device exists by serial_number
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
     }
 
     // Check if device is online
-    const tcpClient = tcpServer.getDevice(device_id);
+    const tcpClient = tcpServer.getDevice(serial_number);
     const isOnline = !!tcpClient;
 
     // Get last scene mode notification (if any)
@@ -152,9 +167,10 @@ const getSceneModeStatus = async (
     });
 
     return successMessage(res, "Scene mode status retrieved", {
-      device_id,
-      is_online: isOnline,
+      serial_number,
+      device_id: device.id,
       device_name: device.device_name,
+      is_online: isOnline,
       last_scene_mode_notification: lastNotification
         ? {
             title: lastNotification.title,
