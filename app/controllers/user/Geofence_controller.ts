@@ -13,9 +13,10 @@ const saveGeofence = async function (
   next: NextFunction
 ) {
   try {
-    const { id, device_id, name, latitude, longitude, radius_meters } =
-      req.body;
-    if (id || id !== "") {
+    const { id, device_id, name, latitude, longitude, radius } = req.body;
+
+    // Update if id is a non-empty string
+    if (id && id !== "") {
       const geofence = await db.Geofence.findByPk(id);
       if (!geofence) {
         return errorMessage(res, "Geofence not found", 404);
@@ -35,12 +36,14 @@ const saveGeofence = async function (
       if (name !== undefined) geofence.name = name;
       if (latitude !== undefined) geofence.latitude = latitude;
       if (longitude !== undefined) geofence.longitude = longitude;
-      if (radius_meters !== undefined) geofence.radius_meters = radius_meters;
+      if (radius !== undefined) geofence.radius = radius;
 
       await geofence.save();
 
       return successMessage(res, "Geofence updated successfully", geofence);
     }
+
+    // Create path
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
@@ -52,14 +55,19 @@ const saveGeofence = async function (
       name,
       latitude,
       longitude,
-      radius_meters,
+      radius,
       is_active: true,
     });
 
     return successMessage(res, "Geofence created successfully", geofence);
-  } catch (err) {
+  } catch (err: any) {
     console.error("saveGeofence error:", err);
-    return errorMessage(res, "Error saving geofence");
+    return errorMessage(
+      res,
+      err?.message
+        ? `Error saving geofence: ${err.message}`
+        : "Error saving geofence"
+    );
   }
 };
 
@@ -102,7 +110,7 @@ const listGeofences = async (
         "name",
         "latitude",
         "longitude",
-        "radius_meters",
+        "radius",
         "is_active",
         "createdAt",
       ],
