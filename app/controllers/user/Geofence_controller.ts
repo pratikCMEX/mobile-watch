@@ -15,7 +15,7 @@ const saveGeofence = async function (
   try {
     const { id, device_id, name, latitude, longitude, radius_meters } =
       req.body;
-    if (id) {
+    if (id || id !== "") {
       const geofence = await db.Geofence.findByPk(id);
       if (!geofence) {
         return errorMessage(res, "Geofence not found", 404);
@@ -40,19 +40,6 @@ const saveGeofence = async function (
       await geofence.save();
 
       return successMessage(res, "Geofence updated successfully", geofence);
-    }
-
-    if (
-      !device_id ||
-      !name ||
-      latitude === undefined ||
-      longitude === undefined ||
-      !radius_meters
-    ) {
-      return errorMessage(
-        res,
-        "device_id, name, latitude, longitude, and radius_meters are required"
-      );
     }
 
     const device = await db.Device.findByPk(device_id);
