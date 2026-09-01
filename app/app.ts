@@ -22,6 +22,7 @@ const userDeviceRoutes = require("./routes/userDeviceRoutes");
 const homeRoutes = require("./routes/homeRoutes");
 const snapshotRoutes = require("./routes/snapshotRoutes");
 const emergencyContactRoutes = require("./routes/emergencyContactRoutes");
+const geofenceRoutes = require("./routes/geofenceRoutes");
 
 // ─── Security Middleware ────────────────────────────────────────
 const allowedOrigins = (
@@ -103,6 +104,7 @@ app.use("/health", healthRoutes);
 app.use("/snapshot", snapshotRoutes);
 app.use("/log", logRoutes);
 app.use("/emergency_contact", emergencyContactRoutes);
+app.use("/geofence", geofenceRoutes);
 
 // ─── Healthcheck ───────────────────────────────────────────────
 app.get("/ping", (req: Request, res: Response) => {

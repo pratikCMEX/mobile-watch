@@ -257,4 +257,28 @@ export const Schemas = {
       end_date: Joi.string().optional().allow(null),
     }),
   },
+  geofence: {
+    save: Joi.object({
+      id: Joi.string().optional().allow(null, ""),
+      device_id: Joi.string().optional().allow(null, ""),
+      name: Joi.string().optional().allow(null, ""),
+      latitude: Joi.number().optional(),
+      longitude: Joi.number().optional(),
+      radius_meters: Joi.number().optional(),
+    }),
+    list: Joi.object({
+      search: Joi.string().optional().allow(""),
+      page: Joi.number().integer().min(1).optional().default(1),
+      sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
+      limit: Joi.number().integer().min(1).optional().default(10),
+      device_id: Joi.string().required(),
+    }),
+    delete: Joi.object({
+      id: Joi.string().required(),
+    }),
+    toggleStatus: Joi.object({
+      id: Joi.string().required(),
+      is_active: Joi.boolean().required(),
+    }),
+  },
 };
