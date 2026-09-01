@@ -148,7 +148,6 @@ export default (sequelize: Sequelize, DataTypes: any) => {
     {
       sequelize,
       modelName: "DeviceSetting",
-      paranoid: true, // Enables soft delete using deletedAt
     }
   );
 
