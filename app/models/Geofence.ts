@@ -95,7 +95,6 @@ export default (sequelize: Sequelize, DataTypes: any) => {
     {
       sequelize,
       modelName: "Geofence",
-      paranoid: true, // Enables soft delete using deletedAt
     }
   );
 
