@@ -56,6 +56,34 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+const logout = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // checkToken middleware decodes the token and sets req.userinfo
+    const userId = (req as any)?.userinfo?.payload?.id;
+
+    if (!userId) {
+      return errorMessage(res, "Invalid token payload", 401);
+    }
+
+    const user = await db.User.findByPk(userId);
+    if (!user) {
+      return errorMessage(res, "User not found", 404);
+    }
+
+    // Invalidate the active session by clearing the stored token.
+    // Subsequent requests using this token will be rejected by checkToken
+    // because user.session_token !== incoming token.
+    user.session_token = "";
+    await user.save();
+
+    return successMessage(res, "Logout successful", null);
+  } catch (error) {
+    console.error("logout error:", error);
+    return errorMessage(res, "Error logging out");
+  }
+};
+
 export default {
   login,
+  logout,
 };

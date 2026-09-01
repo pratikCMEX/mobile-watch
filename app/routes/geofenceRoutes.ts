@@ -23,7 +23,7 @@ router.post(
 
 // Toggle geofence active status
 router.post(
-  "/toggle-status",
+  "/toggle_geofence_status",
   checkToken,
   ValidateJoi(Schemas.geofence.toggleStatus),
   Geofence_controller.toggleGeofenceStatus
