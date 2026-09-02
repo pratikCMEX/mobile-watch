@@ -677,7 +677,7 @@ const captureSnapshot = async (
       );
     }
 
-    const commandProtocol = `[CS*${serial_number}*0008*rcapture]`;
+    const commandProtocol = `[3G*${serial_number}*0008*rcapture]`;
 
     Logging.info(
       `Remote snapshot command sent to device ${serial_number} (device_id: ${device.id})`

@@ -2182,7 +2182,8 @@ class TcpServer {
     }
 
     // Calculate length: "rcapture" has 8 characters
-    const command = `[CS*${deviceId}*0008*rcapture]`;
+    // Note: Using "3G" prefix as shown in the protocol example
+    const command = `[3G*${deviceId}*0008*rcapture]`;
 
     Logging.info(
       `Sending remote snapshot (rcapture) command to device ${deviceId}: ${command}`
