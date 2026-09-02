@@ -2553,7 +2553,7 @@ class TcpServer {
     }
 
     // Auto-prepend default country code for 10-digit national numbers.
-    const DEFAULT_CC = (process.env.SOS_DEFAULT_COUNTRY_CODE || "91").replace(
+    const DEFAULT_CC = (process.env.SOS_DEFAULT_COUNTRY_CODE || "").replace(
       /[^0-9]/g,
       ""
     );
@@ -2591,7 +2591,7 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
-  // Clear a phonebook slot (PHBX with empty name)
+  // Clear a phonebook slot (PHBX with empty name AND empty number)
   // ───────────────────────────────────────────────────────────
 
   /**
@@ -2601,15 +2601,20 @@ class TcpServer {
    * firmware does NOT actually understand a separate `DPHBX` command word.
    * The spec only defines PHBX for setting entries, and the way to clear
    * a slot is to re-send the same PHBX packet at that slot index with
-   * an EMPTY name. The firmware interprets that as "delete this slot".
+   * EMPTY name AND EMPTY number fields. We confirmed via testing that
+   * the firmware wipes the name when name is empty BUT keeps the number
+   * unless the number field is also empty. So both fields must be empty
+   * to fully wipe the contact.
    *
-   *   Wire: [3G*<id>*LEN*PHBX,<index>,,<number>,]
-   *   The index is the only required field; name is empty so the slot
-   *   is wiped (name + number + photo).
+   *   Wire: [3G*<id>*LEN*PHBX,<index>,,,]
+   *   Layout: PHBX command word, slot index, EMPTY name, EMPTY number,
+   *           EMPTY photo. All three fields after index are blank.
    *
-   * If `number` is provided we still send it on the wire (some firmwares
-   * require it to match the existing slot's number to confirm which
-   * entry to delete). If it's not provided we send an empty number.
+   * The `number` parameter is currently unused for sending on the wire
+   * (we always send empty). It is kept in the signature only because
+   * earlier the controller was passing the number as a "confirm" — that
+   * turned out to be wrong for this firmware, which would keep the
+   * previous number. So we accept the parameter and ignore it for now.
    *
    * Device reply (same as for a successful set):
    *   [3G*<id>*0004*PHBX]            (bare ack = OK)
@@ -2618,9 +2623,10 @@ class TcpServer {
    *
    * @param deviceId  - The device ID (e.g. 7893267563)
    * @param index     - Phonebook slot 1..30 to clear
-   * @param number    - Optional. Phone number that was in the slot
-   *                    (digits-only, country code included). If omitted
-   *                    or empty, an empty number field is sent.
+   * @param number    - Optional. Currently unused on the wire because
+   *                    this firmware keeps the previous number when a
+   *                    number is provided. May be used in the future
+   *                    if a firmware variant needs to match by number.
    * @returns true if the command was written to the socket
    */
   public sendDeletePhonebookCommand(
@@ -2644,30 +2650,17 @@ class TcpServer {
       return false;
     }
 
-    // Auto-prepend default country code for 10-digit national numbers.
-    const digits = (number || "").replace(/[^0-9]/g, "");
-    let finalDigits = digits;
-    if (digits) {
-      const DEFAULT_CC = (process.env.SOS_DEFAULT_COUNTRY_CODE || "91").replace(
-        /[^0-9]/g,
-        ""
-      );
-      if (DEFAULT_CC && digits.length === 10) {
-        finalDigits = DEFAULT_CC + digits;
-      }
-    }
-
-    // Clear-slot packet: PHBX,<index>,,<number>,
-    // The third field (name) is EMPTY — that's the "clear this slot"
-    // signal on this firmware. Encoding is hex for the empty name, which
-    // is the literal empty string "".
-    const content = `PHBX,${index},,${finalDigits},`;
+    // Clear-slot packet: PHBX,<index>,,, — all three fields after the
+    // index (name, number, photo) are EMPTY so the firmware wipes the
+    // slot completely. (If we send `PHBX,<index>,,<oldnumber>,` the
+    // firmware clears the name but keeps the old number.)
+    const content = `PHBX,${index},,,`;
     const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
     const command = `[3G*${deviceId}*${length}*${content}]`;
 
     Logging.info(
       `Clearing phonebook (PHBX) slot #${index} on device ${deviceId} ` +
-        `(was: ${finalDigits || "<empty>"}): ${command}`
+        `(was: ${number || "<empty>"}): ${command}`
     );
 
     this.send(client, command);

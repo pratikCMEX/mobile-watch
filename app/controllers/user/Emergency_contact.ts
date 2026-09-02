@@ -914,20 +914,34 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
 // Clear a single phonebook slot on the watch
 //
 // Per the latest protocol spec, this firmware clears a slot by sending
-// PHBX again at the same slot index with an EMPTY name field. There is
-// no separate DPHBX command word on this firmware. The matching is by
-// SLOT INDEX (1..30), not by phone number.
+// PHBX again at the same slot index with EMPTY name AND EMPTY number
+// fields. There is no separate DPHBX command word on this firmware.
+// The matching is by SLOT INDEX (1..30), not by phone number.
 //
-//   Server → Watch : [3G*<id>*LEN*PHBX,<index>,,<number>,]
+//   Server → Watch : [3G*<id>*LEN*PHBX,<index>,,,]
+//                     ^     ^    ^
+//                     |     |    three commas in a row after the index
+//                     |     slot 1..30
+//                     PHBX command word
+//
+//   Layout: PHBX command word, slot index, EMPTY name, EMPTY number,
+//           EMPTY photo. All three fields after the index are blank.
+//
 //   Watch → Server : [3G*<id>*0004*PHBX]               (ack = success)
 //                    [3G*<id>*0006*PHBX,0]             (failure)
 //                    [3G*<id>*0006*PHBX,1]             (explicit success)
+//
+// IMPORTANT: We confirmed by testing that this firmware DOES NOT clear
+// the number unless the number field is also empty. Sending the old
+// number along (PHBX,<index>,,<oldnumber>,) wipes the name but leaves
+// the old number in the slot. So we always send a completely empty
+// contact record.
 //
 // Request body:
 //   {
 //     "serial_number": "7893267563",
 //     "index":         1,                        // required, 1..30
-//     "number":        "919691905903"            // optional, but recommended
+//     "number":        "919691905903"            // optional, but accepted
 //   }
 //
 // We don't persist phonebook rows in DB — it lives only on the watch.
@@ -955,9 +969,9 @@ async function deletePhonebookContact(
       return errorMessage(res, "index is required (integer 1..30)");
     }
 
-    // Number is optional. If provided, normalize it the same way PHBX
-    // set does (strip non-digits, auto-prepend default country code for
-    // 10-digit Indian mobiles).
+    // We accept `number` for caller convenience but do NOT put it on
+    // the wire (this firmware keeps the previous number when number is
+    // non-empty — see file header). Normalize for the response only.
     const digits = number ? normalizeSosPhone(String(number)) : "";
 
     const device = await db.Device.findOne({ where: { serial_number } });
@@ -996,15 +1010,15 @@ async function deletePhonebookContact(
     }
 
     // Build the protocol string for the response (same as what was sent).
-    // PHBX,<index>,,<number>,
-    const content = `PHBX,${index},,${digits},`;
+    // PHBX,<index>,,, — all three fields after index are empty.
+    const content = `PHBX,${index},,,`;
     const length = Buffer.byteLength(content, "utf8")
       .toString(16)
       .padStart(4, "0");
     const protocol = `[3G*${device.serial_number}*${length}*${content}]`;
 
     Logging.info(
-      `PHBX clear slot #${index} (number=${digits || "<empty>"}) ` +
+      `PHBX clear slot #${index} (was number=${digits || "<empty>"}) ` +
         `-> device ${device.serial_number}: ${protocol}`
     );
 
@@ -1017,13 +1031,13 @@ async function deletePhonebookContact(
       command_sent: true,
       protocol,
       command_message:
-        `Sent PHBX clear-slot command for index #${index} (${
-          digits || "no number"
-        }) ` +
+        `Sent PHBX clear-slot command for index #${index} ` +
+        `(${digits ? "was: " + digits : "no number"}) ` +
         `on device ${device.serial_number}. The wire packet is ` +
-        `[3G*<id>*LEN*PHBX,<index>,,<number>,] — the empty name field tells the ` +
-        `firmware to wipe the slot. Watch will reply with [3G*<id>*0004*PHBX] ` +
-        `(bare ack = success) or [3G*<id>*0006*PHBX,0] (failure).`,
+        `[3G*<id>*LEN*PHBX,<index>,,,] — BOTH name AND number fields are empty, ` +
+        `so the firmware wipes the whole contact record. Watch will reply with ` +
+        `[3G*<id>*0004*PHBX] (bare ack = success) or ` +
+        `[3G*<id>*0006*PHBX,0] (failure).`,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {

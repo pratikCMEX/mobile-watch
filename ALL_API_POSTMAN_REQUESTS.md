@@ -671,29 +671,33 @@ as a 4-digit uppercase hex value. Using `Buffer.byteLength(content,
 
 ---
 
-## 29. Clear Phonebook Slot (PHBX with empty name)
+## 29. Clear Phonebook Slot (PHBX with empty name AND empty number)
 
 Clear a single phonebook slot on the watch. Per the latest protocol spec,
 this firmware clears a slot by sending PHBX again at the same slot index
-with an EMPTY name field. There is no separate DPHBX command word on
-this firmware. Matching is by **slot index** (1..30), not by phone
-number.
+with EMPTY name AND EMPTY number fields. There is no separate DPHBX
+command word on this firmware. Matching is by **slot index** (1..30),
+not by phone number.
 
 Protocol sent to the watch:
-`[3G*<serial>*LEN*PHBX,<index>,,<number>,]`
+`[3G*<serial>*LEN*PHBX,<index>,,,]`
 
-The empty name field (two consecutive commas) is the "clear this slot"
-signal on this firmware. The number, if provided, is sent on the wire
-so the firmware can confirm which entry to delete.
+All three fields after the index (name, number, photo) are blank. The
+firmware wipes the entire contact record at that slot. (Sending the old
+number along with an empty name leaves the number in the slot — that
+was the bug we just fixed.)
 
 Device reply (uses the same PHBX command word):
 `[3G*<serial>*0004*PHBX]` (bare ack = success) or
 `[3G*<serial>*0006*PHBX,<status>]` where `status: 1=success, 0=failure`
 
 - `index` (required, integer 1..30): the watch's phonebook slot to clear.
-- `number` (optional): the phone number that was in the slot.
-  Digits-only with country code (e.g. `919691905903` for `+91 96919 05903`).
-  10-digit Indian numbers are auto-prefixed with `91` by the server.
+- `number` (optional, accepted but NOT sent on the wire): the phone
+  number that was in the slot. We accept it for caller convenience but
+  do not transmit it because this firmware keeps the previous number
+  if a number is provided. Digits-only with country code recommended
+  (e.g. `919691905903` for `+91 96919 05903`). 10-digit Indian numbers
+  are auto-prefixed with `91`.
 
 **POST** `/emergency_contact/delete_phonebook`
 
@@ -707,17 +711,17 @@ Device reply (uses the same PHBX command word):
 
 **Response fields:**
 
-| Field             | Type    | Description                                                           |
-| ----------------- | ------- | --------------------------------------------------------------------- |
-| `serial_number`   | string  | Device serial number (protocol ID)                                    |
-| `device_id`       | string  | Device UUID                                                           |
-| `device_name`     | string  | Device name                                                           |
-| `index`           | number  | Slot index that was cleared (1..30)                                   |
-| `number`          | string  | Digits-only phone number that was sent (after normalization)          |
-| `command_sent`    | boolean | Whether the PHBX clear-slot packet was written to the socket          |
-| `protocol`        | string  | Exact packet sent (e.g. `[3G*7893267563*0011*PHBX,1,,919691905903,]`) |
-| `command_message` | string  | Human-readable summary                                                |
-| `timestamp`       | string  | ISO timestamp                                                         |
+| Field             | Type    | Description                                                   |
+| ----------------- | ------- | ------------------------------------------------------------- |
+| `serial_number`   | string  | Device serial number (protocol ID)                            |
+| `device_id`       | string  | Device UUID                                                   |
+| `device_name`     | string  | Device name                                                   |
+| `index`           | number  | Slot index that was cleared (1..30)                           |
+| `number`          | string  | Digits-only phone number that was in the slot (informational) |
+| `command_sent`    | boolean | Whether the PHBX clear-slot packet was written to the socket  |
+| `protocol`        | string  | Exact packet sent (e.g. `[3G*7893267563*000B*PHBX,1,,,]`)     |
+| `command_message` | string  | Human-readable summary                                        |
+| `timestamp`       | string  | ISO timestamp                                                 |
 
 ---
 
