@@ -361,6 +361,7 @@ const allEmergencyContact = async (
       attributes: [
         "id",
         "name",
+        "device_id",
         "country_code",
         "phone_number",
         "priority",
