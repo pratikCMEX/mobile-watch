@@ -563,6 +563,80 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { serial_number, alarms } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (!alarms || !Array.isArray(alarms) || alarms.length === 0) {
+      return errorMessage(res, "alarms array is required (1-3 alarms)");
+    }
+
+    if (alarms.length > 3) {
+      return errorMessage(res, "Maximum 3 alarms allowed");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const tcpClient = tcpServer.getDevice(serial_number);
+
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendAlarmCommand(serial_number, alarms);
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send alarm command. Device may be disconnected."
+      );
+    }
+
+    // Build the command protocol string for response
+    const alarmPayload = alarms.join(",");
+    const content = `REMIND,${alarmPayload}`;
+    const length = content.length.toString().padStart(4, "0");
+    const commandProtocol = `[CS*${serial_number}*${length}*${content}]`;
+
+    Logging.info(
+      `Alarm command sent to device ${serial_number} (device_id: ${
+        device.id
+      }): ${alarms.join(", ")}`
+    );
+
+    return successMessage(res, "Alarm set successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      alarms: alarms,
+      alarm_count: alarms.length,
+      command_sent: true,
+      command_message:
+        "REMIND command sent to device. The device will update its alarm settings.",
+      command_protocol: commandProtocol,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setAlarm error:", err);
+    return errorMessage(res, "Error sending alarm command");
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -571,4 +645,5 @@ export default {
   restartDevice,
   sendDeviceCommand,
   findDevice,
+  setAlarm,
 };

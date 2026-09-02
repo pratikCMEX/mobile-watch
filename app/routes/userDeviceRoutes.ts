@@ -60,6 +60,14 @@ router.post(
   Device_controller.findDevice
 );
 
+// Set alarm clock API (sends REMIND command to device via TCP)
+router.post(
+  "/set_alarm",
+  checkToken,
+  ValidateJoi(Schemas.alarm.set),
+  Device_controller.setAlarm
+);
+
 router.post(
   "/add_family_member",
   checkToken,

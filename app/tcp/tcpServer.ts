@@ -2017,6 +2017,55 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Send Alarm (REMIND) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send alarm clock settings to a specific device.
+   *
+   * Protocol format: [CS*YYYYYYYYYY*LEN*REMIND,alarm1,alarm2,alarm3]
+   *
+   * Alarm format: HH:MM-type-repeat-days
+   * - HH:MM: Time in 24-hour format
+   * - type: Alarm type (1=once, 2=daily, 3=weekly)
+   * - repeat: Repeat count
+   * - days: Days of week (7 chars, 0=Sun, 1=Mon, etc.) e.g., "0111110" = Mon-Fri
+   *
+   * Example: [3G*5678901234*0018*REMIND,08:10-1-1,08:10-1-2,08:10-1-3-0111110]
+   *
+   * @param deviceId - The device ID (e.g. 8800000015)
+   * @param alarms - Array of alarm strings (e.g., ["08:10-1-1", "08:10-1-2", "08:10-1-3-0111110"])
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendAlarmCommand(deviceId: string, alarms: string[]): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send REMIND command.`
+      );
+
+      return false;
+    }
+
+    // Build the alarm command payload
+    const alarmPayload = alarms.join(",");
+    const content = `REMIND,${alarmPayload}`;
+
+    // Calculate length: content length (REMIND, + alarms)
+    const length = content.length.toString().padStart(4, "0");
+    const command = `[CS*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending alarm (REMIND) command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Connection ID
   // ───────────────────────────────────────────────────────────
 

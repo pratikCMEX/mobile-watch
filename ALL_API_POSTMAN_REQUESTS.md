@@ -338,6 +338,107 @@ and resume sending heartbeats.
 
 ---
 
+## 19. Device Command (Unified API)
+
+Send various commands to the device via TCP. Use the `command` field to specify
+the action:
+
+- `1` = Restart (sends `[3G*YYYYYYYYYY*0005*RESET]`)
+- `2` = Shutdown (sends `[CS*YYYYYYYYYY*0008*POWEROFF]`)
+- `3` = Factory Reset (sends `[CS*YYYYYYYYYY*0007*FACTORY]`)
+
+**POST** `/user/device/device_command`
+
+```json
+{
+  "serial_number": "5678901234",
+  "command": 1
+}
+```
+
+**Response fields:**
+
+| Field              | Type    | Description                                     |
+| ------------------ | ------- | ----------------------------------------------- |
+| `serial_number`    | string  | Device serial number (protocol ID)              |
+| `device_id`        | string  | Device UUID in the database                     |
+| `device_name`      | string  | Device name                                     |
+| `command`          | number  | Command type (1=restart, 2=shutdown, 3=factory) |
+| `command_name`     | string  | Human-readable command name                     |
+| `command_sent`     | boolean | Whether the command was sent to the device      |
+| `command_message`  | string  | Status message about the command                |
+| `command_protocol` | string  | The actual protocol command sent to the device  |
+| `timestamp`        | string  | ISO timestamp of when the command was sent      |
+
+---
+
+## 20. Find My Device
+
+Send a FIND command to the device via TCP. The device will respond with its
+location or an audible alert to help locate it.
+
+Protocol: `[CS*YYYYYYYYYY*0004*FIND]`
+
+**POST** `/user/device/find_device`
+
+```json
+{
+  "serial_number": "5678901234"
+}
+```
+
+**Response fields:**
+
+| Field              | Type    | Description                                                         |
+| ------------------ | ------- | ------------------------------------------------------------------- |
+| `serial_number`    | string  | Device serial number (protocol ID)                                  |
+| `device_id`        | string  | Device UUID in the database                                         |
+| `device_name`      | string  | Device name                                                         |
+| `command_sent`     | boolean | Whether the FIND command was sent to the device                     |
+| `command_message`  | string  | Status message about the command                                    |
+| `command_protocol` | string  | The actual protocol command sent (e.g. `[CS*5678901234*0004*FIND]`) |
+| `timestamp`        | string  | ISO timestamp of when the command was sent                          |
+
+---
+
+## 21. Set Alarm Clock
+
+Send alarm clock settings to the device via TCP. You can set up to 3 alarms.
+
+Alarm format: `HH:MM-type-repeat` or `HH:MM-type-repeat-days`
+
+- `HH:MM`: Time in 24-hour format (e.g., `08:10`)
+- `type`: Alarm type (1=once, 2=daily, 3=weekly)
+- `repeat`: Repeat count
+- `days`: Days of week (7 chars, 0=Sun, 1=Mon, etc.) e.g., `0111110` = Mon-Fri
+
+Protocol: `[CS*YYYYYYYYYY*LEN*REMIND,alarm1,alarm2,alarm3]`
+
+**POST** `/user/device/set_alarm`
+
+```json
+{
+  "serial_number": "5678901234",
+  "alarms": ["08:10-1-1", "08:10-1-2", "08:10-1-3-0111110"]
+}
+```
+
+**Response fields:**
+
+| Field              | Type    | Description                                       |
+| ------------------ | ------- | ------------------------------------------------- |
+| `serial_number`    | string  | Device serial number (protocol ID)                |
+| `device_id`        | string  | Device UUID in the database                       |
+| `device_name`      | string  | Device name                                       |
+| `alarms`           | array   | Array of alarm strings sent                       |
+| `alarm_count`      | number  | Number of alarms set                              |
+| `command_sent`     | boolean | Whether the REMIND command was sent to the device |
+| `command_message`  | string  | Status message about the command                  |
+| `command_protocol` | string  | The actual protocol command sent                  |
+| `timestamp`        | string  | ISO timestamp of when the command was sent        |
+
+---
+
 ## Notes
 
 - Replace `DEVICE_UUID`, `USER_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs

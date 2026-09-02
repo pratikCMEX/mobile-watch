@@ -198,6 +198,34 @@ export const Schemas = {
       }),
     }),
   },
+  alarm: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      alarms: Joi.array()
+        .items(
+          Joi.string()
+            .pattern(
+              /^([01]?[0-9]|2[0-3]):[0-5][0-9]-[1-3]-[0-9](-[01]{7})?$/,
+              "alarm format"
+            )
+            .messages({
+              "string.pattern.base":
+                "Invalid alarm format. Expected: HH:MM-type-repeat or HH:MM-type-repeat-days (e.g., 08:10-1-1 or 08:10-1-3-0111110)",
+            })
+        )
+        .min(1)
+        .max(3)
+        .required()
+        .messages({
+          "array.min": "At least one alarm is required",
+          "array.max": "Maximum 3 alarms allowed",
+          "any.required": "alarms array is required",
+        }),
+    }),
+  },
   familyMember: {
     create: Joi.object({
       name: Joi.string().required(),
