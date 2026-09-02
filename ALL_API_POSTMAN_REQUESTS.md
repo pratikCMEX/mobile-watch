@@ -479,6 +479,190 @@ and a snapshot record will be created in the database when the device responds.
 
 ---
 
+## 23. Save Emergency Contacts (Bulk)
+
+Push up to 3 SOS contacts (one per priority slot) to the device in a single call.
+
+The server will:
+
+1. Upsert each contact in the DB keyed by `(device_id, priority)`.
+2. Re-read all stored contacts for the device and push them all to the watch
+   in priority order: `priority=1` → `SOS1`, `priority=2` → `SOS2`,
+   `priority=3` → `SOS3`. Empty slots are NOT sent.
+
+Protocol sent to the watch (per slot):
+`[3G*<serial>*LEN*SOS<slot>,<countryCode+phone>]`
+
+Device reply (per slot):
+`[3G*<serial>*0002*SOS<slot>]` (echo only)
+
+> Tip: leave `id` as `""` to create, pass an existing UUID to update that row.
+
+**POST** `/emergency_contact/save_contacts`
+
+```json
+{
+  "serial_number": "8800000015",
+  "contacts": [
+    { "id": "", "name": "Mom", "phone_number": "9691905903", "priority": 1 },
+    { "id": "", "name": "Dad", "phone_number": "9510589322", "priority": 2 },
+    { "id": "", "name": "Sister", "phone_number": "9587374638", "priority": 3 }
+  ]
+}
+```
+
+**Response fields:**
+
+| Field               | Type   | Description                                                                        |
+| ------------------- | ------ | ---------------------------------------------------------------------------------- |
+| `device`            | object | `{ id, serial_number, device_name }`                                               |
+| `db_results`        | array  | Per-contact DB rows: `{ id, created, priority, name, phone_number, country_code }` |
+| `sync.online`       | bool   | Whether the device was reachable on TCP                                            |
+| `sync.wire_results` | array  | Per-slot packets actually sent: `{ slot, priority, name, digits, sent, protocol }` |
+| `command_message`   | string | Human-readable summary                                                             |
+| `timestamp`         | string | ISO timestamp                                                                      |
+
+---
+
+## 24. Save / Update Single Emergency Contact
+
+Create or update ONE contact. After saving, the server re-syncs **all** stored
+contacts to the device in priority order.
+
+**POST** `/emergency_contact/save_contact`
+
+### Body — create by `(device_id, priority)`:
+
+```json
+{
+  "device_id": "a1a4d02f-48df-4ec7-b368-a84d1cd3f01c",
+  "name": "Mom",
+  "phone_number": "9691905903",
+  "priority": 1
+}
+```
+
+### Body — update by `id`:
+
+```json
+{
+  "id": "CONTACT_UUID",
+  "name": "Mom",
+  "phone_number": "9691905903"
+}
+```
+
+**Response fields:** same as #23 — includes the upserted `contact` plus
+`sync.wire_results` for what was actually pushed to the watch.
+
+---
+
+## 25. Delete Emergency Contact
+
+Delete ONE contact by id. After deleting, the server re-syncs the **remaining**
+contacts to the device in priority order.
+
+**DELETE** `/emergency_contact/delete/<CONTACT_UUID>`
+
+```json
+{}
+```
+
+> No body required — id comes from the URL.
+
+**Response fields:**
+
+| Field               | Type    | Description                                                                |
+| ------------------- | ------- | -------------------------------------------------------------------------- |
+| `deleted`           | number  | Number of rows deleted (0 or 1)                                            |
+| `contact`           | object  | The contact row that was just deleted                                      |
+| `device`            | object  | `{ id, serial_number, device_name }` of the owning device                  |
+| `sync.online`       | boolean | Whether the device was reachable on TCP                                    |
+| `sync.wire_results` | array   | Remaining slots pushed: `{ slot, priority, name, digits, sent, protocol }` |
+| `command_message`   | string  | Human-readable summary                                                     |
+
+---
+
+## 26. List Emergency Contacts
+
+Paginated list of contacts for a device. Sorted by `priority ASC NULLS LAST`,
+then `createdAt` (use `sorting` to flip).
+
+**POST** `/emergency_contact/all`
+
+```json
+{
+  "search": "",
+  "page": 1,
+  "sorting": "DESC",
+  "limit": 10,
+  "device_id": "a1a4d02f-48df-4ec7-b368-a84d1cd3f01c"
+}
+```
+
+**Response fields:** `{ page, limit, total, rows: [{ id, name, device_id, country_code, phone_number, priority, createdAt }, …] }`
+
+---
+
+## 27. Get Emergency Contact by ID
+
+Fetch a single contact.
+
+**GET** `/emergency_contact/<CONTACT_UUID>`
+
+```json
+{}
+```
+
+> No body required — id comes from the URL.
+
+---
+
+## 28. Set Phonebook (PHBX)
+
+Push up to 30 contacts onto the watch's phonebook. Each contact is sent
+as a separate PHBX packet (one round-trip per entry).
+
+Protocol sent to the watch (per entry):
+`[3G*<serial>*LEN*PHBX,<index>,<name>,<digits>,<photoData>]`
+
+Device reply (per entry):
+`[3G*<serial>*0002*PHBX,<status>]` where `status: 1=success, 0=failure`
+
+- `index`: phonebook slot on the watch, integer **1..30**, unique across the batch.
+- `name`: contact name (Unicode allowed).
+- `number`: phone number. Digits-only on the wire; country code `91` is
+  auto-prepended for 10-digit Indian mobiles.
+- `photo`: optional photo data (currently unused — pass `""`).
+
+**POST** `/emergency_contact/set_phonebook`
+
+```json
+{
+  "serial_number": "7893267563",
+  "contacts": [
+    { "index": 1, "name": "Mom", "number": "9691905903" },
+    { "index": 2, "name": "Dad", "number": "9510589322" },
+    { "index": 3, "name": "Sister", "number": "9587374638", "photo": "" }
+  ]
+}
+```
+
+**Response fields:**
+
+| Field             | Type    | Description                                                 |
+| ----------------- | ------- | ----------------------------------------------------------- |
+| `serial_number`   | string  | Device serial number (protocol ID)                          |
+| `device_id`       | string  | Device UUID                                                 |
+| `device_name`     | string  | Device name                                                 |
+| `command_sent`    | boolean | Whether all PHBX entries were written to the socket         |
+| `count`           | number  | Number of entries pushed                                    |
+| `wire_results`    | array   | Per-entry result: `{ index, name, digits, sent, protocol }` |
+| `command_message` | string  | Human-readable summary                                      |
+| `timestamp`       | string  | ISO timestamp                                               |
+
+---
+
 ## Notes
 
 - Replace `DEVICE_UUID`, `USER_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs

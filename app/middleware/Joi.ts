@@ -288,6 +288,65 @@ export const Schemas = {
           "Provide `contacts[]` (preferred) or legacy `sos_number`/`sos1`/`sos2`/`sos3`",
       }),
   },
+  phonebook: {
+    /**
+     * Push the device's phonebook (PHBX) — up to 30 contacts.
+     *
+     * Request body:
+     *   {
+     *     "serial_number": "7893267563",
+     *     "contacts": [
+     *       { "index": 1, "name": "Mom",    "number": "9691905903" },
+     *       { "index": 2, "name": "Dad",    "number": "9510589322" },
+     *       { "index": 3, "name": "Sister", "number": "9587374638", "photo": "" }
+     *     ]
+     *   }
+     *
+     * The `index` field is the watch's phonebook slot (1..30). Photo is
+     * optional and currently not used (empty string OK).
+     */
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      contacts: Joi.array()
+        .items(
+          Joi.object({
+            index: Joi.number().integer().min(1).max(30).required().messages({
+              "number.base": "index must be a number (1..30)",
+              "number.min": "index must be between 1 and 30",
+              "number.max": "index must be between 1 and 30",
+              "any.required": "index is required",
+            }),
+            name: Joi.string().required().messages({
+              "string.empty": "name is required",
+              "any.required": "name is required",
+            }),
+            number: Joi.string()
+              .pattern(/^[0-9+\-\s()]{5,20}$/)
+              .required()
+              .messages({
+                "string.empty": "number is required",
+                "any.required": "number is required",
+                "string.pattern.base":
+                  "number must be a valid phone (5-20 chars, digits/+/-/space/parentheses)",
+              }),
+            photo: Joi.string().optional().allow(null, "").default(""),
+          })
+        )
+        .min(1)
+        .max(30)
+        .unique("index")
+        .required()
+        .messages({
+          "array.min": "At least one contact is required",
+          "array.max": "Maximum 30 contacts allowed",
+          "array.unique": "index values must be unique (1..30)",
+          "any.required": "contacts array is required",
+        }),
+    }),
+  },
   alarm: {
     set: Joi.object({
       serial_number: Joi.string().required().messages({

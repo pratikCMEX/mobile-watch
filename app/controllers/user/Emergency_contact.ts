@@ -694,15 +694,200 @@ async function saveEmergencyContacts(
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// Phonebook (PHBX) — up to 30 contacts on the watch
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Build the wire-format packet string for a single PHBX entry.
+ */
+const buildPhonebookProtocolString = (
+  serialNumber: string,
+  index: number,
+  name: string,
+  number: string,
+  photo: string
+): string => {
+  const content = `PHBX,${index},${name},${number},${photo}`;
+  const length = content.length.toString(16).padStart(4, "0");
+  return `[3G*${serialNumber}*${length}*${content}]`;
+};
+
+/**
+ * Push the watch's phonebook (PHBX command).
+ *
+ * Request body:
+ *   {
+ *     "serial_number": "7893267563",
+ *     "contacts": [
+ *       { "index": 1, "name": "Mom",    "number": "9691905903" },
+ *       { "index": 2, "name": "Dad",    "number": "9510589322" },
+ *       { "index": 3, "name": "Sister", "number": "9587374638" }
+ *     ]
+ *   }
+ *
+ * Per spec:
+ *   - Up to 30 contacts, slot indices 1..30.
+ *   - Each is sent as one PHBX packet:
+ *       [3G*<id>*LEN*PHBX,<index>,<name>,<number>,<photo>]
+ *   - Photo data is optional (empty string for now).
+ *   - Device replies with [3G*<id>*0002*PHBX,<status>] (1=ok, 0=fail).
+ *
+ * Numbers are auto-prefixed with the default country code (91 for
+ * India) if they're 10 digits and a country code isn't already present.
+ */
+async function setPhonebook(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { serial_number, contacts } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+    if (!Array.isArray(contacts) || contacts.length === 0) {
+      return errorMessage(res, "contacts[] is required (1-30 entries)");
+    }
+    if (contacts.length > 30) {
+      return errorMessage(res, "Maximum 30 phonebook contacts allowed");
+    }
+
+    // Indices must be 1..30 and unique across the batch.
+    const indices = contacts.map((c: any) => Number(c.index));
+    if (indices.some((i: number) => !Number.isInteger(i) || i < 1 || i > 30)) {
+      return errorMessage(res, "Each contact.index must be an integer 1..30");
+    }
+    if (new Set(indices).size !== indices.length) {
+      return errorMessage(res, "index values must be unique (1..30)");
+    }
+
+    // Look up the device
+    const device = await db.Device.findOne({ where: { serial_number } });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+    if (!device.serial_number) {
+      return errorMessage(
+        res,
+        `Device ${device.id} has no serial_number, cannot push phonebook`
+      );
+    }
+
+    // Verify the device is online
+    const tcpClient = tcpServer.getDevice(device.serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Sort by index ASC so we always push slot 1 first, 2 second, etc.
+    const sorted = [...contacts].sort(
+      (a, b) => Number(a.index) - Number(b.index)
+    );
+
+    const wireResults: Array<{
+      index: number;
+      name: string;
+      number: string;
+      digits: string;
+      sent: boolean;
+      protocol: string;
+    }> = [];
+
+    let allSent = true;
+
+    for (const c of sorted) {
+      const index = Number(c.index);
+      const name = String(c.name || `Contact ${index}`).trim();
+      const digits = normalizeSosPhone(c.number);
+      const photo = c.photo || "";
+
+      if (!digits) {
+        allSent = false;
+        wireResults.push({
+          index,
+          name,
+          number: c.number,
+          digits: "",
+          sent: false,
+          protocol: "",
+        });
+        continue;
+      }
+
+      const sent = tcpServer.sendPhonebookCommand(
+        device.serial_number,
+        index,
+        name,
+        digits,
+        photo
+      );
+      if (!sent) allSent = false;
+
+      const protocol = buildPhonebookProtocolString(
+        device.serial_number,
+        index,
+        name,
+        digits,
+        photo
+      );
+
+      wireResults.push({
+        index,
+        name,
+        number: digits,
+        digits,
+        sent,
+        protocol,
+      });
+
+      Logging.info(
+        `PHBX slot ${index} -> device ${device.serial_number}: ${protocol}`
+      );
+    }
+
+    if (!allSent) {
+      return errorMessage(
+        res,
+        "One or more PHBX entries failed to send. Device may be disconnected.",
+        { wire_results: wireResults }
+      );
+    }
+
+    return successMessage(
+      res,
+      `Phonebook pushed successfully (${wireResults.length} entries)`,
+      {
+        serial_number: device.serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        command_sent: true,
+        count: wireResults.length,
+        wire_results: wireResults,
+        command_message: `Sent ${wireResults.length} phonebook entry(ies) to the device via PHBX. The watch will reply with [3G*<id>*0002*PHBX,<status>] for each (1=success, 0=failure).`,
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err) {
+    console.error("setPhonebook error:", err);
+    return errorMessage(res, "Error pushing phonebook to device");
+  }
+}
+
 export {
   createOrUpdateEmergencyContact,
   saveEmergencyContacts,
   deleteEmergencyContact,
   allEmergencyContact,
   getEmergencyContact,
+  setPhonebook,
   setSosNumbers, // legacy wrapper, delegates to createOrUpdateEmergencyContact
   // Internal helpers exported only for tests / advanced callers:
   syncSosNumbersToDevice,
   normalizeSosPhone,
   buildSosProtocolString,
+  buildPhonebookProtocolString,
 };

@@ -412,6 +412,10 @@ class TcpServer {
         this.handleImageResponse(client, parsed);
         break;
 
+      case "PHBX":
+        this.handlePhonebookResponse(client, parsed);
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -1315,6 +1319,34 @@ class TcpServer {
    * - TIMESTAMP: YYMMDDHHmmss format
    * - BINARY_DATA: Raw JPEG image bytes
    */
+
+  /**
+   * Handle a PHBX response from the device.
+   *
+   * Device reply:  [3G*YYYYYYYYYY*0002*PHBX,<status>]
+   *   status: 1 = success, 0 = failure
+   *
+   * We log the outcome. No echo is required (unlike LK).
+   */
+  private handlePhonebookResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "1";
+    Logging.info(
+      `PHBX response from device ${packet.deviceId}: status=${status} (${
+        ok ? "OK" : "FAILED"
+      })`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from PHBX: ${error.message}`
+      )
+    );
+    void client;
+  }
+
   private handleRawImagePacket(client: TcpClient, rawPacket: string): void {
     try {
       // Parse the header: [3G*DEVICEID*LENGTH*img,
@@ -2345,6 +2377,89 @@ class TcpServer {
 
     this.send(client, command);
 
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Phonebook (PHBX) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a single phonebook entry to the device.
+   *
+   * Protocol format:
+   *   [3G*YYYYYYYYYY*LEN*PHBX,<index>,<name>,<number>,<photoData>]
+   *
+   * Example (no photo):
+   *   [3G*7893267563*0017*PHBX,1,Mom,9691905903,]
+   *
+   * - index:    1-30 (slot on the watch's phonebook)
+   * - name:     Unicode (UTF-8)
+   * - number:   ASCII digits (+/- allowed on the wire, but we strip
+   *             defensively so the dialler doesn't reject it)
+   * - photoData: optional, leave empty string for no photo
+   *
+   * Device reply:
+   *   [3G*YYYYYYYYYY*0002*PHBX,<status>]
+   *   status: 1 = success, 0 = failure
+   *
+   * @param deviceId  - The device ID (e.g. 7893267563)
+   * @param index     - Phonebook slot 1..30
+   * @param name      - Contact name (Unicode OK)
+   * @param number    - Phone number (we send digits-only; country code
+   *                    is expected to already be included)
+   * @param photoData - Optional photo blob (hex/base64). Empty string
+   *                    means "no photo".
+   * @returns true if the command was written to the socket
+   */
+  public sendPhonebookCommand(
+    deviceId: string,
+    index: number,
+    name: string,
+    number: string,
+    photoData: string = ""
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send PHBX command.`
+      );
+      return false;
+    }
+
+    if (!Number.isInteger(index) || index < 1 || index > 30) {
+      Logging.error(
+        `PHBX index ${index} out of range (must be 1-30) for device ${deviceId}`
+      );
+      return false;
+    }
+
+    // Clean the phone number to digits so the watch's dialler accepts it.
+    const digits = (number || "").replace(/[^0-9]/g, "");
+    if (!digits) {
+      Logging.error(
+        `Refusing to send PHBX with empty phone number to device ${deviceId}`
+      );
+      return false;
+    }
+
+    // Strip control chars / commas from the name so it can't break the
+    // bracketed payload.
+    const safeName = (name || "").replace(/[,\[\]\r\n]/g, " ").trim();
+
+    const photo = photoData || "";
+
+    const content = `PHBX,${index},${safeName},${digits},${photo}`;
+    // LEN is hex (consistent with all other commands on this device).
+    const length = content.length.toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending phonebook (PHBX) entry #${index} to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
     return true;
   }
 
