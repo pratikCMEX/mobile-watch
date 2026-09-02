@@ -416,6 +416,10 @@ class TcpServer {
         this.handlePhonebookResponse(client, parsed);
         break;
 
+      case "DPHBX":
+        this.handleDeletePhonebookResponse(client, parsed);
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -1323,25 +1327,61 @@ class TcpServer {
   /**
    * Handle a PHBX response from the device.
    *
-   * Device reply:  [3G*YYYYYYYYYY*0002*PHBX,<status>]
+   * Per the spec, the device replies with:
+   *   [3G*<id>*LEN*PHBX,<status>]
    *   status: 1 = success, 0 = failure
    *
-   * We log the outcome. No echo is required (unlike LK).
+   * In practice, the device on this firmware often replies with a
+   * bare ACK containing just the command word and no status payload:
+   *   [3G*<id>*0004*PHBX]
+   *
+   * That bare ACK means "I received the command" — we treat an empty
+   * status payload as a successful ack (the contact was saved).
+   * Only an explicit "0" status is treated as a failure.
    */
   private handlePhonebookResponse(
     client: TcpClient,
     packet: ParsedPacket
   ): void {
     const status = (packet.payload || "").trim();
-    const ok = status === "1";
+    const ok = status === "" || status === "1";
     Logging.info(
-      `PHBX response from device ${packet.deviceId}: status=${status} (${
-        ok ? "OK" : "FAILED"
-      })`
+      `PHBX response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
     );
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from PHBX: ${error.message}`
+      )
+    );
+    void client;
+  }
+
+  /**
+   * Handle a DPHBX response from the device.
+   *
+   * The device replies with the DPHBX command word (often with no
+   * payload, just an ack):
+   *   [3G*<id>*0005*DPHBX]            ← bare ack (success)
+   *   [3G*<id>*0006*DPHBX,0]          ← explicit failure
+   *
+   * Empty payload = success.
+   */
+  private handleDeletePhonebookResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `DPHBX response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from DPHBX: ${error.message}`
       )
     );
     void client;
@@ -2412,6 +2452,15 @@ class TcpServer {
    *                    means "no photo".
    * @returns true if the command was written to the socket
    */
+
+  private encodeUnicodeHex(str: string): string {
+    let hex = "";
+    for (const ch of str) {
+      const code = ch.charCodeAt(0);
+      hex += code.toString(16).padStart(4, "0");
+    }
+    return hex;
+  }
   public sendPhonebookCommand(
     deviceId: string,
     index: number,
@@ -2444,13 +2493,23 @@ class TcpServer {
       return false;
     }
 
+    // If we get a 10-digit national number with no country code, prepend
+    // the default one (same convention as SOS). Override with
+    // SOS_DEFAULT_COUNTRY_CODE.
+    const DEFAULT_CC = (process.env.SOS_DEFAULT_COUNTRY_CODE || "91").replace(
+      /[^0-9]/g,
+      ""
+    );
+    const finalDigits =
+      DEFAULT_CC && digits.length === 10 ? DEFAULT_CC + digits : digits;
+
     // Strip control chars / commas from the name so it can't break the
     // bracketed payload.
-    const safeName = (name || "").replace(/[,\[\]\r\n]/g, " ").trim();
-
+    const cleanName = (name || "").replace(/[,\[\]\r\n]/g, " ").trim();
+    const safeName = this.encodeUnicodeHex(cleanName);
     const photo = photoData || "";
 
-    const content = `PHBX,${index},${safeName},${digits},${photo}`;
+    const content = `PHBX,${index},${safeName},${finalDigits},${photo}`;
     // LEN is hex (consistent with all other commands on this device).
     const length = content.length.toString(16).padStart(4, "0");
     const command = `[3G*${deviceId}*${length}*${content}]`;
@@ -2508,7 +2567,15 @@ class TcpServer {
       return false;
     }
 
-    const content = `DPHBX,${digits}`;
+    // Auto-prepend default country code for 10-digit national numbers.
+    const DEFAULT_CC = (process.env.SOS_DEFAULT_COUNTRY_CODE || "91").replace(
+      /[^0-9]/g,
+      ""
+    );
+    const finalDigits =
+      DEFAULT_CC && digits.length === 10 ? DEFAULT_CC + digits : digits;
+
+    const content = `DPHBX,${finalDigits}`;
     // LEN is hex (consistent with all other commands on this device).
     const length = content.length.toString(16).padStart(4, "0");
     const command = `[3G*${deviceId}*${length}*${content}]`;

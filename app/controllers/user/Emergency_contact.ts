@@ -18,7 +18,7 @@ import { tcpServer } from "../../app";
  * Override with the env var SOS_DEFAULT_COUNTRY_CODE.
  */
 const DEFAULT_COUNTRY_CODE = (
-  process.env.SOS_DEFAULT_COUNTRY_CODE || ""
+  process.env.SOS_DEFAULT_COUNTRY_CODE || "91"
 ).replace(/[^0-9]/g, "");
 
 /**
@@ -701,6 +701,14 @@ async function saveEmergencyContacts(
 /**
  * Build the wire-format packet string for a single PHBX entry.
  */
+const encodeUnicodeHex = (str: string): string => {
+  let hex = "";
+  for (const ch of str) {
+    hex += ch.charCodeAt(0).toString(16).padStart(4, "0");
+  }
+  return hex;
+};
+
 const buildPhonebookProtocolString = (
   serialNumber: string,
   index: number,
@@ -708,7 +716,8 @@ const buildPhonebookProtocolString = (
   number: string,
   photo: string
 ): string => {
-  const content = `PHBX,${index},${name},${number},${photo}`;
+  const encodedName = encodeUnicodeHex(name);
+  const content = `PHBX,${index},${encodedName},${number},${photo}`;
   const length = content.length.toString(16).padStart(4, "0");
   return `[3G*${serialNumber}*${length}*${content}]`;
 };
