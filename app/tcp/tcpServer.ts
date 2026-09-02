@@ -109,7 +109,9 @@ class TcpServer {
 
     socket.on("data", (data: Buffer) => {
       try {
-        buffer += data.toString("utf8");
+        // Use latin1 encoding to preserve binary data (JPEG images)
+        // utf8 would corrupt bytes that are not valid UTF-8 sequences
+        buffer += data.toString("latin1");
 
         const packets = this.extractPackets(buffer);
 
@@ -124,7 +126,13 @@ class TcpServer {
         buffer = packets.remaining;
 
         for (const packet of packets.packets) {
-          this.handleMessage(client, packet);
+          // Check if this is an image packet (contains binary data)
+          if (packet.match(/^\[3G\*\d+\*[0-9A-Fa-f]+\*img,/)) {
+            // Handle image packet specially
+            this.handleRawImagePacket(client, packet);
+          } else {
+            this.handleMessage(client, packet);
+          }
         }
       } catch (error) {
         Logging.error(
@@ -269,12 +277,42 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleMessage(client: TcpClient, message: string): void {
-    Logging.info(`GPS packet from ${client.id}: ${message}`);
+    Logging.info(
+      `GPS packet from ${client.id}: ${message.substring(0, 80)}...`
+    );
+
+    // Check if this is an image packet (contains binary JPEG data)
+    // Image packets start with [3G*DEVICEID*LENGTH*img,
+    const imgMatch = message.match(/^\[3G\*(\d+)\*[0-9A-Fa-f]+\*img,/);
+    if (imgMatch) {
+      // Handle image packet directly without parsing (binary data breaks parser)
+      const deviceId = imgMatch[1];
+      client.deviceId = deviceId;
+
+      // Extract payload after "img,"
+      const imgPrefix = message.indexOf("*img,");
+      const payload = message.substring(imgPrefix + 5);
+
+      const parsed: ParsedPacket = {
+        raw: message,
+        manufacturer: "3G",
+        deviceId: deviceId,
+        length: message.split("*")[2],
+        content: "img," + payload,
+        command: "img",
+        payload: payload,
+      };
+
+      this.handleImageResponse(client, parsed);
+      return;
+    }
 
     const parsed = this.parsePacket(message);
 
     if (!parsed) {
-      Logging.error(`Invalid GPS packet from ${client.id}: ${message}`);
+      Logging.error(
+        `Invalid GPS packet from ${client.id}: ${message.substring(0, 80)}`
+      );
 
       return;
     }
@@ -1259,6 +1297,101 @@ class TcpServer {
     } catch (error) {
       Logging.error(
         `Failed to process image from device ${packet.deviceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  /**
+   * Handle raw image packet from binary buffer data.
+   *
+   * This method processes image data directly from the TCP buffer
+   * to avoid UTF-8 conversion corruption of binary JPEG data.
+   *
+   * Packet format: [3G*DEVICEID*LENGTH*img,TYPE,TIMESTAMP,BINARY_DATA]
+   * - LENGTH: Hex length of the packet content (excluding brackets)
+   * - TYPE: Image type (5 = remote snapshot)
+   * - TIMESTAMP: YYMMDDHHmmss format
+   * - BINARY_DATA: Raw JPEG image bytes
+   */
+  private handleRawImagePacket(client: TcpClient, rawPacket: string): void {
+    try {
+      // Parse the header: [3G*DEVICEID*LENGTH*img,
+      const headerMatch = rawPacket.match(/^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*img,/);
+      if (!headerMatch) {
+        Logging.error(`Invalid image packet header from ${client.id}`);
+        return;
+      }
+
+      const deviceId = headerMatch[1];
+      const packetLength = parseInt(headerMatch[2], 16);
+
+      // Store device ID
+      client.deviceId = deviceId;
+
+      // Find the timestamp (12 digits: YYMMDDHHmmss)
+      const afterImg = rawPacket.substring(rawPacket.indexOf("*img,") + 5);
+      const timestampMatch = afterImg.match(/^(\d{12}),/);
+
+      if (!timestampMatch) {
+        Logging.error(`Invalid image timestamp from device ${deviceId}`);
+        return;
+      }
+
+      const timestamp = timestampMatch[1];
+
+      // Calculate where binary data starts in the raw string
+      // Format: [3G*DEVICEID*LEN*img,TYPE,12TIMESTAMP_BINARY]
+      const headerEnd = rawPacket.indexOf(timestamp) + timestamp.length + 1;
+
+      // Extract binary data (everything between timestamp+comma and closing bracket)
+      const binaryString = rawPacket.substring(headerEnd, rawPacket.length - 1);
+
+      Logging.info(
+        `Raw image from device ${deviceId}: timestamp=${timestamp}, dataLength=${binaryString.length}`
+      );
+
+      // Convert binary string to Buffer
+      const imageBuffer = Buffer.from(binaryString, "binary");
+
+      // Generate filename
+      const filename = `snapshot_${deviceId}_${timestamp}.jpg`;
+      const filepath = `./uploads/snapshots/${filename}`;
+
+      // Ensure directory exists
+      const fs = require("fs");
+      const path = require("path");
+      const dir = path.dirname(filepath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      // Save the image
+      fs.writeFileSync(filepath, imageBuffer);
+      Logging.info(`Snapshot saved: ${filepath}`);
+
+      // Save to database
+      this.findDevice(deviceId)
+        .then((device) => {
+          if (!device) return;
+
+          return db.Snapshot.create({
+            device_id: device.id,
+            image_url: filename,
+          });
+        })
+        .then(() => {
+          Logging.info(`Snapshot record created for device ${deviceId}`);
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save snapshot for device ${deviceId}: ${error.message}`
+          )
+        );
+    } catch (error) {
+      Logging.error(
+        `Failed to process raw image packet: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
