@@ -167,6 +167,14 @@ export const Schemas = {
     }),
   },
 
+  deviceRestart: {
+    restart: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+    }),
+  },
   familyMember: {
     create: Joi.object({
       name: Joi.string().required(),

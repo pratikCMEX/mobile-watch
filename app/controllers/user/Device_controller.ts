@@ -326,7 +326,7 @@ const restartDevice = async (
   next: NextFunction
 ) => {
   try {
-    const { serial_number } = req.params;
+    const { serial_number } = req.body;
 
     if (!serial_number) {
       return errorMessage(res, "serial_number is required");

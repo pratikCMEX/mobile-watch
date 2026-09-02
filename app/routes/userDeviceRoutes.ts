@@ -36,9 +36,10 @@ router.get(
 );
 
 // Restart device (sends RESET command to device via TCP)
-router.get(
-  "/restart_device/:serial_number",
+router.post(
+  "/restart_device",
   checkToken,
+  ValidateJoi(Schemas.deviceRestart.restart),
   Device_controller.restartDevice
 );
 
