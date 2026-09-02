@@ -175,6 +175,21 @@ export const Schemas = {
       }),
     }),
   },
+  deviceCommand: {
+    send: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      command: Joi.number().integer().valid(1, 2, 3).required().messages({
+        "number.base": "command is required and must be a number",
+        "number.integer": "command must be an integer",
+        "any.only":
+          "command must be 1 (restart), 2 (shutdown), or 3 (factory_reset)",
+        "any.required": "command is required",
+      }),
+    }),
+  },
   familyMember: {
     create: Joi.object({
       name: Joi.string().required(),

@@ -43,6 +43,15 @@ router.post(
   Device_controller.restartDevice
 );
 
+// Unified device command API
+// command: 1 = restart, 2 = shutdown, 3 = factory_reset
+router.post(
+  "/device_command",
+  checkToken,
+  ValidateJoi(Schemas.deviceCommand.send),
+  Device_controller.sendDeviceCommand
+);
+
 router.post(
   "/add_family_member",
   checkToken,

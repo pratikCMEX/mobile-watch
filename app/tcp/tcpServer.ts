@@ -1898,6 +1898,84 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Send Shutdown (POWEROFF) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a POWEROFF (shutdown) command to a specific device.
+   *
+   * Protocol format: [CS*YYYYYYYYYY*LEN*POWEROFF]
+   *
+   * Example: [3G*5678901234*0008*POWEROFF]
+   *
+   * The device will shut down and disconnect from the network.
+   *
+   * @param deviceId - The device ID (e.g. 8800000015)
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendShutdownCommand(deviceId: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send POWEROFF command.`
+      );
+
+      return false;
+    }
+
+    // Calculate length: "POWEROFF" has 8 characters
+    const command = `[CS*${deviceId}*0008*POWEROFF]`;
+
+    Logging.info(
+      `Sending shutdown (POWEROFF) command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Factory Reset (FACTORY) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a FACTORY (factory reset) command to a specific device.
+   *
+   * Protocol format: [CS*YYYYYYYYYY*LEN*FACTORY]
+   *
+   * Example: [3G*8800000015*0007*FACTORY]
+   *
+   * The device will perform a factory reset and restore default settings.
+   *
+   * @param deviceId - The device ID (e.g. 8800000015)
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendFactoryCommand(deviceId: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send FACTORY command.`
+      );
+
+      return false;
+    }
+
+    // Calculate length: "FACTORY" has 7 characters
+    const command = `[CS*${deviceId}*0007*FACTORY]`;
+
+    Logging.info(
+      `Sending factory reset (FACTORY) command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Connection ID
   // ───────────────────────────────────────────────────────────
 
