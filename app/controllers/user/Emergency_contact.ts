@@ -911,51 +911,54 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Delete a single phonebook entry on the watch (DPHBX command)
+// Clear a single phonebook slot on the watch
+//
+// Per the latest protocol spec, this firmware clears a slot by sending
+// PHBX again at the same slot index with an EMPTY name field. There is
+// no separate DPHBX command word on this firmware. The matching is by
+// SLOT INDEX (1..30), not by phone number.
+//
+//   Server → Watch : [3G*<id>*LEN*PHBX,<index>,,<number>,]
+//   Watch → Server : [3G*<id>*0004*PHBX]               (ack = success)
+//                    [3G*<id>*0006*PHBX,0]             (failure)
+//                    [3G*<id>*0006*PHBX,1]             (explicit success)
+//
+// Request body:
+//   {
+//     "serial_number": "7893267563",
+//     "index":         1,                        // required, 1..30
+//     "number":        "919691905903"            // optional, but recommended
+//   }
+//
+// We don't persist phonebook rows in DB — it lives only on the watch.
+// If you later add a `DevicePhonebook` table, delete the matching row
+// here too.
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Delete a single phonebook entry on the device by phone number.
- *
- * Per spec:
- *   Server → Watch : [3G*<id>*LEN*DPHBX,<number>]
- *   Watch → Server : [3G*<id>*0002*PHBX,<status>] (1=ok, 0=fail)
- *
- * The watch matches the entry by phone number (digits-only, with the
- * country code already included) and removes the contact AND any
- * avatar/photo attached to it.
- *
- * Request body:
- *   { "serial_number": "7893267563", "number": "919691905903" }
- *
- * No DB persistence — phonebook lives only on the watch. If you later
- * add a `DevicePhonebook` table, this is the place to delete the row
- * too.
- */
 async function deletePhonebookContact(
   req: Request,
   res: Response,
   next: NextFunction
 ) {
   try {
-    const { serial_number, number } = req.body;
+    const { serial_number, index, number } = req.body;
 
     if (!serial_number) {
       return errorMessage(res, "serial_number is required");
     }
-    if (!number) {
-      return errorMessage(res, "number is required");
+    if (
+      typeof index !== "number" ||
+      !Number.isInteger(index) ||
+      index < 1 ||
+      index > 30
+    ) {
+      return errorMessage(res, "index is required (integer 1..30)");
     }
 
-    // Normalize the number the same way we do for PHBX (strip non-digits,
-    // auto-prepend the default country code for 10-digit Indian mobiles).
-    const digits = normalizeSosPhone(String(number));
-    if (!digits) {
-      return errorMessage(
-        res,
-        "number must contain at least one digit (e.g. 919691905903 or +91 96919 05903)"
-      );
-    }
+    // Number is optional. If provided, normalize it the same way PHBX
+    // set does (strip non-digits, auto-prepend default country code for
+    // 10-digit Indian mobiles).
+    const digits = number ? normalizeSosPhone(String(number)) : "";
 
     const device = await db.Device.findOne({ where: { serial_number } });
     if (!device) {
@@ -967,7 +970,7 @@ async function deletePhonebookContact(
     if (!device.serial_number) {
       return errorMessage(
         res,
-        `Device ${device.id} has no serial_number, cannot delete phonebook entry`
+        `Device ${device.id} has no serial_number, cannot clear phonebook slot`
       );
     }
 
@@ -981,38 +984,51 @@ async function deletePhonebookContact(
 
     const sent = tcpServer.sendDeletePhonebookCommand(
       device.serial_number,
+      index,
       digits
     );
 
     if (!sent) {
       return errorMessage(
         res,
-        "Failed to send DPHBX command. Device may be disconnected."
+        "Failed to clear PHBX slot. Device may be disconnected."
       );
     }
 
-    // Build the protocol string for the response (same as what was sent)
-    const content = `DPHBX,${digits}`;
-    const length = content.length.toString(16).padStart(4, "0");
+    // Build the protocol string for the response (same as what was sent).
+    // PHBX,<index>,,<number>,
+    const content = `PHBX,${index},,${digits},`;
+    const length = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
     const protocol = `[3G*${device.serial_number}*${length}*${content}]`;
 
     Logging.info(
-      `DPHBX number ${digits} -> device ${device.serial_number}: ${protocol}`
+      `PHBX clear slot #${index} (number=${digits || "<empty>"}) ` +
+        `-> device ${device.serial_number}: ${protocol}`
     );
 
-    return successMessage(res, "Phonebook entry deleted successfully", {
+    return successMessage(res, "Phonebook slot cleared successfully", {
       serial_number: device.serial_number,
       device_id: device.id,
       device_name: device.device_name,
+      index,
       number: digits,
       command_sent: true,
       protocol,
-      command_message: `Sent DPHBX to delete phonebook entry for number ${digits} on the device. The watch will reply with [3G*<id>*0002*PHBX,<status>] (1=success, 0=failure). The contact AND any avatar/photo are cleared.`,
+      command_message:
+        `Sent PHBX clear-slot command for index #${index} (${
+          digits || "no number"
+        }) ` +
+        `on device ${device.serial_number}. The wire packet is ` +
+        `[3G*<id>*LEN*PHBX,<index>,,<number>,] — the empty name field tells the ` +
+        `firmware to wipe the slot. Watch will reply with [3G*<id>*0004*PHBX] ` +
+        `(bare ack = success) or [3G*<id>*0006*PHBX,0] (failure).`,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
     console.error("deletePhonebookContact error:", err);
-    return errorMessage(res, "Error deleting phonebook entry");
+    return errorMessage(res, "Error clearing phonebook slot");
   }
 }
 

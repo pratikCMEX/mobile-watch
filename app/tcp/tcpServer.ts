@@ -2591,65 +2591,83 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
-  // Send Delete-Phonebook (DPHBX) command to device
+  // Clear a phonebook slot (PHBX with empty name)
   // ───────────────────────────────────────────────────────────
 
   /**
-   * Delete a single phonebook entry on the device (clears the contact AND
-   * any avatar/photo that was attached to it).
+   * Clear a single phonebook slot on the device.
    *
-   * Protocol format:
-   *   [3G*YYYYYYYYYY*LEN*DPHBX,<number>]
+   * IMPORTANT — per the latest protocol spec from the vendor, this
+   * firmware does NOT actually understand a separate `DPHBX` command word.
+   * The spec only defines PHBX for setting entries, and the way to clear
+   * a slot is to re-send the same PHBX packet at that slot index with
+   * an EMPTY name. The firmware interprets that as "delete this slot".
    *
-   * Example (deleting +91 96919 05903):
-   *   [3G*7893267563*0016*DPHBX,919691905903]
+   *   Wire: [3G*<id>*LEN*PHBX,<index>,,<number>,]
+   *   The index is the only required field; name is empty so the slot
+   *   is wiped (name + number + photo).
    *
-   * Device reply (uses the same PHBX command word with a status):
-   *   [3G*YYYYYYYYYY*0002*PHBX,<status>]
-   *   status: 1 = success, 0 = failure
+   * If `number` is provided we still send it on the wire (some firmwares
+   * require it to match the existing slot's number to confirm which
+   * entry to delete). If it's not provided we send an empty number.
    *
-   * The watch matches the entry by phone number (digits-only, with the
-   * country code already included) and removes it from the phonebook.
+   * Device reply (same as for a successful set):
+   *   [3G*<id>*0004*PHBX]            (bare ack = OK)
+   *   [3G*<id>*0006*PHBX,0]          (failure)
+   *   [3G*<id>*0006*PHBX,1]          (explicit success)
    *
    * @param deviceId  - The device ID (e.g. 7893267563)
-   * @param number    - Phone number to delete, digits-only with country
-   *                    code (e.g. "919691905903" for +91 96919 05903)
+   * @param index     - Phonebook slot 1..30 to clear
+   * @param number    - Optional. Phone number that was in the slot
+   *                    (digits-only, country code included). If omitted
+   *                    or empty, an empty number field is sent.
    * @returns true if the command was written to the socket
    */
-  public sendDeletePhonebookCommand(deviceId: string, number: string): boolean {
+  public sendDeletePhonebookCommand(
+    deviceId: string,
+    index: number,
+    number: string = ""
+  ): boolean {
     const client = this.devices.get(deviceId);
 
     if (!client) {
       Logging.error(
-        `Device ${deviceId} is not connected. Cannot send DPHBX command.`
+        `Device ${deviceId} is not connected. Cannot clear PHBX slot.`
       );
       return false;
     }
 
-    // Clean the number to digits so the watch's dialler matches it.
-    const digits = (number || "").replace(/[^0-9]/g, "");
-    if (!digits) {
+    if (!Number.isInteger(index) || index < 1 || index > 30) {
       Logging.error(
-        `Refusing to send DPHBX with empty phone number to device ${deviceId}`
+        `PHBX clear index ${index} out of range (must be 1-30) for device ${deviceId}`
       );
       return false;
     }
 
     // Auto-prepend default country code for 10-digit national numbers.
-    const DEFAULT_CC = (process.env.SOS_DEFAULT_COUNTRY_CODE || "91").replace(
-      /[^0-9]/g,
-      ""
-    );
-    const finalDigits =
-      DEFAULT_CC && digits.length === 10 ? DEFAULT_CC + digits : digits;
+    const digits = (number || "").replace(/[^0-9]/g, "");
+    let finalDigits = digits;
+    if (digits) {
+      const DEFAULT_CC = (process.env.SOS_DEFAULT_COUNTRY_CODE || "91").replace(
+        /[^0-9]/g,
+        ""
+      );
+      if (DEFAULT_CC && digits.length === 10) {
+        finalDigits = DEFAULT_CC + digits;
+      }
+    }
 
-    const content = `DPHBX,${finalDigits}`;
-    // LEN is hex (consistent with all other commands on this device).
-    const length = content.length.toString(16).padStart(4, "0");
+    // Clear-slot packet: PHBX,<index>,,<number>,
+    // The third field (name) is EMPTY — that's the "clear this slot"
+    // signal on this firmware. Encoding is hex for the empty name, which
+    // is the literal empty string "".
+    const content = `PHBX,${index},,${finalDigits},`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
     const command = `[3G*${deviceId}*${length}*${content}]`;
 
     Logging.info(
-      `Sending delete-phonebook (DPHBX) for number ${digits} to device ${deviceId}: ${command}`
+      `Clearing phonebook (PHBX) slot #${index} on device ${deviceId} ` +
+        `(was: ${finalDigits || "<empty>"}): ${command}`
     );
 
     this.send(client, command);

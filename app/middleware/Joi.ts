@@ -348,26 +348,41 @@ export const Schemas = {
     }),
 
     /**
-     * Delete a single phonebook entry on the watch by phone number
-     * (clears name, number AND any avatar/photo attached to that entry).
+     * Clear a single phonebook slot on the watch.
      *
      * Request body:
-     *   { "serial_number": "7893267563", "number": "919691905903" }
+     *   {
+     *     "serial_number": "7893267563",
+     *     "index":         1,                     // required, 1..30
+     *     "number":        "919691905903"         // optional
+     *   }
      *
-     * Protocol: [3G*<id>*LEN*DPHBX,<number>]
-     * Device reply: [3G*<id>*0002*PHBX,<status>] (1=ok, 0=fail)
+     * Per the latest spec, this firmware clears a slot by sending PHBX
+     * again at the same slot index with an EMPTY name field. There is
+     * no separate DPHBX command word. Matching is by SLOT INDEX (1..30),
+     * not by phone number. The number, if provided, is sent on the wire
+     * so the firmware can confirm which entry to delete.
+     *
+     * Wire packet: [3G*<id>*LEN*PHBX,<index>,,<number>,]
+     * Device reply: [3G*<id>*0004*PHBX] (ack = success) or
+     *               [3G*<id>*0006*PHBX,0] (failure)
      */
     delete: Joi.object({
       serial_number: Joi.string().required().messages({
         "string.empty": "serial_number is required",
         "any.required": "serial_number is required",
       }),
+      index: Joi.number().integer().min(1).max(30).required().messages({
+        "number.base": "index must be a number (1..30)",
+        "number.min": "index must be between 1 and 30",
+        "number.max": "index must be between 1 and 30",
+        "any.required": "index is required (the slot number to clear)",
+      }),
       number: Joi.string()
         .pattern(/^[0-9+\-\s()]{5,20}$/)
-        .required()
+        .optional()
+        .allow(null, "")
         .messages({
-          "string.empty": "number is required",
-          "any.required": "number is required",
           "string.pattern.base":
             "number must be a valid phone (5-20 chars, digits/+/-/space/parentheses)",
         }),

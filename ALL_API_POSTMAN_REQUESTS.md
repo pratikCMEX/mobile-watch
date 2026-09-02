@@ -671,43 +671,53 @@ as a 4-digit uppercase hex value. Using `Buffer.byteLength(content,
 
 ---
 
-## 29. Delete Phonebook Entry (DPHBX)
+## 29. Clear Phonebook Slot (PHBX with empty name)
 
-Delete a single phonebook entry on the watch by **phone number**. The
-watch matches the entry by number and removes the contact info AND any
-avatar/photo that was attached to it.
+Clear a single phonebook slot on the watch. Per the latest protocol spec,
+this firmware clears a slot by sending PHBX again at the same slot index
+with an EMPTY name field. There is no separate DPHBX command word on
+this firmware. Matching is by **slot index** (1..30), not by phone
+number.
 
 Protocol sent to the watch:
-`[3G*<serial>*LEN*DPHBX,<number>]`
+`[3G*<serial>*LEN*PHBX,<index>,,<number>,]`
+
+The empty name field (two consecutive commas) is the "clear this slot"
+signal on this firmware. The number, if provided, is sent on the wire
+so the firmware can confirm which entry to delete.
 
 Device reply (uses the same PHBX command word):
-`[3G*<serial>*0002*PHBX,<status>]` where `status: 1=success, 0=failure`
+`[3G*<serial>*0004*PHBX]` (bare ack = success) or
+`[3G*<serial>*0006*PHBX,<status>]` where `status: 1=success, 0=failure`
 
-- `number`: the phone number to delete, **digits-only with country code**
-  (e.g. `919691905903` for `+91 96919 05903`). 10-digit Indian numbers
-  are auto-prefixed with `91` by the server.
+- `index` (required, integer 1..30): the watch's phonebook slot to clear.
+- `number` (optional): the phone number that was in the slot.
+  Digits-only with country code (e.g. `919691905903` for `+91 96919 05903`).
+  10-digit Indian numbers are auto-prefixed with `91` by the server.
 
 **POST** `/emergency_contact/delete_phonebook`
 
 ```json
 {
   "serial_number": "7893267563",
+  "index": 1,
   "number": "919691905903"
 }
 ```
 
 **Response fields:**
 
-| Field             | Type    | Description                                                        |
-| ----------------- | ------- | ------------------------------------------------------------------ |
-| `serial_number`   | string  | Device serial number (protocol ID)                                 |
-| `device_id`       | string  | Device UUID                                                        |
-| `device_name`     | string  | Device name                                                        |
-| `number`          | string  | Digits-only phone number that was sent (after normalization)       |
-| `command_sent`    | boolean | Whether the DPHBX command was written to the socket                |
-| `protocol`        | string  | Exact packet sent (e.g. `[3G*7893267563*0016*DPHBX,919691905903]`) |
-| `command_message` | string  | Human-readable summary                                             |
-| `timestamp`       | string  | ISO timestamp                                                      |
+| Field             | Type    | Description                                                           |
+| ----------------- | ------- | --------------------------------------------------------------------- |
+| `serial_number`   | string  | Device serial number (protocol ID)                                    |
+| `device_id`       | string  | Device UUID                                                           |
+| `device_name`     | string  | Device name                                                           |
+| `index`           | number  | Slot index that was cleared (1..30)                                   |
+| `number`          | string  | Digits-only phone number that was sent (after normalization)          |
+| `command_sent`    | boolean | Whether the PHBX clear-slot packet was written to the socket          |
+| `protocol`        | string  | Exact packet sent (e.g. `[3G*7893267563*0011*PHBX,1,,919691905903,]`) |
+| `command_message` | string  | Human-readable summary                                                |
+| `timestamp`       | string  | ISO timestamp                                                         |
 
 ---
 
