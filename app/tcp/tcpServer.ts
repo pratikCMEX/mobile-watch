@@ -213,6 +213,33 @@ class TcpServer {
         buffer = buffer.slice(startIndex);
       }
 
+      // Check if this is an image packet (contains binary data)
+      // Image packets have format: [3G*DEVICEID*LENGTH*img,TYPE,TIMESTAMP,DATA]
+      // The LENGTH field tells us the exact packet length
+      const imgMatch = buffer.match(/^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*img,/);
+      if (imgMatch) {
+        // Parse the length as hex
+        const packetLength = parseInt(imgMatch[2], 16);
+
+        // Check if we have enough data for the full packet
+        // +1 for the closing bracket
+        if (buffer.length >= packetLength + 1) {
+          const packet = buffer.slice(0, packetLength + 1);
+          buffer = buffer.slice(packetLength + 1);
+
+          if (packet.trim()) {
+            packets.push(packet.trim());
+          }
+          continue;
+        } else {
+          // Packet is incomplete, wait for more data
+          return {
+            packets,
+            remaining: buffer,
+          };
+        }
+      }
+
       const endIndex = buffer.indexOf("]");
 
       /**
@@ -1160,23 +1187,39 @@ class TcpServer {
       }: ${packet.payload.substring(0, 50)}...`
     );
 
-    const parts = packet.payload.split(",");
-    if (parts.length < 3) {
+    // Parse image packet: img,TYPE,TIMESTAMP,BINARY_DATA
+    // The image data is raw binary (JPEG), not hex
+    const commaIndex = packet.payload.indexOf(",");
+    if (commaIndex === -1) {
       Logging.error(`Invalid image payload from device ${packet.deviceId}`);
       return;
     }
 
-    const imageType = parts[0]; // "5" for remote snapshot
-    const timestamp = parts[1]; // YYMMDDHHmmss format
-    const imageHexData = parts.slice(2).join(","); // Image hex data
+    const firstPart = packet.payload.substring(0, commaIndex);
+    const secondPart = packet.payload.substring(commaIndex + 1);
+    const secondCommaIndex = secondPart.indexOf(",");
+
+    if (secondCommaIndex === -1) {
+      Logging.error(`Invalid image payload from device ${packet.deviceId}`);
+      return;
+    }
+
+    const imageType = firstPart; // "5" for remote snapshot
+    const timestamp = secondPart.substring(0, secondCommaIndex); // YYMMDDHHmmss format
+    // The rest is binary image data - extract from raw packet
+    const headerEnd = packet.raw.indexOf(timestamp) + timestamp.length + 1;
+    const imageBinaryData = packet.raw.substring(
+      headerEnd,
+      packet.raw.length - 1
+    ); // Remove closing bracket
 
     Logging.info(
-      `Image type: ${imageType}, timestamp: ${timestamp}, data length: ${imageHexData.length}`
+      `Image type: ${imageType}, timestamp: ${timestamp}, data length: ${imageBinaryData.length}`
     );
 
-    // Convert hex to binary and save as JPEG
+    // Save binary data as JPEG
     try {
-      const imageBuffer = Buffer.from(imageHexData, "hex");
+      const imageBuffer = Buffer.from(imageBinaryData, "binary");
 
       // Generate filename from timestamp
       const filename = `snapshot_${packet.deviceId}_${timestamp}.jpg`;
