@@ -541,7 +541,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
       );
     }
 
-    const commandProtocol = `[CS*${serial_number}*0004*FIND]`;
+    const commandProtocol = `[3G*${serial_number}*0004*FIND]`;
 
     Logging.info(
       `Find device command sent to device ${serial_number} (device_id: ${device.id})`

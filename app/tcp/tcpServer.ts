@@ -2266,7 +2266,10 @@ class TcpServer {
     }
 
     // Calculate length: "FIND" has 4 characters
-    const command = `[CS*${deviceId}*0004*FIND]`;
+    // Use "3G" prefix to match the device's protocol for action commands
+    // (same family as RESET, TS, rcapture) so the device actually plays
+    // the find-my-device alert sound.
+    const command = `[3G*${deviceId}*0004*FIND]`;
 
     Logging.info(
       `Sending find device (FIND) command to device ${deviceId}: ${command}`
