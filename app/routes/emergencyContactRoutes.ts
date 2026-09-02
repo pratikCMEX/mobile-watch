@@ -9,6 +9,7 @@ import {
   getEmergencyContact,
   setPhonebook,
   deletePhonebookContact,
+  listPhonebook,
 } from "../controllers/user/Emergency_contact";
 
 const router = express.Router();
@@ -31,11 +32,22 @@ router.post(
   setPhonebook
 );
 
+// List all phonebook entries currently stored server-side for a device.
+// Paginated; returns slot_index, name, phone_number, country_code, photo
+// for every entry.
+router.post(
+  "/list_phonebook",
+  checkToken,
+  ValidateJoi(Schemas.phonebook.list),
+  listPhonebook
+);
+
 // Delete a single phonebook entry on the watch (clears name, number AND
-// any avatar/photo attached to that entry). Uses the DPHBX command.
+// any avatar/photo attached to that entry). Uses PHBX with all-empty
+// fields at the slot index.
 //
 // Body shape:
-//   { "serial_number": "7893267563", "number": "919691905903" }
+//   { "serial_number": "7893267563", "index": 1, "number": "919691905903" }
 router.post(
   "/delete_phonebook",
   checkToken,

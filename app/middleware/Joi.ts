@@ -387,6 +387,32 @@ export const Schemas = {
             "number must be a valid phone (5-20 chars, digits/+/-/space/parentheses)",
         }),
     }),
+
+    /**
+     * List all phonebook entries currently stored on the server for a
+     * device. Paginated; the response shape mirrors the DevicePhonebook
+     * table with a few derived fields (`digits`, `display_number`,
+     * `has_photo`).
+     *
+     * Request body:
+     *   {
+     *     "serial_number": "7893267563",
+     *     "search":        "Mom",     // optional, LIKE on name/number
+     *     "page":          1,         // 1-based
+     *     "limit":         30,        // default 30 (the watch's max)
+     *     "sorting":       "ASC"      // "ASC" | "DESC" by slot_index
+     *   }
+     */
+    list: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      search: Joi.string().optional().allow(null, "").default(""),
+      page: Joi.number().integer().min(1).optional().default(1),
+      limit: Joi.number().integer().min(1).max(30).optional().default(30),
+      sorting: Joi.string().valid("ASC", "DESC").optional().default("ASC"),
+    }),
   },
   alarm: {
     set: Joi.object({

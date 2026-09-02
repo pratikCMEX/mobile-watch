@@ -830,6 +830,15 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
       protocol: string;
     }> = [];
 
+    const dbResults: Array<{
+      id: string;
+      slot_index: number;
+      name: string;
+      phone_number: string;
+      country_code: string;
+      created: boolean;
+    }> = [];
+
     let allSent = true;
 
     for (const c of sorted) {
@@ -837,6 +846,19 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
       const name = String(c.name || `Contact ${index}`).trim();
       const digits = normalizeSosPhone(c.number);
       const photo = c.photo || "";
+
+      // Split the digits-only phone into country_code + national_number
+      // so analytics / display layers can format it back as +CC NNNNN NNNNN.
+      let cc = "";
+      let pn = digits;
+      if (
+        DEFAULT_COUNTRY_CODE &&
+        digits.startsWith(DEFAULT_COUNTRY_CODE) &&
+        digits.length > DEFAULT_COUNTRY_CODE.length
+      ) {
+        cc = DEFAULT_COUNTRY_CODE;
+        pn = digits.substring(DEFAULT_COUNTRY_CODE.length);
+      }
 
       if (!digits) {
         allSent = false;
@@ -851,6 +873,39 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
         continue;
       }
 
+      // ── Upsert into DevicePhonebook ──
+      // We persist BEFORE sending on the wire so that if the device is
+      // mid-disconnect we still have a server-side record. The unique
+      // index on (device_id, slot_index) gives us race-safe upsert.
+      const [row, created] = await db.DevicePhonebook.findOrCreate({
+        where: { device_id: device.id, slot_index: index },
+        defaults: {
+          device_id: device.id,
+          slot_index: index,
+          name,
+          phone_number: pn,
+          country_code: cc,
+          photo: photo || null,
+        },
+      });
+      if (!created) {
+        row.name = name;
+        row.phone_number = pn;
+        row.country_code = cc;
+        row.photo = photo || null;
+        await row.save();
+      }
+
+      dbResults.push({
+        id: row.id,
+        slot_index: index,
+        name,
+        phone_number: pn,
+        country_code: cc,
+        created,
+      });
+
+      // ── Send on the wire ──
       const sent = tcpServer.sendPhonebookCommand(
         device.serial_number,
         index,
@@ -886,7 +941,7 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
       return errorMessage(
         res,
         "One or more PHBX entries failed to send. Device may be disconnected.",
-        { wire_results: wireResults }
+        { wire_results: wireResults, db_results: dbResults }
       );
     }
 
@@ -900,7 +955,8 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
         command_sent: true,
         count: wireResults.length,
         wire_results: wireResults,
-        command_message: `Sent ${wireResults.length} phonebook entry(ies) to the device via PHBX. The watch will reply with [3G*<id>*0002*PHBX,<status>] for each (1=success, 0=failure).`,
+        db_results: dbResults,
+        command_message: `Sent ${wireResults.length} phonebook entry(ies) to the device via PHBX and stored them in DevicePhonebooks (server-side mirror). The watch will reply with [3G*<id>*0002*PHBX,<status>] for each (1=success, 0=failure). List them later via POST /emergency_contact/list_phonebook.`,
         timestamp: new Date().toISOString(),
       }
     );
@@ -1017,9 +1073,31 @@ async function deletePhonebookContact(
       .padStart(4, "0");
     const protocol = `[3G*${device.serial_number}*${length}*${content}]`;
 
+    // ── Remove the row from the server-side mirror ──
+    // We do this AFTER clearing on the wire so that if the wire clear
+    // fails the DB still has the old record (consistent with how
+    // setPhonebook persists before sending). The unique index on
+    // (device_id, slot_index) makes this a single-row delete.
+    const deletedRowCount = await db.DevicePhonebook.destroy({
+      where: { device_id: device.id, slot_index: index },
+    });
+    // Capture the row we deleted so the caller can confirm what was
+    // wiped. We do a second lookup against a soft snapshot if the
+    // delete returned 0 — usually that means the slot was empty.
+    let deletedRowSnapshot: any = null;
+    if (deletedRowCount === 0) {
+      // No row existed for that slot — slot was already empty. That is
+      // not an error; the wire clear is idempotent.
+      Logging.info(
+        `PHBX clear slot #${index} on device ${device.serial_number}: ` +
+          `no row in DevicePhonebooks to delete (was already empty)`
+      );
+    }
+
     Logging.info(
       `PHBX clear slot #${index} (was number=${digits || "<empty>"}) ` +
-        `-> device ${device.serial_number}: ${protocol}`
+        `-> device ${device.serial_number}: ${protocol} ` +
+        `(rows deleted from DB: ${deletedRowCount})`
     );
 
     return successMessage(res, "Phonebook slot cleared successfully", {
@@ -1030,19 +1108,170 @@ async function deletePhonebookContact(
       number: digits,
       command_sent: true,
       protocol,
+      db: {
+        deleted_rows: deletedRowCount,
+      },
       command_message:
         `Sent PHBX clear-slot command for index #${index} ` +
         `(${digits ? "was: " + digits : "no number"}) ` +
         `on device ${device.serial_number}. The wire packet is ` +
         `[3G*<id>*LEN*PHBX,<index>,,,] — BOTH name AND number fields are empty, ` +
-        `so the firmware wipes the whole contact record. Watch will reply with ` +
-        `[3G*<id>*0004*PHBX] (bare ack = success) or ` +
+        `so the firmware wipes the whole contact record. The corresponding row ` +
+        `in DevicePhonebooks has been removed (rows deleted: ${deletedRowCount}). ` +
+        `Watch will reply with [3G*<id>*0004*PHBX] (bare ack = success) or ` +
         `[3G*<id>*0006*PHBX,0] (failure).`,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
     console.error("deletePhonebookContact error:", err);
     return errorMessage(res, "Error clearing phonebook slot");
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// List all phonebook entries currently stored for a device.
+// Server-side mirror of the watch's PHBX phonebook — see the
+// DevicePhonebook model. Paginated.
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * List the phonebook entries stored server-side for a given device.
+ * Returns paginated rows in slot order. Useful for:
+ *   - showing the user which contacts are queued for / already on the watch;
+ *   - reconciling against the watch's actual phonebook;
+ *   - analytics (how many contacts, which names).
+ *
+ * Request body:
+ *   {
+ *     "serial_number": "7893267563",
+ *     "search":        "Mom",          // optional, name or number LIKE
+ *     "page":          1,              // 1-based
+ *     "limit":         30,             // default 30 (the watch's max)
+ *     "sorting":       "ASC"           // slot order: "ASC" | "DESC"
+ *   }
+ */
+async function listPhonebook(req: Request, res: Response, next: NextFunction) {
+  try {
+    const {
+      serial_number = "",
+      search = "",
+      page = 1,
+      limit = 30,
+      sorting = "ASC",
+    } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({ where: { serial_number } });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitNum = Math.min(
+      30,
+      Math.max(1, parseInt(String(limit), 10) || 30)
+    );
+    const offset = (pageNum - 1) * limitNum;
+    const sortDir = String(sorting).toUpperCase() === "DESC" ? "DESC" : "ASC";
+
+    const whereCondition: any = { device_id: device.id };
+
+    const searchTerm = String(search || "").trim();
+    if (searchTerm) {
+      const dialect = db.sequelize.getDialect();
+      const likeOp = dialect === "postgres" ? Op.iLike : Op.like;
+      const like = `%${searchTerm}%`;
+      whereCondition[Op.and] = [
+        {
+          [Op.or]: [
+            { name: { [likeOp]: like } },
+            { phone_number: { [likeOp]: like } },
+          ],
+        },
+      ];
+    }
+
+    const { count, rows } = await db.DevicePhonebook.findAndCountAll({
+      where: whereCondition,
+      attributes: [
+        "id",
+        "device_id",
+        "slot_index",
+        "name",
+        "phone_number",
+        "country_code",
+        "photo",
+        "createdAt",
+        "updatedAt",
+      ],
+      order: [["slot_index", sortDir]],
+      limit: limitNum,
+      offset,
+    });
+
+    // Map rows to a caller-friendly shape that includes the on-wire
+    // digits-only number (country_code + phone_number) so the client
+    // can display "+CC NNNNN NNNNN" without recomputing.
+    const data = rows.map((r: any) => {
+      const cc = r.country_code || "";
+      const pn = r.phone_number || "";
+      return {
+        id: r.id,
+        device_id: r.device_id,
+        slot_index: r.slot_index,
+        name: r.name,
+        phone_number: r.phone_number,
+        country_code: r.country_code,
+        // Convenience: full digits-only number as sent on the wire.
+        digits: cc + pn,
+        // Convenience: human-readable display number.
+        display_number: cc ? `+${cc} ${pn}` : pn,
+        has_photo: !!r.photo,
+        photo: r.photo,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      };
+    });
+
+    // Use successMessage so we can include device-level metadata
+    // (successPagination's signature only accepts page/limit/total).
+    const totalPages = Math.ceil(count / limitNum);
+    return successMessage(res, "Phonebook entries fetched successfully", {
+      device: {
+        id: device.id,
+        serial_number: device.serial_number,
+        device_name: device.device_name,
+      },
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: count,
+        totalPages,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
+      slots_used: count,
+      slots_total: 30,
+      contacts: data,
+    });
+  } catch (error) {
+    console.error("listPhonebook error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    const hint =
+      msg.toLowerCase().includes("devicephonebooks") &&
+      (msg.toLowerCase().includes("does not exist") ||
+        msg.toLowerCase().includes("no such table") ||
+        msg.toLowerCase().includes("relation") ||
+        msg.toLowerCase().includes("unknown"))
+        ? " (Did you run the migration? `npx sequelize-cli db:migrate`)"
+        : "";
+    return errorMessage(res, "Error fetching phonebook: " + msg + hint);
   }
 }
 
@@ -1054,6 +1283,7 @@ export {
   getEmergencyContact,
   setPhonebook,
   deletePhonebookContact,
+  listPhonebook,
   setSosNumbers, // legacy wrapper, delegates to createOrUpdateEmergencyContact
   // Internal helpers exported only for tests / advanced callers:
   syncSosNumbersToDevice,

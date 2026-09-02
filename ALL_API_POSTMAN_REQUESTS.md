@@ -658,16 +658,22 @@ as a 4-digit uppercase hex value. Using `Buffer.byteLength(content,
 
 **Response fields:**
 
-| Field             | Type    | Description                                                 |
-| ----------------- | ------- | ----------------------------------------------------------- |
-| `serial_number`   | string  | Device serial number (protocol ID)                          |
-| `device_id`       | string  | Device UUID                                                 |
-| `device_name`     | string  | Device name                                                 |
-| `command_sent`    | boolean | Whether all PHBX entries were written to the socket         |
-| `count`           | number  | Number of entries pushed                                    |
-| `wire_results`    | array   | Per-entry result: `{ index, name, digits, sent, protocol }` |
-| `command_message` | string  | Human-readable summary                                      |
-| `timestamp`       | string  | ISO timestamp                                               |
+| Field             | Type    | Description                                                                          |
+| ----------------- | ------- | ------------------------------------------------------------------------------------ |
+| `serial_number`   | string  | Device serial number (protocol ID)                                                   |
+| `device_id`       | string  | Device UUID                                                                          |
+| `device_name`     | string  | Device name                                                                          |
+| `command_sent`    | boolean | Whether all PHBX entries were written to the socket                                  |
+| `count`           | number  | Number of entries pushed                                                             |
+| `wire_results`    | array   | Per-entry result: `{ index, name, digits, sent, protocol }`                          |
+| `db_results`      | array   | Per-entry DB upsert: `{ id, slot_index, name, phone_number, country_code, created }` |
+| `command_message` | string  | Human-readable summary                                                               |
+| `timestamp`       | string  | ISO timestamp                                                                        |
+
+Each contact is also **upserted into the server-side `DevicePhonebooks`
+table** (one row per `(device_id, slot_index)`) so the list endpoint
+(`POST /emergency_contact/list_phonebook`) can return what's currently
+queued for the watch.
 
 ---
 
@@ -720,8 +726,69 @@ Device reply (uses the same PHBX command word):
 | `number`          | string  | Digits-only phone number that was in the slot (informational) |
 | `command_sent`    | boolean | Whether the PHBX clear-slot packet was written to the socket  |
 | `protocol`        | string  | Exact packet sent (e.g. `[3G*7893267563*000B*PHBX,1,,,]`)     |
+| `db.deleted_rows` | number  | How many rows were removed from the DevicePhonebooks mirror   |
 | `command_message` | string  | Human-readable summary                                        |
 | `timestamp`       | string  | ISO timestamp                                                 |
+
+---
+
+## 30. List Phonebook Entries (Server-Side Mirror)
+
+List all phonebook entries currently stored on the server for a device.
+The server mirrors the watch's PHBX state in a `DevicePhonebooks` table:
+one row per `(device_id, slot_index)` (1..30). This endpoint reads that
+table — it does NOT query the watch itself, so it works even when the
+device is offline.
+
+Pagination defaults to the watch's full slot count (30), which means a
+default request returns the entire phonebook in a single page. Use the
+`search` parameter to filter by name or number (LIKE on both columns).
+
+**POST** `/emergency_contact/list_phonebook`
+
+```json
+{
+  "serial_number": "7893267563",
+  "search": "Mom",
+  "page": 1,
+  "limit": 30,
+  "sorting": "ASC"
+}
+```
+
+**Response fields:**
+
+| Field                   | Type    | Description                                             |
+| ----------------------- | ------- | ------------------------------------------------------- |
+| `device.id`             | string  | Device UUID                                             |
+| `device.serial_number`  | string  | Device serial number (protocol ID)                      |
+| `device.device_name`    | string  | Device name                                             |
+| `pagination.page`       | number  | Current page (1-based)                                  |
+| `pagination.limit`      | number  | Page size (max 30, the watch's full slot count)         |
+| `pagination.total`      | number  | Total rows for this device                              |
+| `pagination.totalPages` | number  | Total pages                                             |
+| `pagination.hasNext`    | boolean | True if there is a next page                            |
+| `pagination.hasPrev`    | boolean | True if there is a previous page                        |
+| `slots_used`            | number  | Number of slots currently filled (= `pagination.total`) |
+| `slots_total`           | number  | Always 30 (the watch's phonebook capacity)              |
+| `contacts[]`            | array   | List of contact rows (see below)                        |
+
+Each `contacts[]` entry:
+
+| Field            | Type    | Description                                                                |
+| ---------------- | ------- | -------------------------------------------------------------------------- |
+| `id`             | string  | UUID of the row                                                            |
+| `device_id`      | string  | Device UUID                                                                |
+| `slot_index`     | number  | Watch phonebook slot (1..30)                                               |
+| `name`           | string  | Decoded UTF-8 contact name (e.g. `Mom`)                                    |
+| `phone_number`   | string  | National number without country code (e.g. `9691905903`)                   |
+| `country_code`   | string  | Country code without `+` (e.g. `91`) — empty string if none                |
+| `digits`         | string  | Convenience: `country_code + phone_number`, as sent on the wire            |
+| `display_number` | string  | Convenience: `+91 9691905903` style, ready for the UI                      |
+| `has_photo`      | boolean | True if a photo blob is attached                                           |
+| `photo`          | string  | Opaque photo blob (hex or base64), or `null` if none                       |
+| `createdAt`      | string  | ISO timestamp of when the row was first created                            |
+| `updatedAt`      | string  | ISO timestamp of when the row was last updated (every set call bumps this) |
 
 ---
 
