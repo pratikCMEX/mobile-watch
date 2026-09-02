@@ -342,17 +342,32 @@ const allEmergencyContact = async (
       device_id = "",
     } = req.body;
 
-    const offset = (Number(page) - 1) * Number(limit);
+    const pageNum = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitNum = Math.max(1, parseInt(String(limit), 10) || 10);
+    const offset = (pageNum - 1) * limitNum;
+
+    const sortDir = String(sorting).toUpperCase() === "ASC" ? "ASC" : "DESC";
 
     const whereCondition: any = {};
-    if (search) {
-      whereCondition[Op.or] = [
-        { name: { [Op.iLike]: `%${search}%` } },
-        { phone_number: { [Op.iLike]: `%${search}%` } },
+    const searchTerm = String(search || "").trim();
+
+    if (searchTerm) {
+      // iLike / LIKE on NULL columns blows up in some DBs; only match
+      // non-null fields, and cast the search term to a string.
+      const like = `%${searchTerm}%`;
+      const dialect = db.sequelize.getDialect();
+      const likeOp = dialect === "postgres" ? Op.iLike : Op.like;
+      whereCondition[Op.and] = [
+        {
+          [Op.or]: [
+            { name: { [likeOp]: like } },
+            { phone_number: { [likeOp]: like } },
+          ],
+        },
       ];
     }
 
-    if (device_id != "") {
+    if (device_id && device_id !== "") {
       whereCondition.device_id = device_id;
     }
 
@@ -368,21 +383,40 @@ const allEmergencyContact = async (
         "createdAt",
       ],
       order: [
+        // NULLs last so SOS1/2/3 (always populated) come first regardless
+        // of DB (Postgres puts NULLs last by default with ASC; SQLite
+        // puts them first — normalize explicitly).
+        [db.sequelize.literal('"priority" IS NULL'), "ASC"],
         ["priority", "ASC"],
-        ["createdAt", sorting],
+        ["createdAt", sortDir],
       ],
-      limit: Number(limit),
+      limit: limitNum,
       offset,
     });
 
-    return successPagination(res, "Users fetched successfully", rows, {
-      page,
-      limit,
-      total: count,
-    });
+    return successPagination(
+      res,
+      "Emergency contacts fetched successfully",
+      rows,
+      {
+        page: pageNum,
+        limit: limitNum,
+        total: count,
+      }
+    );
   } catch (error) {
     console.error("allEmergencyContact error:", error);
-    return errorMessage(res, "Error fetching users");
+    const msg = error instanceof Error ? error.message : String(error);
+    const hint =
+      msg.toLowerCase().includes("priority") &&
+      (msg.toLowerCase().includes("does not exist") ||
+        msg.toLowerCase().includes("no such column"))
+        ? " (Did you run the migration? `npx sequelize-cli db:migrate`)"
+        : "";
+    return errorMessage(
+      res,
+      "Error fetching emergency contacts: " + msg + hint
+    );
   }
 };
 
