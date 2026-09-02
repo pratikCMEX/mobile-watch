@@ -663,6 +663,46 @@ Device reply (per entry):
 
 ---
 
+## 29. Delete Phonebook Entry (DPHBX)
+
+Delete a single phonebook entry on the watch by **phone number**. The
+watch matches the entry by number and removes the contact info AND any
+avatar/photo that was attached to it.
+
+Protocol sent to the watch:
+`[3G*<serial>*LEN*DPHBX,<number>]`
+
+Device reply (uses the same PHBX command word):
+`[3G*<serial>*0002*PHBX,<status>]` where `status: 1=success, 0=failure`
+
+- `number`: the phone number to delete, **digits-only with country code**
+  (e.g. `919691905903` for `+91 96919 05903`). 10-digit Indian numbers
+  are auto-prefixed with `91` by the server.
+
+**POST** `/emergency_contact/delete_phonebook`
+
+```json
+{
+  "serial_number": "7893267563",
+  "number": "919691905903"
+}
+```
+
+**Response fields:**
+
+| Field             | Type    | Description                                                        |
+| ----------------- | ------- | ------------------------------------------------------------------ |
+| `serial_number`   | string  | Device serial number (protocol ID)                                 |
+| `device_id`       | string  | Device UUID                                                        |
+| `device_name`     | string  | Device name                                                        |
+| `number`          | string  | Digits-only phone number that was sent (after normalization)       |
+| `command_sent`    | boolean | Whether the DPHBX command was written to the socket                |
+| `protocol`        | string  | Exact packet sent (e.g. `[3G*7893267563*0016*DPHBX,919691905903]`) |
+| `command_message` | string  | Human-readable summary                                             |
+| `timestamp`       | string  | ISO timestamp                                                      |
+
+---
+
 ## Notes
 
 - Replace `DEVICE_UUID`, `USER_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs

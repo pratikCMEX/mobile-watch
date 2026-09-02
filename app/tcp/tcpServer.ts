@@ -2464,6 +2464,64 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Send Delete-Phonebook (DPHBX) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Delete a single phonebook entry on the device (clears the contact AND
+   * any avatar/photo that was attached to it).
+   *
+   * Protocol format:
+   *   [3G*YYYYYYYYYY*LEN*DPHBX,<number>]
+   *
+   * Example (deleting +91 96919 05903):
+   *   [3G*7893267563*0016*DPHBX,919691905903]
+   *
+   * Device reply (uses the same PHBX command word with a status):
+   *   [3G*YYYYYYYYYY*0002*PHBX,<status>]
+   *   status: 1 = success, 0 = failure
+   *
+   * The watch matches the entry by phone number (digits-only, with the
+   * country code already included) and removes it from the phonebook.
+   *
+   * @param deviceId  - The device ID (e.g. 7893267563)
+   * @param number    - Phone number to delete, digits-only with country
+   *                    code (e.g. "919691905903" for +91 96919 05903)
+   * @returns true if the command was written to the socket
+   */
+  public sendDeletePhonebookCommand(deviceId: string, number: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send DPHBX command.`
+      );
+      return false;
+    }
+
+    // Clean the number to digits so the watch's dialler matches it.
+    const digits = (number || "").replace(/[^0-9]/g, "");
+    if (!digits) {
+      Logging.error(
+        `Refusing to send DPHBX with empty phone number to device ${deviceId}`
+      );
+      return false;
+    }
+
+    const content = `DPHBX,${digits}`;
+    // LEN is hex (consistent with all other commands on this device).
+    const length = content.length.toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending delete-phonebook (DPHBX) for number ${digits} to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Send Alarm (REMIND) command to device
   // ───────────────────────────────────────────────────────────
 

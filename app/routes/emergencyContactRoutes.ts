@@ -8,6 +8,7 @@ import {
   allEmergencyContact,
   getEmergencyContact,
   setPhonebook,
+  deletePhonebookContact,
 } from "../controllers/user/Emergency_contact";
 
 const router = express.Router();
@@ -28,6 +29,18 @@ router.post(
   checkToken,
   ValidateJoi(Schemas.phonebook.set),
   setPhonebook
+);
+
+// Delete a single phonebook entry on the watch (clears name, number AND
+// any avatar/photo attached to that entry). Uses the DPHBX command.
+//
+// Body shape:
+//   { "serial_number": "7893267563", "number": "919691905903" }
+router.post(
+  "/delete_phonebook",
+  checkToken,
+  ValidateJoi(Schemas.phonebook.delete),
+  deletePhonebookContact
 );
 
 // Bulk save: receive a contacts[] array, upsert each (by id or priority),

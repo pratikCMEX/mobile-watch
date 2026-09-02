@@ -346,6 +346,32 @@ export const Schemas = {
           "any.required": "contacts array is required",
         }),
     }),
+
+    /**
+     * Delete a single phonebook entry on the watch by phone number
+     * (clears name, number AND any avatar/photo attached to that entry).
+     *
+     * Request body:
+     *   { "serial_number": "7893267563", "number": "919691905903" }
+     *
+     * Protocol: [3G*<id>*LEN*DPHBX,<number>]
+     * Device reply: [3G*<id>*0002*PHBX,<status>] (1=ok, 0=fail)
+     */
+    delete: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      number: Joi.string()
+        .pattern(/^[0-9+\-\s()]{5,20}$/)
+        .required()
+        .messages({
+          "string.empty": "number is required",
+          "any.required": "number is required",
+          "string.pattern.base":
+            "number must be a valid phone (5-20 chars, digits/+/-/space/parentheses)",
+        }),
+    }),
   },
   alarm: {
     set: Joi.object({

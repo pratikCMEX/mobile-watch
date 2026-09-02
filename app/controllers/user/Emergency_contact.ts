@@ -877,6 +877,112 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────
+// Delete a single phonebook entry on the watch (DPHBX command)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Delete a single phonebook entry on the device by phone number.
+ *
+ * Per spec:
+ *   Server → Watch : [3G*<id>*LEN*DPHBX,<number>]
+ *   Watch → Server : [3G*<id>*0002*PHBX,<status>] (1=ok, 0=fail)
+ *
+ * The watch matches the entry by phone number (digits-only, with the
+ * country code already included) and removes the contact AND any
+ * avatar/photo attached to it.
+ *
+ * Request body:
+ *   { "serial_number": "7893267563", "number": "919691905903" }
+ *
+ * No DB persistence — phonebook lives only on the watch. If you later
+ * add a `DevicePhonebook` table, this is the place to delete the row
+ * too.
+ */
+async function deletePhonebookContact(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+    if (!number) {
+      return errorMessage(res, "number is required");
+    }
+
+    // Normalize the number the same way we do for PHBX (strip non-digits,
+    // auto-prepend the default country code for 10-digit Indian mobiles).
+    const digits = normalizeSosPhone(String(number));
+    if (!digits) {
+      return errorMessage(
+        res,
+        "number must contain at least one digit (e.g. 919691905903 or +91 96919 05903)"
+      );
+    }
+
+    const device = await db.Device.findOne({ where: { serial_number } });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+    if (!device.serial_number) {
+      return errorMessage(
+        res,
+        `Device ${device.id} has no serial_number, cannot delete phonebook entry`
+      );
+    }
+
+    const tcpClient = tcpServer.getDevice(device.serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const sent = tcpServer.sendDeletePhonebookCommand(
+      device.serial_number,
+      digits
+    );
+
+    if (!sent) {
+      return errorMessage(
+        res,
+        "Failed to send DPHBX command. Device may be disconnected."
+      );
+    }
+
+    // Build the protocol string for the response (same as what was sent)
+    const content = `DPHBX,${digits}`;
+    const length = content.length.toString(16).padStart(4, "0");
+    const protocol = `[3G*${device.serial_number}*${length}*${content}]`;
+
+    Logging.info(
+      `DPHBX number ${digits} -> device ${device.serial_number}: ${protocol}`
+    );
+
+    return successMessage(res, "Phonebook entry deleted successfully", {
+      serial_number: device.serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      number: digits,
+      command_sent: true,
+      protocol,
+      command_message: `Sent DPHBX to delete phonebook entry for number ${digits} on the device. The watch will reply with [3G*<id>*0002*PHBX,<status>] (1=success, 0=failure). The contact AND any avatar/photo are cleared.`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("deletePhonebookContact error:", err);
+    return errorMessage(res, "Error deleting phonebook entry");
+  }
+}
+
 export {
   createOrUpdateEmergencyContact,
   saveEmergencyContacts,
@@ -884,6 +990,7 @@ export {
   allEmergencyContact,
   getEmergencyContact,
   setPhonebook,
+  deletePhonebookContact,
   setSosNumbers, // legacy wrapper, delegates to createOrUpdateEmergencyContact
   // Internal helpers exported only for tests / advanced callers:
   syncSosNumbersToDevice,
