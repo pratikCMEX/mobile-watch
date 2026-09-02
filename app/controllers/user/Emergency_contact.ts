@@ -696,18 +696,18 @@ async function saveEmergencyContacts(
 
 // ─────────────────────────────────────────────────────────────
 // Phonebook (PHBX) — up to 30 contacts on the watch
+//
+// Per spec, the PHBX name field uses "Unicode coding" — i.e. RAW UTF-8
+// characters sent as-is on the wire, NOT hex-encoded. The firmware
+// reads LEN UTF-8 bytes of payload and decodes the UTF-8 itself. We
+// previously hex-encoded the name ("Mom" -> "4d006f006d00") which the
+// device rendered as garbage and rejected, so every entry was failing
+// with status=0 even though we thought we were succeeding.
+//
+// LEN is the UTF-8 byte length of the content (not the JS character
+// count) so that multi-byte names like "अмм" don't silently get LEN
+// wrong.
 // ─────────────────────────────────────────────────────────────
-
-/**
- * Build the wire-format packet string for a single PHBX entry.
- */
-const encodeUnicodeHex = (str: string): string => {
-  let hex = "";
-  for (const ch of str) {
-    hex += ch.charCodeAt(0).toString(16).padStart(4, "0");
-  }
-  return hex;
-};
 
 const buildPhonebookProtocolString = (
   serialNumber: string,
@@ -716,9 +716,12 @@ const buildPhonebookProtocolString = (
   number: string,
   photo: string
 ): string => {
-  const encodedName = encodeUnicodeHex(name);
-  const content = `PHBX,${index},${encodedName},${number},${photo}`;
-  const length = content.length.toString(16).padStart(4, "0");
+  const cleanName = (name || "").replace(/[,\[\]\r\n]/g, " ").trim();
+  const content = `PHBX,${index},${cleanName},${number},${photo}`;
+  // UTF-8 byte length (not JS char count) — critical for non-ASCII names.
+  const length = Buffer.byteLength(content, "utf8")
+    .toString(16)
+    .padStart(4, "0");
   return `[3G*${serialNumber}*${length}*${content}]`;
 };
 

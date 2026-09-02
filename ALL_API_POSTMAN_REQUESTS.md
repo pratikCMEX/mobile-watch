@@ -630,10 +630,17 @@ Device reply (per entry):
 `[3G*<serial>*0002*PHBX,<status>]` where `status: 1=success, 0=failure`
 
 - `index`: phonebook slot on the watch, integer **1..30**, unique across the batch.
-- `name`: contact name (Unicode allowed).
+- `name`: contact name. Sent as **raw Unicode / UTF-8 bytes** on the wire
+  (NOT hex-encoded). Any characters are allowed, including multi-byte
+  ones like `अम्मा`, `Mom`, `張媽媽`, etc. Earlier code hex-encoded the
+  name, which the firmware rejected (status=0).
 - `number`: phone number. Digits-only on the wire; country code `91` is
   auto-prepended for 10-digit Indian mobiles.
 - `photo`: optional photo data (currently unused — pass `""`).
+
+`LEN` is the **UTF-8 byte length** of the content (after `*`), expressed
+as a 4-digit uppercase hex value. Using `Buffer.byteLength(content,
+"utf8")` (not `content.length`) is critical for non-ASCII names.
 
 **POST** `/emergency_contact/set_phonebook`
 

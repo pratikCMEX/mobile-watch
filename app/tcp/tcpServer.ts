@@ -2453,14 +2453,36 @@ class TcpServer {
    * @returns true if the command was written to the socket
    */
 
-  private encodeUnicodeHex(str: string): string {
-    let hex = "";
-    for (const ch of str) {
-      const code = ch.charCodeAt(0);
-      hex += code.toString(16).padStart(4, "0");
-    }
-    return hex;
+  /**
+   * UTF-8 byte length of a JS string. We use this for LEN in commands
+   * that contain non-ASCII content (e.g. PHBX names like "Màm", "अम्मा").
+   * Plain `str.length` would count JS code units, which is wrong for
+   * multi-byte UTF-8 sequences and silently truncates the LEN that the
+   * device firmware uses to know how many payload bytes to consume.
+   */
+  private utf8ByteLength(str: string): number {
+    return Buffer.byteLength(str, "utf8");
   }
+
+  /**
+   * IMPORTANT — PHBX wire format:
+   *
+   * Per the protocol spec:
+   *   Server send:
+   *     [3G*<id>*LEN*PHBX,<index>,<name>,<phone number>,<photo data>]
+   *     1. number   1-30         (slot index, ASCII digits)
+   *     2. name     Unicode      (RAW Unicode/UTF-8 chars, NOT hex!)
+   *     3. phone    ASCII        (digits, country code included)
+   *     4. photo    photo data   (optional, often empty)
+   *
+   * The "Unicode coding" instruction means the name is sent as RAW UTF-8
+   * bytes on the wire — the device firmware reads the LEN-bounded
+   * payload and decodes the UTF-8 itself. Earlier code in this file was
+   * hex-encoding the name ("Mom" -> "4d006f006d00"), which is just an
+   * ASCII string of digits that the firmware renders as garbage and
+   * rejects with status=0. That is why "no number was saving in the
+   * device": the device saw an invalid name and refused the entry.
+   */
   public sendPhonebookCommand(
     deviceId: string,
     index: number,
@@ -2504,14 +2526,20 @@ class TcpServer {
       DEFAULT_CC && digits.length === 10 ? DEFAULT_CC + digits : digits;
 
     // Strip control chars / commas from the name so it can't break the
-    // bracketed payload.
+    // bracketed payload. The cleaned name is sent as RAW Unicode (UTF-8),
+    // not hex-encoded.
     const cleanName = (name || "").replace(/[,\[\]\r\n]/g, " ").trim();
-    const safeName = this.encodeUnicodeHex(cleanName);
+    if (!cleanName) {
+      Logging.error(
+        `Refusing to send PHBX with empty name to device ${deviceId}`
+      );
+      return false;
+    }
     const photo = photoData || "";
 
-    const content = `PHBX,${index},${safeName},${finalDigits},${photo}`;
-    // LEN is hex (consistent with all other commands on this device).
-    const length = content.length.toString(16).padStart(4, "0");
+    const content = `PHBX,${index},${cleanName},${finalDigits},${photo}`;
+    // LEN is the UTF-8 byte length of `content`, expressed as hex.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
     const command = `[3G*${deviceId}*${length}*${content}]`;
 
     Logging.info(
