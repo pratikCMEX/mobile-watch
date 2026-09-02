@@ -21,4 +21,10 @@ router.post(
   Snapshot_controller.ListSnapshots
 );
 
+router.post(
+  "/get_snapshots_by_serial",
+  checkToken,
+  Snapshot_controller.GetSnapshotsBySerialNumber
+);
+
 module.exports = router;

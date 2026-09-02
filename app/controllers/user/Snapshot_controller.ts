@@ -91,7 +91,61 @@ const ListSnapshots = async (
   }
 };
 
+const GetSnapshotsBySerialNumber = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const snapshots = await db.Snapshot.findAll({
+      where: { device_id: device.id },
+      attributes: ["id", "device_id", "image_url", "createdAt", "updatedAt"],
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Add full image URL to each snapshot
+    const snapshotsWithUrl = snapshots.map((snapshot: any) => {
+      const data = snapshot.toJSON();
+      return {
+        ...data,
+        image_url: snapshot.image_url
+          ? `/uploads/snapshots/${snapshot.image_url}`
+          : null,
+      };
+    });
+
+    return successMessage(res, "Snapshots fetched successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      snapshot_count: snapshotsWithUrl.length,
+      snapshots: snapshotsWithUrl,
+    });
+  } catch (err) {
+    console.error("GetSnapshotsBySerialNumber error:", err);
+    return errorMessage(res, "Error fetching snapshots");
+  }
+};
+
 export default {
   AddSnapshot,
   ListSnapshots,
+  GetSnapshotsBySerialNumber,
 };
