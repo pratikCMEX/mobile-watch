@@ -311,6 +311,33 @@ automatically updates the record.
 
 ---
 
+## 18. Restart Device
+
+Sends a RESET (restart) command to the device via TCP. The device will
+restart and, upon coming back online, will re-establish its TCP connection
+and resume sending heartbeats.
+
+**POST** `/user/device/restart_device`
+
+```json
+{
+  "serial_number": "5678901234"
+}
+```
+
+**Response fields:**
+
+| Field             | Type    | Description                                      |
+| ----------------- | ------- | ------------------------------------------------ |
+| `serial_number`   | string  | Device serial number (protocol ID)               |
+| `device_id`       | string  | Device UUID in the database                      |
+| `device_name`     | string  | Device name                                      |
+| `command_sent`    | boolean | Whether the RESET command was sent to the device |
+| `command_message` | string  | Status message about the command                 |
+| `timestamp`       | string  | ISO timestamp of when the command was sent       |
+
+---
+
 ## Notes
 
 - Replace `DEVICE_UUID`, `USER_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs

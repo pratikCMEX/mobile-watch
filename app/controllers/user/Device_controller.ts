@@ -320,9 +320,69 @@ const getDeviceStatus = async (
   }
 };
 
+const restartDevice = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number } = req.params;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const tcpClient = tcpServer.getDevice(serial_number);
+
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendRestartCommand(serial_number);
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send restart command. Device may be disconnected."
+      );
+    }
+
+    Logging.info(
+      `Restart command sent to device ${serial_number} (device_id: ${device.id})`
+    );
+
+    return successMessage(res, "Restart command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      command_sent: true,
+      command_message:
+        "RESET command sent to device. The device will restart and reconnect.",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("restartDevice error:", err);
+    return errorMessage(res, "Error sending restart command");
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
   getDeviceSettings,
   getDeviceStatus,
+  restartDevice,
 };

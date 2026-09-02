@@ -339,6 +339,10 @@ class TcpServer {
         this.handleDeviceStatusResponse(client, parsed);
         break;
 
+      case "RESET":
+        this.handleRestartResponse(client, parsed);
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -1093,6 +1097,46 @@ class TcpServer {
     );
   }
 
+  // ───────────────────────────────────────────────────────────
+  // RESET - Device Restart
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Device response after the server sends a RESET (restart) command.
+   *
+   * Server sends:  [3G*YYYYYYYYYY*0005*RESET]
+   * Device replies: [3G*YYYYYYYYYY*0005*RESET]
+   *
+   * The device acknowledges the restart command by echoing it back.
+   * We log the acknowledgement and save a notification so the user
+   * is informed that the restart was accepted by the device.
+   */
+  private handleRestartResponse(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `RESET restart response received from device ${packet.deviceId}: ${packet.raw}`
+    );
+
+    this.findDevice(packet.deviceId)
+      .then((device) => {
+        if (!device) return;
+
+        return db.Notification.create({
+          device_id: device.id,
+          user_id: null,
+          type: "general",
+          title: "Device restart",
+          body: `Device ${packet.deviceId} acknowledged restart command`,
+          metadata: { kind: "restart", deviceId: packet.deviceId },
+          is_read: "0",
+        });
+      })
+      .catch((error: Error) =>
+        Logging.error(
+          `Failed to save restart notification for device ${packet.deviceId}: ${error.message}`
+        )
+      );
+  }
+
   /**
    * Parse the semicolon-delimited key:value payload returned by the
    * device in response to a TS command.
@@ -1809,6 +1853,43 @@ class TcpServer {
 
     Logging.info(
       `Sending device status (TS) command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Restart (RESET) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a RESET (restart) command to a specific device.
+   *
+   * Protocol format: [3G*YYYYYYYYYY*0005*RESET]
+   *
+   * The device will restart and, upon coming back online, will
+   * re-establish its TCP connection and resume sending heartbeats.
+   *
+   * @param deviceId - The device ID (e.g. 8800000015)
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendRestartCommand(deviceId: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send RESET command.`
+      );
+
+      return false;
+    }
+
+    const command = `[3G*${deviceId}*0005*RESET]`;
+
+    Logging.info(
+      `Sending restart (RESET) command to device ${deviceId}: ${command}`
     );
 
     this.send(client, command);

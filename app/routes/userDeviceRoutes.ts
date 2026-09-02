@@ -35,6 +35,13 @@ router.get(
   Device_controller.getDeviceStatus
 );
 
+// Restart device (sends RESET command to device via TCP)
+router.get(
+  "/restart_device/:serial_number",
+  checkToken,
+  Device_controller.restartDevice
+);
+
 router.post(
   "/add_family_member",
   checkToken,
