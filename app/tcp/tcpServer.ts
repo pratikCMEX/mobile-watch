@@ -343,6 +343,10 @@ class TcpServer {
         this.handleRestartResponse(client, parsed);
         break;
 
+      case "img":
+        this.handleImageResponse(client, parsed);
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -1135,6 +1139,87 @@ class TcpServer {
           `Failed to save restart notification for device ${packet.deviceId}: ${error.message}`
         )
       );
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // IMG - Image/Snapshot response from device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle image data received from device after rcapture command.
+   *
+   * Protocol format: [3G*YYYYYYYYYY*len*img,x,y,z]
+   * - x: Image type (5 = remote snapshot)
+   * - y: Timestamp (YYMMDDHHmmss format, e.g., 160429110950)
+   * - z: Image data in hex format (needs to be converted to JPEG)
+   */
+  private handleImageResponse(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `Image data received from device ${
+        packet.deviceId
+      }: ${packet.payload.substring(0, 50)}...`
+    );
+
+    const parts = packet.payload.split(",");
+    if (parts.length < 3) {
+      Logging.error(`Invalid image payload from device ${packet.deviceId}`);
+      return;
+    }
+
+    const imageType = parts[0]; // "5" for remote snapshot
+    const timestamp = parts[1]; // YYMMDDHHmmss format
+    const imageHexData = parts.slice(2).join(","); // Image hex data
+
+    Logging.info(
+      `Image type: ${imageType}, timestamp: ${timestamp}, data length: ${imageHexData.length}`
+    );
+
+    // Convert hex to binary and save as JPEG
+    try {
+      const imageBuffer = Buffer.from(imageHexData, "hex");
+
+      // Generate filename from timestamp
+      const filename = `snapshot_${packet.deviceId}_${timestamp}.jpg`;
+      const filepath = `./uploads/snapshots/${filename}`;
+
+      // Ensure directory exists
+      const fs = require("fs");
+      const path = require("path");
+      const dir = path.dirname(filepath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      // Save the image
+      fs.writeFileSync(filepath, imageBuffer);
+
+      Logging.info(`Snapshot saved: ${filepath}`);
+
+      // Save to database
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+
+          return db.Snapshot.create({
+            device_id: device.id,
+            image_url: filename,
+          });
+        })
+        .then(() => {
+          Logging.info(`Snapshot record created for device ${packet.deviceId}`);
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save snapshot for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    } catch (error) {
+      Logging.error(
+        `Failed to process image from device ${packet.deviceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   /**
@@ -2058,6 +2143,49 @@ class TcpServer {
 
     Logging.info(
       `Sending alarm (REMIND) command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Remote Snapshot (rcapture) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a remote snapshot (rcapture) command to a specific device.
+   *
+   * Protocol format: [CS*YYYYYYYYYY*LEN*rcapture]
+   *
+   * Example: [3G*8800000015*0008*rcapture]
+   *
+   * The device will capture a photo and send it back as:
+   * [3G*YYYYYYYYYY*len*img,x,y,z]
+   * - x: Image type (5 = remote snapshot)
+   * - y: Timestamp (YYMMDDHHmmss format)
+   * - z: Image data in hex format
+   *
+   * @param deviceId - The device ID (e.g. 8800000015)
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendCaptureCommand(deviceId: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send rcapture command.`
+      );
+
+      return false;
+    }
+
+    // Calculate length: "rcapture" has 8 characters
+    const command = `[CS*${deviceId}*0008*rcapture]`;
+
+    Logging.info(
+      `Sending remote snapshot (rcapture) command to device ${deviceId}: ${command}`
     );
 
     this.send(client, command);

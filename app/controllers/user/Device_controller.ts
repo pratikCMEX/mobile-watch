@@ -637,6 +637,69 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+const captureSnapshot = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const tcpClient = tcpServer.getDevice(serial_number);
+
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendCaptureCommand(serial_number);
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send snapshot command. Device may be disconnected."
+      );
+    }
+
+    const commandProtocol = `[CS*${serial_number}*0008*rcapture]`;
+
+    Logging.info(
+      `Remote snapshot command sent to device ${serial_number} (device_id: ${device.id})`
+    );
+
+    return successMessage(res, "Remote snapshot command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      command_sent: true,
+      command_message:
+        "rcapture command sent to device. The device will capture a photo and send it back.",
+      command_protocol: commandProtocol,
+      note: "The device will respond with image data in format: [3G*YYYYYYYYYY*len*img,x,y,z]. The image will be automatically saved when received.",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("captureSnapshot error:", err);
+    return errorMessage(res, "Error sending snapshot command");
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -646,4 +709,5 @@ export default {
   sendDeviceCommand,
   findDevice,
   setAlarm,
+  captureSnapshot,
 };

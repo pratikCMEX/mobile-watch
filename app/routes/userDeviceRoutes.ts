@@ -68,6 +68,14 @@ router.post(
   Device_controller.setAlarm
 );
 
+// Remote snapshot API (sends rcapture command to device via TCP)
+router.post(
+  "/capture_snapshot",
+  checkToken,
+  ValidateJoi(Schemas.capture.snapshot),
+  Device_controller.captureSnapshot
+);
+
 router.post(
   "/add_family_member",
   checkToken,

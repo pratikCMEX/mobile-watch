@@ -439,6 +439,46 @@ Protocol: `[CS*YYYYYYYYYY*LEN*REMIND,alarm1,alarm2,alarm3]`
 
 ---
 
+## 22. Remote Snapshot (Capture Photo)
+
+Send a remote snapshot command to the device via TCP. The device will capture
+a photo and send it back as image data.
+
+Protocol: `[CS*YYYYYYYYYY*0008*rcapture]`
+
+**Device response format:**
+`[3G*YYYYYYYYYY*len*img,x,y,z]`
+
+- `x`: Image type (5 = remote snapshot)
+- `y`: Timestamp (YYMMDDHHmmss format, e.g., 160429110950)
+- `z`: Image data in hex format (automatically converted and saved as JPEG)
+
+**POST** `/user/device/capture_snapshot`
+
+```json
+{
+  "serial_number": "8800000015"
+}
+```
+
+**Response fields:**
+
+| Field              | Type    | Description                                                             |
+| ------------------ | ------- | ----------------------------------------------------------------------- |
+| `serial_number`    | string  | Device serial number (protocol ID)                                      |
+| `device_id`        | string  | Device UUID in the database                                             |
+| `device_name`      | string  | Device name                                                             |
+| `command_sent`     | boolean | Whether the rcapture command was sent                                   |
+| `command_message`  | string  | Status message about the command                                        |
+| `command_protocol` | string  | The actual protocol command sent (e.g. `[CS*8800000015*0008*rcapture]`) |
+| `note`             | string  | Information about the device response                                   |
+| `timestamp`        | string  | ISO timestamp of when the command was sent                              |
+
+**Note:** The image will be automatically saved to `./uploads/snapshots/` directory
+and a snapshot record will be created in the database when the device responds.
+
+---
+
 ## Notes
 
 - Replace `DEVICE_UUID`, `USER_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs
