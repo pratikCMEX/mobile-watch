@@ -1741,7 +1741,8 @@ class TcpServer {
       return;
     }
 
-    client.socket.write(message);
+    // Add newline terminator - GPS devices expect \n to know command is complete
+    client.socket.write(message + "\n");
   }
 
   // ───────────────────────────────────────────────────────────
