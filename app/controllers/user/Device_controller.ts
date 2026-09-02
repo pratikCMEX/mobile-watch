@@ -28,9 +28,9 @@ const normalizeSosPhone = (raw: string): string => {
   // Heuristic: if it's exactly 10 digits, treat as national and prepend
   // the default country code. If it's already 11-15 digits, assume the
   // caller already included a country code.
-  // if (digits.length === 10) {
-  //   return DEFAULT_COUNTRY_CODE + digits;
-  // }
+  if (digits.length === 10) {
+    return DEFAULT_COUNTRY_CODE + digits;
+  }
   return digits;
 };
 
