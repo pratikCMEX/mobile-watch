@@ -18,7 +18,7 @@ import { tcpServer } from "../../app";
  * a different region.
  */
 const DEFAULT_COUNTRY_CODE = (
-  process.env.SOS_DEFAULT_COUNTRY_CODE || "91"
+  process.env.SOS_DEFAULT_COUNTRY_CODE || ""
 ).replace(/[^0-9]/g, "");
 
 const normalizeSosPhone = (raw: string): string => {
