@@ -381,6 +381,7 @@ const allEmergencyContact = async (
       total: count,
     });
   } catch (error) {
+    console.error("allEmergencyContact error:", error);
     return errorMessage(res, "Error fetching users");
   }
 };
