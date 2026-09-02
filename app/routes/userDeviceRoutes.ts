@@ -60,6 +60,18 @@ router.post(
   Device_controller.findDevice
 );
 
+// Set SOS number(s) on the device
+// Body options:
+//   - { serial_number, sos_number }                 -> writes to SOS1
+//   - { serial_number, sos1, sos2, sos3 }           -> writes each slot
+//   - { serial_number, sos_number, sos2, sos3 }     -> mixes both
+router.post(
+  "/set_sos_numbers",
+  checkToken,
+  ValidateJoi(Schemas.sos.set),
+  Device_controller.setSosNumbers
+);
+
 // Set alarm clock API (sends REMIND command to device via TCP)
 router.post(
   "/set_alarm",

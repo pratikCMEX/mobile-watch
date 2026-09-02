@@ -2281,6 +2281,71 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Send SOS number command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send SOS number settings to a specific device slot.
+   *
+   * Protocol format:
+   *   [3G*YYYYYYYYYY*LEN*SOS1,phoneNumber]
+   *
+   * Examples:
+   *   [3G*8800000015*0010*SOS1,00000000000]   ← set SOS1
+   *   [3G*8800000015*0010*SOS2,00000000000]   ← set SOS2
+   *   [3G*8800000015*0010*SOS3,00000000000]   ← set SOS3
+   *
+   * Phone numbers MUST be digits only — no '+', no spaces, no dashes.
+   * Always include the country code (e.g. "919999999999" for an Indian
+   * mobile). If the country code is missing, prefix it before calling
+   * this method.
+   *
+   * @param deviceId - The device ID (e.g. 8800000015)
+   * @param slot     - "SOS1" | "SOS2" | "SOS3"
+   * @param phone    - Digits-only phone number (country code included)
+   * @returns true if the command was sent, false if device not connected
+   */
+  public sendSosCommand(
+    deviceId: string,
+    slot: "SOS1" | "SOS2" | "SOS3",
+    phone: string
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send ${slot} command.`
+      );
+
+      return false;
+    }
+
+    // Strip any non-digit characters defensively so we never write '+' or
+    // spaces onto the wire — the device's dialer/SMS module rejects them.
+    const digits = (phone || "").replace(/[^0-9]/g, "");
+
+    if (!digits) {
+      Logging.error(
+        `Refusing to send empty/invalid ${slot} phone number to device ${deviceId}.`
+      );
+
+      return false;
+    }
+
+    const content = `${slot},${digits}`;
+    const length = content.length.toString().padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending SOS number (${slot}) to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Send Alarm (REMIND) command to device
   // ───────────────────────────────────────────────────────────
 

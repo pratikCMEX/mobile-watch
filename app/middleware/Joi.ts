@@ -198,6 +198,64 @@ export const Schemas = {
       }),
     }),
   },
+  sos: {
+    /**
+     * Set the SOS numbers on a device.
+     *
+     * Accepts any of:
+     *   - sos_number:  single number (writes to SOS1)
+     *   - sos1, sos2, sos3: per-slot numbers
+     *
+     * Each field is a digits-only string. '+', spaces and dashes are
+     * stripped before being sent to the device, but the validator
+     * accepts them so the API is friendly.
+     *
+     * Country code must be included (e.g. "91" prefix for India).
+     */
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      sos_number: Joi.string()
+        .pattern(/^[0-9+\-\s()]{5,20}$/)
+        .optional()
+        .allow(null, "")
+        .messages({
+          "string.pattern.base":
+            "sos_number must be a valid phone number (5-20 chars, digits/+/-/space/parentheses)",
+        }),
+      sos1: Joi.string()
+        .pattern(/^[0-9+\-\s()]{5,20}$/)
+        .optional()
+        .allow(null, "")
+        .messages({
+          "string.pattern.base":
+            "sos1 must be a valid phone number (5-20 chars, digits/+/-/space/parentheses)",
+        }),
+      sos2: Joi.string()
+        .pattern(/^[0-9+\-\s()]{5,20}$/)
+        .optional()
+        .allow(null, "")
+        .messages({
+          "string.pattern.base":
+            "sos2 must be a valid phone number (5-20 chars, digits/+/-/space/parentheses)",
+        }),
+      sos3: Joi.string()
+        .pattern(/^[0-9+\-\s()]{5,20}$/)
+        .optional()
+        .allow(null, "")
+        .messages({
+          "string.pattern.base":
+            "sos3 must be a valid phone number (5-20 chars, digits/+/-/space/parentheses)",
+        }),
+    })
+      .or("sos_number", "sos1", "sos2", "sos3")
+      .messages({
+        "object.missing":
+          "At least one of sos_number, sos1, sos2 or sos3 is required",
+      }),
+  },
   alarm: {
     set: Joi.object({
       serial_number: Joi.string().required().messages({
