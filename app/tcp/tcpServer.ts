@@ -1977,6 +1977,46 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Send Find Device command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a FIND command to a specific device.
+   *
+   * Protocol format: [CS*YYYYYYYYYY*LEN*FIND]
+   *
+   * Example: [3G*5678901234*0004*FIND]
+   *
+   * The device will respond with its location or an audible alert
+   * to help locate it.
+   *
+   * @param deviceId - The device ID (e.g. 8800000015)
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendFindCommand(deviceId: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send FIND command.`
+      );
+
+      return false;
+    }
+
+    // Calculate length: "FIND" has 4 characters
+    const command = `[CS*${deviceId}*0004*FIND]`;
+
+    Logging.info(
+      `Sending find device (FIND) command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Connection ID
   // ───────────────────────────────────────────────────────────
 

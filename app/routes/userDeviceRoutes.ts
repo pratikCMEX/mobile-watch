@@ -52,6 +52,14 @@ router.post(
   Device_controller.sendDeviceCommand
 );
 
+// Find my device API (sends FIND command to device via TCP)
+router.post(
+  "/find_device",
+  checkToken,
+  ValidateJoi(Schemas.findDevice.send),
+  Device_controller.findDevice
+);
+
 router.post(
   "/add_family_member",
   checkToken,
