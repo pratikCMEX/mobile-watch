@@ -335,6 +335,10 @@ class TcpServer {
         this.handleRyimei(client, parsed);
         break;
 
+      case "TS":
+        this.handleDeviceStatusResponse(client, parsed);
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -1041,6 +1045,263 @@ class TcpServer {
     }
   }
 
+  // ───────────────────────────────────────────────────────────
+  // TS - Device Status / Terminal Status
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Device response after the server sends a TS (terminal status)
+   * query command.
+   *
+   * Server sends:  [3G*YYYYYYYYYY*0002*TS]
+   * Device replies: [3G*YYYYYYYYYY*LEN*TS,ver:...;ID:...;imei:...;...]
+   *
+   * The payload is a semicolon-delimited list of key:value pairs.
+   * We parse it, persist the relevant fields to the Device record,
+   * and log the raw data for diagnostics.
+   */
+  private handleDeviceStatusResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    Logging.info(
+      `TS device status response received from device ${packet.deviceId}: ${packet.payload}`
+    );
+
+    const status = this.parseDeviceStatus(packet.payload);
+
+    if (!status) {
+      Logging.error(
+        `Unable to parse TS device status response from device ${packet.deviceId}`
+      );
+
+      return;
+    }
+
+    Logging.info(
+      `DEVICE STATUS | Device: ${packet.deviceId} | ` +
+        `Firmware: ${status.ver} | ` +
+        `Battery: ${status.batlevel} | ` +
+        `GPS: ${status.gps} | ` +
+        `NET: ${status.net}`
+    );
+
+    this.saveDeviceStatus(packet.deviceId, status).catch((error: Error) =>
+      Logging.error(
+        `Failed to save device status for ${packet.deviceId}: ${error.message}`
+      )
+    );
+  }
+
+  /**
+   * Parse the semicolon-delimited key:value payload returned by the
+   * device in response to a TS command.
+   *
+   * Example payload:
+   *   ver:G4C_YSC_EMMC_240_5M_En_N_2023.11.10_15.38.00;
+   *   ID:8800000015;
+   *   imei:861234000000001;
+   *   url:52.18.132.157; port:8001;
+   *   upload:600; lk:300;
+   *   batlevel:87;
+   *   language:en; zone:+01:00;
+   *   profile:1;
+   *   GPS:OK(0);
+   *   wifiOpen:false; wifiConnect:false;
+   *   gprsOpen:true;
+   *   NET:OK(100)
+   *
+   * Some values carry inline annotations in parentheses, e.g.
+   * "GPS:OK(0)" or "NET:OK(100)".  We keep the raw value and also
+   * extract the parenthesised detail where present.
+   */
+  private parseDeviceStatus(payload: string): DeviceStatus | null {
+    if (!payload || !payload.trim()) {
+      return null;
+    }
+
+    const result: DeviceStatus = {};
+
+    /**
+     * Split on semicolons.  Some values may contain commas inside
+     * parentheses (e.g. "profile:1; (1-vibration and ringing,...)"),
+     * but the semicolon is always the top-level delimiter.
+     */
+    const pairs = payload.split(";");
+
+    for (const pair of pairs) {
+      const trimmed = pair.trim();
+
+      if (!trimmed) continue;
+
+      /**
+       * Skip fragments that are pure comments, e.g.
+       * "(1-vibration and ringing,refer to 30.Scence mode)"
+       */
+      if (trimmed.startsWith("(")) continue;
+
+      const colonIndex = trimmed.indexOf(":");
+
+      if (colonIndex === -1) continue;
+
+      const key = trimmed.substring(0, colonIndex).trim();
+      const value = trimmed.substring(colonIndex + 1).trim();
+
+      if (!key) continue;
+
+      result[key] = value;
+    }
+
+    return result;
+  }
+
+  /**
+   * Persist the parsed device status to the Device record (and
+   * DeviceSetting for the scene-mode profile).
+   */
+  private async saveDeviceStatus(
+    deviceId: string,
+    status: DeviceStatus
+  ): Promise<void> {
+    const device = await this.findDevice(deviceId);
+
+    if (!device) return;
+
+    const updates: any = {
+      last_updated_at: new Date(),
+      is_online: true,
+      connection_status: "online",
+    };
+
+    /**
+     * Firmware version
+     */
+    if (status.ver) {
+      updates.firmware_version = status.ver;
+    }
+
+    /**
+     * Battery level (percentage)
+     */
+    if (status.batlevel) {
+      const battery = parseInt(status.batlevel, 10);
+
+      if (!isNaN(battery) && battery >= 0 && battery <= 100) {
+        updates.battery_percentage = battery;
+      }
+    }
+
+    /**
+     * Upload interval (seconds → minutes)
+     */
+    if (status.upload) {
+      const uploadSeconds = parseInt(status.upload, 10);
+
+      if (!isNaN(uploadSeconds) && uploadSeconds > 0) {
+        updates.location_interval_minutes = Math.round(uploadSeconds / 60);
+      }
+    }
+
+    /**
+     * Heartbeat / link interval (seconds)
+     */
+    if (status.lk) {
+      const lkSeconds = parseInt(status.lk, 10);
+
+      if (!isNaN(lkSeconds) && lkSeconds > 0) {
+        updates.heartbeat_interval_seconds = lkSeconds;
+      }
+    }
+
+    /**
+     * Language
+     */
+    if (status.language) {
+      updates.language = status.language;
+    }
+
+    /**
+     * Timezone / zone
+     */
+    if (status.zone) {
+      updates.timezone = status.zone;
+    }
+
+    /**
+     * GPS status — e.g. "OK(0)"
+     */
+    if (status.GPS) {
+      updates.gps_status = status.GPS;
+    }
+
+    /**
+     * Network status — e.g. "OK(100)"
+     */
+    if (status.NET) {
+      updates.network_status = status.NET;
+      updates.signal_status = status.NET;
+    }
+
+    /**
+     * WiFi
+     */
+    if (status.wifiOpen !== undefined) {
+      updates.wifi_enabled = status.wifiOpen === "true";
+    }
+
+    if (status.wifiConnect !== undefined) {
+      updates.wifi_connected = status.wifiConnect === "true";
+    }
+
+    /**
+     * GPRS
+     */
+    if (status.gprsOpen !== undefined) {
+      updates.gprs_enabled = status.gprsOpen === "true";
+    }
+
+    await device.update(updates);
+
+    /**
+     * Update scene mode in DeviceSetting if profile is present.
+     */
+    if (status.profile) {
+      const profile = parseInt(status.profile, 10);
+
+      if (!isNaN(profile) && [1, 2, 3, 4].includes(profile)) {
+        try {
+          let deviceSetting = await db.DeviceSetting.findOne({
+            where: { device_id: device.id },
+          });
+
+          if (deviceSetting) {
+            deviceSetting.scene_mode = profile;
+            await deviceSetting.save();
+          } else {
+            await db.DeviceSetting.create({
+              device_id: device.id,
+              sms_alert_enabled: "0",
+              take_off_device_alert: "0",
+              safe_mode: "0",
+              talking_clock: "0",
+              night_power_saving: "0",
+              volume: 50,
+              brightness: 50,
+              fall_down_alert_enabled: true,
+              fall_down_reminder_call: true,
+              fall_down_level: 5,
+              scene_mode: profile,
+            });
+          }
+        } catch (settingErr) {
+          Logging.error(
+            `Failed to update scene_mode from TS profile for device ${deviceId}: ${settingErr}`
+          );
+        }
+      }
+    }
+  }
+
   /**
    * The bracket protocol's deviceId is a short serial, not the real
    * IMEI a Device is registered with. Once we learn the real IMEI
@@ -1517,6 +1778,45 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Send Device Status (TS) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a TS (terminal status) query command to a specific device.
+   *
+   * Protocol format: [3G*YYYYYYYYYY*0002*TS]
+   *
+   * The device will respond with a TS packet containing its current
+   * firmware version, battery level, GPS/network status, WiFi/GPRS
+   * state, upload & heartbeat intervals, language, timezone, and
+   * scene-mode profile.
+   *
+   * @param deviceId - The device ID (e.g. 8800000015)
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendDeviceStatusCommand(deviceId: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send TS command.`
+      );
+
+      return false;
+    }
+
+    const command = `[3G*${deviceId}*0002*TS]`;
+
+    Logging.info(
+      `Sending device status (TS) command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Connection ID
   // ───────────────────────────────────────────────────────────
 
@@ -1677,6 +1977,33 @@ interface GpsLocation {
   gsmSignal?: string;
 
   rawFields: string[];
+}
+
+/**
+ * Parsed key:value pairs from a TS (terminal status) device response.
+ *
+ * The device returns a semicolon-delimited list of key:value pairs.
+ * We store every recognised key as an optional string property so
+ * that callers can safely access any field without runtime errors.
+ */
+interface DeviceStatus {
+  ver?: string;
+  ID?: string;
+  imei?: string;
+  url?: string;
+  port?: string;
+  upload?: string;
+  lk?: string;
+  batlevel?: string;
+  language?: string;
+  zone?: string;
+  profile?: string;
+  GPS?: string;
+  wifiOpen?: string;
+  wifiConnect?: string;
+  gprsOpen?: string;
+  NET?: string;
+  [key: string]: string | undefined;
 }
 
 export default TcpServer;

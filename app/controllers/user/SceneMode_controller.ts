@@ -2,21 +2,8 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import Logging from "../../library/Logging";
-
-// Import TCP server instance
 import { tcpServer } from "../../app";
 
-/**
- * Scene Mode Controller
- *
- * Scene Modes:
- * - 1: Vibration and ringing
- * - 2: Ringing only
- * - 3: Vibration only
- * - 4: Silence
- */
-
-// Scene mode descriptions for response
 const SCENE_MODE_DESCRIPTIONS: Record<number, string> = {
   1: "Vibration and ringing",
   2: "Ringing only",
@@ -24,20 +11,6 @@ const SCENE_MODE_DESCRIPTIONS: Record<number, string> = {
   4: "Silence",
 };
 
-/**
- * Send scene mode command to a device
- *
- * API: POST /api/scene_mode/update
- *
- * Request Body:
- * - serial_number: string (required) - The device serial number (e.g., "8800000015")
- * - scene_mode: number (required) - 1, 2, 3, or 4
- *
- * Response:
- * - success: true/false
- * - message: string
- * - data: { serial_number, scene_mode, scene_mode_description, command_sent, timestamp }
- */
 const updateSceneMode = async (
   req: Request,
   res: Response,
@@ -46,7 +19,6 @@ const updateSceneMode = async (
   try {
     const { serial_number, scene_mode } = req.body;
 
-    // Validate required fields
     if (!serial_number) {
       return errorMessage(res, "serial_number is required");
     }
@@ -55,7 +27,6 @@ const updateSceneMode = async (
       return errorMessage(res, "scene_mode is required");
     }
 
-    // Validate scene mode value
     if (![1, 2, 3, 4].includes(scene_mode)) {
       return errorMessage(
         res,
@@ -63,7 +34,6 @@ const updateSceneMode = async (
       );
     }
 
-    // Check if device exists in database by serial_number
     const device = await db.Device.findOne({
       where: { serial_number: serial_number },
     });
@@ -74,7 +44,6 @@ const updateSceneMode = async (
       );
     }
 
-    // Check if device is online (TCP connection exists)
     const tcpClient = tcpServer.getDevice(serial_number);
     if (!tcpClient) {
       return errorMessage(
@@ -83,7 +52,6 @@ const updateSceneMode = async (
       );
     }
 
-    // Send scene mode command via TCP
     const commandSent = tcpServer.sendSceneModeCommand(
       serial_number,
       scene_mode
@@ -96,26 +64,22 @@ const updateSceneMode = async (
       );
     }
 
-    // Log the command
     Logging.info(
       `Scene mode command sent to device ${serial_number}: mode ${scene_mode} (${SCENE_MODE_DESCRIPTIONS[scene_mode]})`
     );
 
-    // Also update scene_mode in DeviceSetting table
     try {
       let deviceSetting = await db.DeviceSetting.findOne({
         where: { device_id: device.id },
       });
 
       if (deviceSetting) {
-        // Update existing settings
         deviceSetting.scene_mode = scene_mode;
         await deviceSetting.save();
         Logging.info(
           `Scene mode updated in DeviceSetting for device ${device.id}: mode ${scene_mode}`
         );
       } else {
-        // Create new settings with scene_mode
         deviceSetting = await db.DeviceSetting.create({
           device_id: device.id,
           sms_alert_enabled: "0",
@@ -135,14 +99,12 @@ const updateSceneMode = async (
         );
       }
     } catch (settingErr) {
-      // Log error but don't fail the request since command was sent successfully
       console.error("Error updating DeviceSetting:", settingErr);
       Logging.error(
         `Failed to update DeviceSetting for device ${device.id}: ${settingErr}`
       );
     }
 
-    // Return success response
     return successMessage(res, "Scene mode command sent successfully", {
       serial_number,
       device_id: device.id,
@@ -159,16 +121,6 @@ const updateSceneMode = async (
   }
 };
 
-/**
- * Get current scene mode status for a device
- *
- * API: GET /api/scene_mode/status/:serial_number
- *
- * Response:
- * - success: true/false
- * - message: string
- * - data: { serial_number, is_online, last_scene_mode }
- */
 const getSceneModeStatus = async (
   req: Request,
   res: Response,
@@ -184,7 +136,6 @@ const getSceneModeStatus = async (
       return errorMessage(res, "serial_number is required");
     }
 
-    // Check if device exists by serial_number
     const device = await db.Device.findOne({
       where: { serial_number: serial_number },
     });
@@ -195,11 +146,9 @@ const getSceneModeStatus = async (
       );
     }
 
-    // Check if device is online
     const tcpClient = tcpServer.getDevice(serial_number);
     const isOnline = !!tcpClient;
 
-    // Get last scene mode notification (if any)
     const lastNotification = await db.Notification.findOne({
       where: {
         device_id: device.id,
@@ -227,16 +176,6 @@ const getSceneModeStatus = async (
   }
 };
 
-/**
- * Get available scene modes
- *
- * API: GET /api/scene_mode/list
- *
- * Response:
- * - success: true/false
- * - message: string
- * - data: Array of scene modes with id and description
- */
 const listSceneModes = async (
   req: Request,
   res: Response,

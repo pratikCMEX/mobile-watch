@@ -263,6 +263,54 @@
 
 ---
 
+## 17. Get Device Status
+
+Sends a TS (terminal status) command to the device via TCP to request
+fresh firmware/software status, then returns the current device data
+from the database. When the device responds, the TCP server
+automatically updates the record.
+
+**POST** `/user/device/get_device_status`
+
+```json
+{
+  "device_id": "DEVICE_UUID"
+}
+```
+
+**Response fields:**
+
+| Field                        | Type    | Description                                                            |
+| ---------------------------- | ------- | ---------------------------------------------------------------------- |
+| `device_id`                  | string  | Device UUID                                                            |
+| `device_name`                | string  | Device name                                                            |
+| `serial_number`              | string  | Protocol serial number                                                 |
+| `imei`                       | string  | Device IMEI                                                            |
+| `firmware_version`           | string  | Firmware version (e.g. `G4C_YSC_EMMC_240_5M_En_N_2023.11.10_15.38.00`) |
+| `is_online`                  | boolean | Whether device is currently connected via TCP                          |
+| `connection_status`          | string  | `"online"` or `"offline"`                                              |
+| `network_type`               | string  | e.g. `2G`, `4G`, `5G`                                                  |
+| `network_carrier`            | string  | Carrier name                                                           |
+| `signal_status`              | string  | Network signal status (e.g. `OK(100)`)                                 |
+| `network_status`             | string  | Network status from device (e.g. `OK(100)`)                            |
+| `gprs_enabled`               | boolean | Whether GPRS is enabled                                                |
+| `gps_strength`               | string  | GPS strength (`strong` / `weak`)                                       |
+| `gps_status`                 | string  | GPS status from device (e.g. `OK(0)`)                                  |
+| `wifi_enabled`               | boolean | Whether WiFi is enabled                                                |
+| `wifi_connected`             | boolean | Whether WiFi is connected                                              |
+| `battery_percentage`         | number  | Battery level (0-100)                                                  |
+| `location_interval_minutes`  | number  | Upload interval in minutes                                             |
+| `heartbeat_interval_seconds` | number  | Heartbeat/link interval in seconds                                     |
+| `language`                   | string  | Device language (e.g. `en`)                                            |
+| `timezone`                   | string  | Device timezone (e.g. `+01:00`)                                        |
+| `scene_mode`                 | number  | Current scene mode (1-4)                                               |
+| `scene_mode_description`     | string  | Human-readable scene mode                                              |
+| `last_updated_at`            | string  | Last update timestamp                                                  |
+| `command_sent`               | boolean | Whether the TS command was sent to the device                          |
+| `command_message`            | string  | Status message about the command                                       |
+
+---
+
 ## Notes
 
 - Replace `DEVICE_UUID`, `USER_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs

@@ -1,6 +1,8 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
+import Logging from "../../library/Logging";
+import { tcpServer } from "../../app";
 
 const updateDeviceSettings = async function (
   req: Request,
@@ -107,12 +109,33 @@ const aboutDevice = async (req: Request, res: Response, next: NextFunction) => {
       connection_status: deviceData.connection_status,
       country_code: deviceData.country_code,
       phone_number: deviceData.phone_number,
-      // network_carrier: deviceData.network_carrier,
       network_type: deviceData.network_type,
-      // signal_status: deviceData.signal_status,
       gps_strength: deviceData.gps_strength,
       imei: deviceData.imei,
       serial_number: deviceData.serial_number,
+
+      // Firmware / software
+      firmware_version: deviceData.firmware_version,
+
+      // Network & connection
+      signal_status: deviceData.signal_status,
+      network_status: deviceData.network_status,
+      gprs_enabled: deviceData.gprs_enabled,
+
+      // WiFi
+      wifi_enabled: deviceData.wifi_enabled,
+      wifi_connected: deviceData.wifi_connected,
+
+      // Battery
+      battery_percentage: deviceData.battery_percentage,
+
+      // Intervals
+      location_interval_minutes: deviceData.location_interval_minutes,
+      heartbeat_interval_seconds: deviceData.heartbeat_interval_seconds,
+
+      // Locale
+      language: deviceData.language,
+      timezone: deviceData.timezone,
 
       // Device Settings
     });
@@ -122,16 +145,6 @@ const aboutDevice = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
-/**
- * Get all device settings including scene_mode
- *
- * API: GET /api/device/settings/:device_id
- *
- * Response:
- * - success: true/false
- * - message: string
- * - data: All device settings including scene_mode
- */
 const getDeviceSettings = async (
   req: Request,
   res: Response,
@@ -205,8 +218,111 @@ const getDeviceSettings = async (
   }
 };
 
+const getDeviceStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id } = req.params;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const deviceData = device.toJSON();
+
+    const serialNumber = deviceData.serial_number;
+
+    let commandSent = false;
+    let commandMessage = "Device is offline or not connected";
+
+    if (serialNumber) {
+      const tcpClient = tcpServer.getDevice(serialNumber);
+
+      if (tcpClient) {
+        commandSent = tcpServer.sendDeviceStatusCommand(serialNumber);
+
+        if (commandSent) {
+          commandMessage =
+            "TS command sent to device. Response will update the database.";
+        } else {
+          commandMessage = "Failed to send TS command to device";
+        }
+      } else {
+        commandMessage =
+          "Device is not connected via TCP. Returning last known data.";
+      }
+    } else {
+      commandMessage = "Device has no serial_number. Cannot send TS command.";
+    }
+
+    let sceneMode: number | null = null;
+    let sceneModeDescription: string | null = null;
+
+    const deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (deviceSetting) {
+      sceneMode = deviceSetting.scene_mode;
+      const sceneModeDescriptions: Record<number, string> = {
+        1: "Vibration and ringing",
+        2: "Ringing only",
+        3: "Vibration only",
+        4: "Silence",
+      };
+      sceneModeDescription =
+        sceneModeDescriptions[deviceSetting.scene_mode] || "Unknown";
+    }
+
+    Logging.info(
+      `Device status requested for device ${device.id} (serial: ${serialNumber}): ` +
+        `command_sent=${commandSent}`
+    );
+
+    return successMessage(res, "Device status fetched successfully", {
+      device_id: deviceData.id,
+      device_name: deviceData.device_name,
+      serial_number: deviceData.serial_number,
+      imei: deviceData.imei,
+      firmware_version: deviceData.firmware_version,
+      is_online: deviceData.is_online,
+      connection_status: deviceData.connection_status,
+      network_type: deviceData.network_type,
+      network_carrier: deviceData.network_carrier,
+      signal_status: deviceData.signal_status,
+      network_status: deviceData.network_status,
+      gprs_enabled: deviceData.gprs_enabled,
+      gps_strength: deviceData.gps_strength,
+      gps_status: deviceData.gps_status,
+      wifi_enabled: deviceData.wifi_enabled,
+      wifi_connected: deviceData.wifi_connected,
+      battery_percentage: deviceData.battery_percentage,
+      location_interval_minutes: deviceData.location_interval_minutes,
+      heartbeat_interval_seconds: deviceData.heartbeat_interval_seconds,
+      language: deviceData.language,
+      timezone: deviceData.timezone,
+      scene_mode: sceneMode,
+      scene_mode_description: sceneModeDescription,
+      last_updated_at: deviceData.last_updated_at,
+      command_sent: commandSent,
+      command_message: commandMessage,
+    });
+  } catch (err) {
+    console.error("getDeviceStatus error:", err);
+    return errorMessage(res, "Error fetching device status");
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
   getDeviceSettings,
+  getDeviceStatus,
 };

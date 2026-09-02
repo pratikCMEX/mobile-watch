@@ -150,6 +150,7 @@ export const Schemas = {
       scene_mode: Joi.number().integer().min(1).max(4).optional(),
     }),
   },
+
   sceneMode: {
     update: Joi.object({
       serial_number: Joi.string().required().messages({

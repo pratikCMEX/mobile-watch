@@ -28,6 +28,13 @@ router.get(
   Device_controller.getDeviceSettings
 );
 
+// Get device information and status (sends TS command to device)
+router.get(
+  "/get_device_status/:device_id",
+  checkToken,
+  Device_controller.getDeviceStatus
+);
+
 router.post(
   "/add_family_member",
   checkToken,
