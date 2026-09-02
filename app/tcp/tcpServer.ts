@@ -2465,23 +2465,60 @@ class TcpServer {
   }
 
   /**
-   * IMPORTANT — PHBX wire format:
+   * Encode a contact name into the wire format the PHBX firmware expects.
+   *
+   * The spec says "name: Unicode coding". Different firmware builds on
+   * this watch interpret that in two different ways — both of which are
+   * common in the wild for Chinese GPS watches:
+   *
+   *   1. "hex"   — Each Unicode codepoint as 4-digit HEX in BIG-ENDIAN
+   *                order. "Mom" -> "4d006f006d00". This is the original
+   *                behaviour and works on most firmwares (when the LEN
+   *                is computed correctly).
+   *
+   *   2. "utf8"  — RAW UTF-8 bytes. "Mom" stays as "Mom". Some firmwares
+   *                decode the LEN-bounded payload as UTF-8.
+   *
+   * Pick the right mode with the env var:
+   *   PHBX_NAME_ENCODING=hex    (default — same as the original code)
+   *   PHBX_NAME_ENCODING=utf8
+   *
+   * You can see which one your firmware wants by reading what the watch
+   * does on the very first entry. With "hex" the device typically
+   * shows the name correctly; with "utf8" it may show "U'" or random
+   * garbled characters because it's interpreting the wrong format.
+   */
+  private encodePhonebookName(str: string): string {
+    const mode = (process.env.PHBX_NAME_ENCODING || "hex").toLowerCase();
+    if (mode === "utf8") {
+      return str;
+    }
+    // hex: each char's Unicode codepoint as 4 hex digits, big-endian.
+    let hex = "";
+    for (const ch of str) {
+      hex += ch.charCodeAt(0).toString(16).padStart(4, "0");
+    }
+    return hex;
+  }
+
+  /**
+   * Send a single phonebook entry to the device.
    *
    * Per the protocol spec:
    *   Server send:
    *     [3G*<id>*LEN*PHBX,<index>,<name>,<phone number>,<photo data>]
-   *     1. number   1-30         (slot index, ASCII digits)
-   *     2. name     Unicode      (RAW Unicode/UTF-8 chars, NOT hex!)
-   *     3. phone    ASCII        (digits, country code included)
-   *     4. photo    photo data   (optional, often empty)
+   *     1. index    1..30         (slot, ASCII)
+   *     2. name     Unicode/UTF-8 hex or raw (see PHBX_NAME_ENCODING)
+   *     3. phone    ASCII digits  (with country code included)
+   *     4. photo    photo data    (optional, often empty)
    *
-   * The "Unicode coding" instruction means the name is sent as RAW UTF-8
-   * bytes on the wire — the device firmware reads the LEN-bounded
-   * payload and decodes the UTF-8 itself. Earlier code in this file was
-   * hex-encoding the name ("Mom" -> "4d006f006d00"), which is just an
-   * ASCII string of digits that the firmware renders as garbage and
-   * rejects with status=0. That is why "no number was saving in the
-   * device": the device saw an invalid name and refused the entry.
+   *   Device reply:
+   *     [3G*<id>*0004*PHBX]            (bare ack = success)
+   *     [3G*<id>*0006*PHBX,0]          (explicit failure)
+   *     [3G*<id>*0006*PHBX,1]          (explicit success — rare)
+   *
+   * LEN is the UTF-8 byte length of the content between `*` and `]`,
+   * expressed as a 4-digit uppercase hex value.
    */
   public sendPhonebookCommand(
     deviceId: string,
@@ -2515,9 +2552,7 @@ class TcpServer {
       return false;
     }
 
-    // If we get a 10-digit national number with no country code, prepend
-    // the default one (same convention as SOS). Override with
-    // SOS_DEFAULT_COUNTRY_CODE.
+    // Auto-prepend default country code for 10-digit national numbers.
     const DEFAULT_CC = (process.env.SOS_DEFAULT_COUNTRY_CODE || "91").replace(
       /[^0-9]/g,
       ""
@@ -2525,9 +2560,9 @@ class TcpServer {
     const finalDigits =
       DEFAULT_CC && digits.length === 10 ? DEFAULT_CC + digits : digits;
 
-    // Strip control chars / commas from the name so it can't break the
-    // bracketed payload. The cleaned name is sent as RAW Unicode (UTF-8),
-    // not hex-encoded.
+    // Strip control chars / commas from the name. The cleaned name is
+    // then either hex-encoded (default, original behaviour) or kept as
+    // raw UTF-8, depending on PHBX_NAME_ENCODING.
     const cleanName = (name || "").replace(/[,\[\]\r\n]/g, " ").trim();
     if (!cleanName) {
       Logging.error(
@@ -2535,15 +2570,20 @@ class TcpServer {
       );
       return false;
     }
+    const encodedName = this.encodePhonebookName(cleanName);
     const photo = photoData || "";
 
-    const content = `PHBX,${index},${cleanName},${finalDigits},${photo}`;
-    // LEN is the UTF-8 byte length of `content`, expressed as hex.
+    const content = `PHBX,${index},${encodedName},${finalDigits},${photo}`;
+    // LEN = UTF-8 byte length of `content` (which already includes the
+    // hex-encoded name, or the raw name — both are ASCII or UTF-8).
     const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
     const command = `[3G*${deviceId}*${length}*${content}]`;
 
     Logging.info(
-      `Sending phonebook (PHBX) entry #${index} to device ${deviceId}: ${command}`
+      `Sending phonebook (PHBX) entry #${index} to device ${deviceId} ` +
+        `(name_encoding=${(
+          process.env.PHBX_NAME_ENCODING || "hex"
+        ).toLowerCase()}): ${command}`
     );
 
     this.send(client, command);

@@ -630,10 +630,11 @@ Device reply (per entry):
 `[3G*<serial>*0002*PHBX,<status>]` where `status: 1=success, 0=failure`
 
 - `index`: phonebook slot on the watch, integer **1..30**, unique across the batch.
-- `name`: contact name. Sent as **raw Unicode / UTF-8 bytes** on the wire
-  (NOT hex-encoded). Any characters are allowed, including multi-byte
-  ones like `अम्मा`, `Mom`, `張媽媽`, etc. Earlier code hex-encoded the
-  name, which the firmware rejected (status=0).
+- `name`: contact name. The spec says "Unicode coding". This firmware
+  interprets that as **each Unicode codepoint as 4 hex digits in
+  big-endian** — so `Mom` goes on the wire as `4d006f006d00`. To
+  switch to raw UTF-8, set `PHBX_NAME_ENCODING=utf8` in the server env
+  and restart. Default is `hex`.
 - `number`: phone number. Digits-only on the wire; country code `91` is
   auto-prepended for 10-digit Indian mobiles.
 - `photo`: optional photo data (currently unused — pass `""`).

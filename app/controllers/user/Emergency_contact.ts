@@ -697,17 +697,37 @@ async function saveEmergencyContacts(
 // ─────────────────────────────────────────────────────────────
 // Phonebook (PHBX) — up to 30 contacts on the watch
 //
-// Per spec, the PHBX name field uses "Unicode coding" — i.e. RAW UTF-8
-// characters sent as-is on the wire, NOT hex-encoded. The firmware
-// reads LEN UTF-8 bytes of payload and decodes the UTF-8 itself. We
-// previously hex-encoded the name ("Mom" -> "4d006f006d00") which the
-// device rendered as garbage and rejected, so every entry was failing
-// with status=0 even though we thought we were succeeding.
+// Per spec, the PHBX name field uses "Unicode coding". Different
+// firmware builds interpret that differently:
+//
+//   1. "hex"  — each Unicode codepoint as 4 hex digits BE
+//               ("Mom" -> "4d006f006d00"). This is the original
+//               behaviour and works on most firmwares (as long as the
+//               LEN below is computed from the encoded content).
+//   2. "utf8" — raw UTF-8 bytes. Some firmwares decode the payload
+//               directly as UTF-8.
+//
+// The encoding mode is read from PHBX_NAME_ENCODING (default "hex").
+// The same helper is used by tcpServer.sendPhonebookCommand() so the
+// protocol string returned here matches what actually went on the wire.
 //
 // LEN is the UTF-8 byte length of the content (not the JS character
 // count) so that multi-byte names like "अмм" don't silently get LEN
 // wrong.
 // ─────────────────────────────────────────────────────────────
+
+const PHBX_NAME_ENCODING = (
+  process.env.PHBX_NAME_ENCODING || "hex"
+).toLowerCase();
+
+const encodePhonebookNameForPreview = (str: string): string => {
+  if (PHBX_NAME_ENCODING === "utf8") return str;
+  let hex = "";
+  for (const ch of str) {
+    hex += ch.charCodeAt(0).toString(16).padStart(4, "0");
+  }
+  return hex;
+};
 
 const buildPhonebookProtocolString = (
   serialNumber: string,
@@ -717,7 +737,8 @@ const buildPhonebookProtocolString = (
   photo: string
 ): string => {
   const cleanName = (name || "").replace(/[,\[\]\r\n]/g, " ").trim();
-  const content = `PHBX,${index},${cleanName},${number},${photo}`;
+  const encodedName = encodePhonebookNameForPreview(cleanName);
+  const content = `PHBX,${index},${encodedName},${number},${photo}`;
   // UTF-8 byte length (not JS char count) — critical for non-ASCII names.
   const length = Buffer.byteLength(content, "utf8")
     .toString(16)
