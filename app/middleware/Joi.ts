@@ -202,58 +202,90 @@ export const Schemas = {
     /**
      * Set the SOS numbers on a device.
      *
-     * Accepts any of:
-     *   - sos_number:  single number (writes to SOS1)
-     *   - sos1, sos2, sos3: per-slot numbers
+     * Preferred shape (per the spec):
+     *   {
+     *     "serial_number": "8800000015",
+     *     "contacts": [
+     *       { "name": "Mom",   "number": "9691905903", "priority": 1 },
+     *       { "name": "Dad",   "number": "9510589322", "priority": 2 }
+     *     ]
+     *   }
      *
-     * Each field is a digits-only string. '+', spaces and dashes are
-     * stripped before being sent to the device, but the validator
-     * accepts them so the API is friendly.
+     * - 1..3 contacts, priorities must be unique and in [1,3].
+     * - Contacts are stored in the DB one row each (with priority).
+     * - Contacts are pushed to the device as SOS1/SOS2/SOS3 ordered by
+     *   priority; empty slots are NOT sent.
      *
-     * Country code must be included (e.g. "91" prefix for India).
+     * Legacy shape still accepted:
+     *   - sos_number        -> treated as SOS1
+     *   - sos1 / sos2 / sos3-> per-slot numbers
      */
     set: Joi.object({
       serial_number: Joi.string().required().messages({
         "string.empty": "serial_number is required",
         "any.required": "serial_number is required",
       }),
+      contacts: Joi.array()
+        .items(
+          Joi.object({
+            name: Joi.string().required().messages({
+              "string.empty": "name is required",
+              "any.required": "name is required",
+            }),
+            number: Joi.string()
+              .pattern(/^[0-9+\-\s()]{5,20}$/)
+              .required()
+              .messages({
+                "string.empty": "number is required",
+                "any.required": "number is required",
+                "string.pattern.base":
+                  "number must be a valid phone (5-20 chars, digits/+/-/space/parentheses)",
+              }),
+            priority: Joi.number().integer().min(1).max(3).required().messages({
+              "number.base": "priority must be a number (1, 2 or 3)",
+              "number.min": "priority must be 1, 2 or 3",
+              "number.max": "priority must be 1, 2 or 3",
+              "any.required": "priority is required",
+            }),
+          })
+        )
+        .min(1)
+        .max(3)
+        .unique("priority")
+        .optional()
+        .messages({
+          "array.min": "At least one contact is required",
+          "array.max": "Maximum 3 contacts allowed",
+          "array.unique": "priority values must be unique (1, 2 and/or 3)",
+        }),
+      // Legacy fields (still accepted for backward compatibility)
       sos_number: Joi.string()
         .pattern(/^[0-9+\-\s()]{5,20}$/)
         .optional()
         .allow(null, "")
         .messages({
-          "string.pattern.base":
-            "sos_number must be a valid phone number (5-20 chars, digits/+/-/space/parentheses)",
+          "string.pattern.base": "sos_number must be a valid phone number",
         }),
       sos1: Joi.string()
         .pattern(/^[0-9+\-\s()]{5,20}$/)
         .optional()
         .allow(null, "")
-        .messages({
-          "string.pattern.base":
-            "sos1 must be a valid phone number (5-20 chars, digits/+/-/space/parentheses)",
-        }),
+        .messages({ "string.pattern.base": "sos1 invalid" }),
       sos2: Joi.string()
         .pattern(/^[0-9+\-\s()]{5,20}$/)
         .optional()
         .allow(null, "")
-        .messages({
-          "string.pattern.base":
-            "sos2 must be a valid phone number (5-20 chars, digits/+/-/space/parentheses)",
-        }),
+        .messages({ "string.pattern.base": "sos2 invalid" }),
       sos3: Joi.string()
         .pattern(/^[0-9+\-\s()]{5,20}$/)
         .optional()
         .allow(null, "")
-        .messages({
-          "string.pattern.base":
-            "sos3 must be a valid phone number (5-20 chars, digits/+/-/space/parentheses)",
-        }),
+        .messages({ "string.pattern.base": "sos3 invalid" }),
     })
-      .or("sos_number", "sos1", "sos2", "sos3")
+      .or("contacts", "sos_number", "sos1", "sos2", "sos3")
       .messages({
         "object.missing":
-          "At least one of sos_number, sos1, sos2 or sos3 is required",
+          "Provide `contacts[]` (preferred) or legacy `sos_number`/`sos1`/`sos2`/`sos3`",
       }),
   },
   alarm: {

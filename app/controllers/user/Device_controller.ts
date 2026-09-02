@@ -4,36 +4,6 @@ import { errorMessage, successMessage } from "../../library/Response";
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
 
-/**
- * Normalize a phone number for the watch's SOS protocol.
- *
- * The watch's dialler/SMS module rejects anything that isn't a
- * digits-only string, and needs the country code (it cannot infer it).
- * This helper:
- *   1. Strips everything except digits.
- *   2. If the resulting digits look like a 10-digit national number
- *      (i.e. no leading country code), prepends DEFAULT_COUNTRY_CODE.
- *
- * Override with an env var SOS_DEFAULT_COUNTRY_CODE if you operate in
- * a different region.
- */
-const DEFAULT_COUNTRY_CODE = (
-  process.env.SOS_DEFAULT_COUNTRY_CODE || ""
-).replace(/[^0-9]/g, "");
-
-const normalizeSosPhone = (raw: string): string => {
-  const digits = (raw || "").replace(/[^0-9]/g, "");
-  if (!digits) return "";
-
-  // Heuristic: if it's exactly 10 digits, treat as national and prepend
-  // the default country code. If it's already 11-15 digits, assume the
-  // caller already included a country code.
-  if (digits.length === 10) {
-    return DEFAULT_COUNTRY_CODE + digits;
-  }
-  return digits;
-};
-
 const updateDeviceSettings = async function (
   req: Request,
   res: Response,
@@ -730,133 +700,9 @@ const captureSnapshot = async (
   }
 };
 
-const setSosNumbers = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const { serial_number, sos_number, sos1, sos2, sos3 } = req.body;
-
-    if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
-    }
-
-    // Build the list of (slot, rawPhone) pairs to push to the device.
-    // - "sos_number" is treated as SOS1 (single-number shorthand)
-    // - "sos1", "sos2", "sos3" target specific slots
-    type SosSlot = "SOS1" | "SOS2" | "SOS3";
-    const targets: Array<{ slot: SosSlot; raw: string }> = [];
-
-    if (sos1) targets.push({ slot: "SOS1", raw: sos1 });
-    if (sos2) targets.push({ slot: "SOS2", raw: sos2 });
-    if (sos3) targets.push({ slot: "SOS3", raw: sos3 });
-
-    if (sos_number && !sos1) {
-      // "sos_number" is shorthand for SOS1; only use it if SOS1 wasn't
-      // explicitly provided to avoid double-sending.
-      targets.unshift({ slot: "SOS1", raw: sos_number });
-    }
-
-    if (targets.length === 0) {
-      return errorMessage(
-        res,
-        "At least one of sos_number, sos1, sos2 or sos3 is required"
-      );
-    }
-
-    // Look up the device
-    const device = await db.Device.findOne({
-      where: { serial_number },
-    });
-    if (!device) {
-      return errorMessage(
-        res,
-        `Device with serial_number '${serial_number}' not found`
-      );
-    }
-
-    // Verify the device is online via TCP
-    const tcpClient = tcpServer.getDevice(serial_number);
-    if (!tcpClient) {
-      return errorMessage(
-        res,
-        "Device is offline. Please ensure the device is connected."
-      );
-    }
-
-    // Send each SOS command in turn
-    const results: Array<{
-      slot: SosSlot;
-      raw: string;
-      digits: string;
-      sent: boolean;
-      protocol: string;
-    }> = [];
-
-    let allSent = true;
-
-    for (const { slot, raw } of targets) {
-      const digits = normalizeSosPhone(raw);
-
-      if (!digits) {
-        results.push({
-          slot,
-          raw,
-          digits: "",
-          sent: false,
-          protocol: "",
-        });
-        allSent = false;
-        continue;
-      }
-
-      const sent = tcpServer.sendSosCommand(serial_number, slot, digits);
-      if (!sent) allSent = false;
-
-      // Build the on-wire packet string for the response (mirrors the
-      // exact bytes written to the socket). LEN is hex.
-      const content = `${slot},${digits}`;
-      const length = content.length.toString(16).padStart(4, "0");
-      const protocol = `[3G*${serial_number}*${length}*${content}]`;
-
-      results.push({
-        slot,
-        raw,
-        digits,
-        sent,
-        protocol,
-      });
-
-      Logging.info(
-        `SOS ${slot} command sent to device ${serial_number} ` +
-          `(device_id: ${device.id}): ${protocol}`
-      );
-    }
-
-    if (!allSent) {
-      return errorMessage(
-        res,
-        "One or more SOS commands failed to send. Device may be disconnected.",
-        { results }
-      );
-    }
-
-    return successMessage(res, "SOS numbers set successfully", {
-      serial_number,
-      device_id: device.id,
-      device_name: device.device_name,
-      command_sent: true,
-      results,
-      command_message:
-        "SOSx commands sent to device. The device will use these numbers when the SOS button is pressed.",
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error("setSosNumbers error:", err);
-    return errorMessage(res, "Error sending SOS numbers to device");
-  }
-};
+// SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
+// The `/set_sos_numbers` route now points directly at the
+// Emergency_contact controller there.
 
 export default {
   updateDeviceSettings,
@@ -868,5 +714,4 @@ export default {
   findDevice,
   setAlarm,
   captureSnapshot,
-  setSosNumbers,
 };

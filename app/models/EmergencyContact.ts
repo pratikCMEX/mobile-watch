@@ -9,6 +9,11 @@ export interface EmergencyContactAttributes {
   name: string;
   phone_number: string;
   country_code: string;
+  /**
+   * SOS slot on the watch (1, 2 or 3). Null for non-SOS contacts.
+   * Unique per device.
+   */
+  priority: number | null;
   //   deletedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -16,7 +21,7 @@ export interface EmergencyContactAttributes {
 
 type EmergencyContactCreationAttributes = Optional<
   EmergencyContactAttributes,
-  "id"
+  "id" | "priority"
 >;
 
 // ── Model Class ──────────────────────────────────────────────
@@ -29,6 +34,7 @@ class EmergencyContact
   public name!: string;
   public phone_number!: string;
   public country_code!: string;
+  public priority!: number | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   //   public readonly deletedAt!: Date;
@@ -76,6 +82,16 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.STRING(10),
         allowNull: true,
         defaultValue: null, // e.g. +1, +91
+      },
+
+      priority: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+        validate: {
+          min: 1,
+          max: 3,
+        },
       },
 
       //   deletedAt: {
