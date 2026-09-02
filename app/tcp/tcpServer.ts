@@ -2069,7 +2069,9 @@ class TcpServer {
 
     // Calculate length: "profile,X" where X is the scene mode
     const payload = `profile,${sceneMode}`;
-    const length = payload.length.toString().padStart(4, "0");
+    // LEN is hex (same family as image packets which are received with
+    // parseInt(..., 16)). Sending it as decimal mis-frames the packet.
+    const length = payload.length.toString(16).padStart(4, "0");
 
     // Build the command packet
     const command = `[CS*${deviceId}*${length}*${payload}]`;
@@ -2333,7 +2335,8 @@ class TcpServer {
     }
 
     const content = `${slot},${digits}`;
-    const length = content.length.toString().padStart(4, "0");
+    // LEN is hex (device's parser uses parseInt(..., 16)).
+    const length = content.length.toString(16).padStart(4, "0");
     const command = `[3G*${deviceId}*${length}*${content}]`;
 
     Logging.info(
@@ -2382,7 +2385,8 @@ class TcpServer {
     const content = `REMIND,${alarmPayload}`;
 
     // Calculate length: content length (REMIND, + alarms)
-    const length = content.length.toString().padStart(4, "0");
+    // LEN is hex (same as image-packet framing on the receive side).
+    const length = content.length.toString(16).padStart(4, "0");
     const command = `[CS*${deviceId}*${length}*${content}]`;
 
     Logging.info(

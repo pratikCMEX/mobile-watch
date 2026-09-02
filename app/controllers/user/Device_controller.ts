@@ -4,6 +4,36 @@ import { errorMessage, successMessage } from "../../library/Response";
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
 
+/**
+ * Normalize a phone number for the watch's SOS protocol.
+ *
+ * The watch's dialler/SMS module rejects anything that isn't a
+ * digits-only string, and needs the country code (it cannot infer it).
+ * This helper:
+ *   1. Strips everything except digits.
+ *   2. If the resulting digits look like a 10-digit national number
+ *      (i.e. no leading country code), prepends DEFAULT_COUNTRY_CODE.
+ *
+ * Override with an env var SOS_DEFAULT_COUNTRY_CODE if you operate in
+ * a different region.
+ */
+const DEFAULT_COUNTRY_CODE = (
+  process.env.SOS_DEFAULT_COUNTRY_CODE || "91"
+).replace(/[^0-9]/g, "");
+
+const normalizeSosPhone = (raw: string): string => {
+  const digits = (raw || "").replace(/[^0-9]/g, "");
+  if (!digits) return "";
+
+  // Heuristic: if it's exactly 10 digits, treat as national and prepend
+  // the default country code. If it's already 11-15 digits, assume the
+  // caller already included a country code.
+  if (digits.length === 10) {
+    return DEFAULT_COUNTRY_CODE + digits;
+  }
+  return digits;
+};
+
 const updateDeviceSettings = async function (
   req: Request,
   res: Response,
@@ -607,10 +637,10 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
       );
     }
 
-    // Build the command protocol string for response
+    // Build the command protocol string for response (LEN is hex).
     const alarmPayload = alarms.join(",");
     const content = `REMIND,${alarmPayload}`;
-    const length = content.length.toString().padStart(4, "0");
+    const length = content.length.toString(16).padStart(4, "0");
     const commandProtocol = `[CS*${serial_number}*${length}*${content}]`;
 
     Logging.info(
@@ -767,7 +797,7 @@ const setSosNumbers = async (
     let allSent = true;
 
     for (const { slot, raw } of targets) {
-      const digits = (raw || "").replace(/[^0-9]/g, "");
+      const digits = normalizeSosPhone(raw);
 
       if (!digits) {
         results.push({
@@ -785,9 +815,9 @@ const setSosNumbers = async (
       if (!sent) allSent = false;
 
       // Build the on-wire packet string for the response (mirrors the
-      // exact bytes written to the socket).
+      // exact bytes written to the socket). LEN is hex.
       const content = `${slot},${digits}`;
-      const length = content.length.toString().padStart(4, "0");
+      const length = content.length.toString(16).padStart(4, "0");
       const protocol = `[3G*${serial_number}*${length}*${content}]`;
 
       results.push({
