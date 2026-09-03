@@ -217,8 +217,21 @@ const GetSnapshotsBySerialNumber = async (
   }
 };
 
+const deleteSnapshot = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const { id } = req.params;
+  const snapshot = await db.Snapshot.findByPk(id);
+  if (snapshot) {
+    await snapshot.destroy();
+    return successMessage(res, "Snapshot deleted successfully");
+  }
+};
 export default {
   AddSnapshot,
   ListSnapshots,
   GetSnapshotsBySerialNumber,
+  deleteSnapshot,
 };

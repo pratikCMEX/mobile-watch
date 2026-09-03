@@ -27,4 +27,9 @@ router.post(
   Snapshot_controller.GetSnapshotsBySerialNumber
 );
 
+router.delete(
+  "/delete_snapshot/:id",
+  checkToken,
+  Snapshot_controller.deleteSnapshot
+);
 module.exports = router;
