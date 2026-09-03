@@ -152,8 +152,31 @@ async function createOrUpdateEmergencyContact(
   next: NextFunction
 ) {
   try {
-    const { id, name, country_code, phone_number, device_id, serial_number } =
+    let { id, name, country_code, phone_number, device_id, serial_number } =
       req.body;
+    let priority: any = req.body.priority;
+
+    // ── Compatibility shim ──
+    // If the caller sent the plural body shape
+    //   { serial_number, contacts: [{id, name, phone_number, priority}, ...] }
+    // (common from the mobile app), transparently unwrap the FIRST
+    // contact so this singular endpoint works the same way. If the
+    // caller actually wanted to save multiple contacts, they should
+    // use POST /emergency_contact/save_contacts (plural).
+    if (
+      Array.isArray((req.body as any).contacts) &&
+      (req.body as any).contacts.length > 0 &&
+      (name === undefined ||
+        phone_number === undefined ||
+        priority === undefined)
+    ) {
+      const c = (req.body as any).contacts[0];
+      id = id ?? c.id;
+      name = name ?? c.name;
+      phone_number = phone_number ?? c.phone_number;
+      country_code = country_code ?? c.country_code;
+      priority = priority ?? c.priority;
+    }
 
     // Treat empty-string id as "no id" so mobile clients that always
     // send id: "" (e.g. for "create new") behave the same as omitting it.
@@ -204,13 +227,9 @@ async function createOrUpdateEmergencyContact(
         return errorMessage(res, "Emergency contact not found", 404);
       }
       contact = await db.EmergencyContact.findByPk(id);
-    } else if (
-      typeof req.body.priority === "number" &&
-      req.body.priority >= 1 &&
-      req.body.priority <= 3
-    ) {
+    } else if (typeof priority === "number" && priority >= 1 && priority <= 3) {
       // Upsert by (device_id, priority)
-      const priority = req.body.priority;
+      const prio = priority;
       const digits = normalizeSosPhone(phone_number);
       let cc = (country_code || "").replace(/[^0-9]/g, "");
       let pn = digits;
@@ -222,11 +241,11 @@ async function createOrUpdateEmergencyContact(
         cc = "";
       }
       [contact, created] = await db.EmergencyContact.findOrCreate({
-        where: { device_id: device.id, priority },
+        where: { device_id: device.id, priority: prio },
         defaults: {
           device_id: device.id,
-          priority,
-          name: name || `SOS ${priority}`,
+          priority: prio,
+          name: name || `SOS ${prio}`,
           phone_number: pn,
           country_code: cc,
         },
@@ -268,9 +287,10 @@ async function createOrUpdateEmergencyContact(
           : "Device is offline — contact saved in DB but not pushed to the watch. It will sync on next reconnect.",
       }
     );
-  } catch (err) {
+  } catch (err: any) {
     console.error("createOrUpdateEmergencyContact error:", err);
-    return errorMessage(res, "Error saving emergency contact");
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error saving emergency contact: " + msg);
   }
 }
 
