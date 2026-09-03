@@ -899,16 +899,12 @@ const listAutoAnswer = async (
   next: NextFunction
 ) => {
   try {
-    const { serial_number, device_id } = req.body || {};
+    const { device_id } = req.body || {};
 
     // Look up the device
     let device = null as any;
     if (device_id) {
       device = await db.Device.findByPk(device_id);
-    } else if (serial_number) {
-      device = await db.Device.findOne({
-        where: { serial_number: String(serial_number).trim() },
-      });
     } else {
       return errorMessage(res, "serial_number or device_id is required");
     }
@@ -917,7 +913,9 @@ const listAutoAnswer = async (
       return errorMessage(
         res,
         `Device with ${
-          device_id ? `id '${device_id}'` : `serial_number '${serial_number}'`
+          device_id
+            ? `id '${device_id}'`
+            : `serial_number '${device.serial_number}'`
         } not found`
       );
     }
