@@ -528,8 +528,8 @@ export const Schemas = {
       page: Joi.number().integer().min(1).optional().default(1),
       limit: Joi.number().integer().min(1).optional().default(10),
       sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
-      start_date: Joi.string().optional().allow(null),
-      end_date: Joi.string().optional().allow(null),
+      // start_date: Joi.string().optional().allow(null),
+      // end_date: Joi.string().optional().allow(null),
     }),
   },
   notification: {
