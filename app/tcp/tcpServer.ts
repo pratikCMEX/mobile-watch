@@ -427,16 +427,20 @@ class TcpServer {
         // Parse the length as hex
         const packetLength = parseInt(imgMatch[2], 16);
 
-        // Check if we have enough data for the full packet
-        // +1 for the closing bracket
-        if (buffer.length >= packetLength + 1) {
+        // Check if we have enough data for the full packet.
+        // Packet = "[" (1) + content (packetLength bytes) + "]" (1),
+        // so the full on-wire length is packetLength + 2 — NOT + 1.
+        // (Off-by-one here silently dropped the packet's last byte,
+        // which for image packets is part of the JPEG's own trailing
+        // data/EOI marker, corrupting every captured snapshot.)
+        if (buffer.length >= packetLength + 2) {
           // Slice exactly LEN bytes plus the closing "]" — DO NOT
           // .trim() here. The image region can legitimately end in
           // 0x20 (space), 0x0D, or 0x0A, and trimming would silently
           // eat the closing "]" and corrupt the byte-count framing
           // that the JPEG decoder relies on.
-          const packet = buffer.slice(0, packetLength + 1);
-          buffer = buffer.slice(packetLength + 1);
+          const packet = buffer.slice(0, packetLength + 2);
+          buffer = buffer.slice(packetLength + 2);
 
           if (packet.length > 0) {
             packets.push(packet);
