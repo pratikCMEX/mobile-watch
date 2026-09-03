@@ -894,6 +894,110 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+// ────────────────────────────────────────────────────────────
+// Language / time zone (LZ) — set the watch's display language
+// AND/OR its time zone.
+//
+// Wire protocol:
+//   [3G*<id>*<LEN>*LZ,<language>,<timezone>]
+//   e.g. [3G*8800000015*0006*LZ,1,8]   (Chinese, GMT+8)
+//
+// Device reply:
+//   [3G*<id>*0002*LZ]                  (bare ack = success)
+//
+// Product requirement: send EITHER `language` OR `timezone` per
+// request, never both. The Joi schema enforces that with .oxor().
+// The empty side of the comma tells the firmware to leave that
+// half of the setting alone.
+// ────────────────────────────────────────────────────────────
+
+const setLanguageTimezone = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, language, timezone } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+    if (language === undefined && timezone === undefined) {
+      return errorMessage(
+        res,
+        "Provide exactly one of: language OR timezone (not both, not neither)."
+      );
+    }
+    if (language !== undefined && timezone !== undefined) {
+      return errorMessage(
+        res,
+        "Provide exactly one of: language OR timezone (not both)."
+      );
+    }
+
+    const device = await db.Device.findOne({ where: { serial_number } });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    if (!tcpServer.getDevice(serial_number)) {
+      return errorMessage(
+        res,
+        "Device is offline. LZ command NOT sent — try again once the watch is connected."
+      );
+    }
+
+    const langArg: number | null =
+      language === undefined ? null : Number(language);
+    const tzArg: number | null =
+      timezone === undefined ? null : Number(timezone);
+
+    const result = tcpServer.sendLzCommand(serial_number, langArg, tzArg);
+    if (!result.sent) {
+      return errorMessage(
+        res,
+        "Failed to send LZ command. Device may be disconnected."
+      );
+    }
+
+    Logging.info(
+      `Language/timezone (LZ) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, language=${langArg}, timezone=${tzArg})`
+    );
+
+    return successMessage(
+      res,
+      langArg !== null
+        ? "Language set successfully"
+        : "Time zone set successfully",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        language: langArg,
+        timezone: tzArg,
+        command_sent: true,
+        command_message:
+          langArg !== null
+            ? `Set watch language to code ${langArg} on device ${serial_number}. The other setting (time zone) was left unchanged.`
+            : `Set watch time zone to GMT${
+                tzArg! >= 0 ? "+" : ""
+              }${tzArg} on device ${serial_number}. The other setting (language) was left unchanged.`,
+        command_protocol: result.protocol,
+        note: "Device will reply with [3G*<id>*0002*LZ] (ack = success) or [3G*<id>*0004*LZ,0] (failure).",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("setLanguageTimezone error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error sending LZ command: " + msg);
+  }
+};
+
 // SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
 // The `/set_sos_numbers` route now points directly at the
 // Emergency_contact controller there.
@@ -910,4 +1014,5 @@ export default {
   captureSnapshot,
   setAutoAnswer,
   setSosSms,
+  setLanguageTimezone,
 };

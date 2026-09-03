@@ -100,6 +100,15 @@ router.post(
   Device_controller.setSosSms
 );
 
+// Language / time zone (LZ) API — set the watch's display language
+// OR its time zone (mutually exclusive per request, per the spec).
+router.post(
+  "/lz",
+  checkToken,
+  ValidateJoi(Schemas.lz.set),
+  Device_controller.setLanguageTimezone
+);
+
 router.post(
   "/add_family_member",
   checkToken,

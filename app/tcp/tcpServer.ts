@@ -626,6 +626,10 @@ class TcpServer {
         this.handleSosSmsResponse(client, parsed);
         break;
 
+      case "LZ":
+        this.handleLzResponse(client, parsed);
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -3270,6 +3274,101 @@ class TcpServer {
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from SOSSMS: ${error.message}`
+      )
+    );
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send language / time-zone (LZ) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Set the watch's language AND/OR time zone via the LZ command.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*<id>*<LEN>*LZ,<language>,<timezone>]
+   *                 (e.g. [3G*8800000015*0006*LZ,1,8])
+   *   Device reply: [3G*<id>*0002*LZ]            (bare ack = success)
+   *
+   * Product requirement: send EITHER language OR timezone in a single
+   * request (not both, not neither). Pass `null` for the field that
+   * you do NOT want to set; the empty value on the wire tells the
+   * firmware to leave that half alone.
+   *
+   *   language : 0|1|3|4|5|7|8|9|10|11|12|13|14|15|16|17|18|19|
+   *              22|23|25|26|27|28|29|34|36   (per the spec)
+   *   timezone : integer -12..+14  (e.g. 8 = GMT+8, -5 = EST)
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param language  Language code or null to leave alone
+   * @param timezone  Timezone value  or null to leave alone
+   * @returns {sent, protocol, content} where `sent` is true if the
+   *          command was actually written to the socket.
+   */
+  public sendLzCommand(
+    deviceId: string,
+    language: number | null,
+    timezone: number | null
+  ): { sent: boolean; protocol: string; content: string } {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send LZ command.`
+      );
+      return { sent: false, protocol: "", content: "" };
+    }
+
+    // At least one of the two must be present.
+    if (language === null && timezone === null) {
+      Logging.error(
+        `Refusing to send LZ with no language AND no timezone to device ${deviceId}`
+      );
+      return { sent: false, protocol: "", content: "" };
+    }
+
+    // Build the comma-separated payload. Empty side = "leave that
+    // half of the setting alone" (e.g. "1," to set only language;
+    // ",8" to set only timezone).
+    const langPart = language === null ? "" : String(language);
+    const tzPart = timezone === null ? "" : String(timezone);
+    const content = `LZ,${langPart},${tzPart}`;
+
+    // LEN is the UTF-8 byte length of the content, hex, 4 digits.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending language/timezone (LZ) command to device ${deviceId} ` +
+        `(language=${language === null ? "<unchanged>" : language}, ` +
+        `timezone=${timezone === null ? "<unchanged>" : timezone}): ${command}`
+    );
+
+    this.send(client, command);
+    return { sent: true, protocol: command, content };
+  }
+
+  /**
+   * Handle an LZ reply from the device.
+   *
+   * Reply shapes:
+   *   [3G*<id>*0002*LZ]            bare ack → success
+   *   [3G*<id>*0004*LZ,0]          failure (some firmwares)
+   *   [3G*<id>*0004*LZ,1]          explicit success (some firmwares)
+   */
+  private handleLzResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `LZ response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from LZ: ${error.message}`
       )
     );
     void client;

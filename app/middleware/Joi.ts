@@ -529,6 +529,94 @@ export const Schemas = {
       }),
     }),
   },
+
+  /**
+   * Set the watch's language and/or time zone (LZ command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*<id>*<LEN>*LZ,<language>,<timezone>]
+   *   Device reply: [3G*<id>*0002*LZ]            (bare ack = success)
+   *
+   * The user requirement is: send EITHER language OR time zone per
+   * request, never both. The Joi rule below enforces that — the
+   * controller picks which side of the command to fill in.
+   *
+   * Valid language codes (per the spec):
+   *   0=English         1=Simplify Chinese    3=Portuguese
+   *   4=Spain           5=Deutsch            7=Turkish
+   *   8=Vietnam         9=Russia             10=French
+   *   11=Greek          12=Italian           13=Sweden
+   *   14=Trad Chinese   15=Bulgarian         16=Dutch
+   *   17=Polish         18=Finland           19=Thailand
+   *   22=Hebrew         23=Danish            25=Indian
+   *   26=Romania        27=Czech             28=Arabia
+   *   29=Polski         34=Hungarian         36=Slovak
+   *
+   * Time zone is a numeric value, e.g. 8 for GMT+8. Firmwares vary;
+   * we allow -12..+14 to cover all real-world offsets.
+   */
+  lz: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      language: Joi.number()
+        .integer()
+        .valid(
+          0,
+          1,
+          3,
+          4,
+          5,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          22,
+          23,
+          25,
+          26,
+          27,
+          28,
+          29,
+          34,
+          36
+        )
+        .optional()
+        .messages({
+          "any.only":
+            "language must be one of the supported codes: 0, 1, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 23, 25, 26, 27, 28, 29, 34, 36",
+          "number.base":
+            "language must be a number (one of the supported codes)",
+        }),
+      timezone: Joi.number().integer().min(-12).max(14).optional().messages({
+        "number.base":
+          "timezone must be an integer (e.g. 8 for GMT+8, -5 for EST)",
+        "number.min": "timezone must be between -12 and 14",
+        "number.max": "timezone must be between -12 and 14",
+      }),
+    })
+      .or("language", "timezone")
+      .oxor("language", "timezone")
+      .messages({
+        "object.missing":
+          "Provide exactly one of: language OR timezone (not both, not neither).",
+        "object.oxor":
+          "Provide exactly one of: language OR timezone (not both).",
+        "object.or":
+          "Provide exactly one of: language OR timezone (not both, not neither).",
+      }),
+  },
   familyMember: {
     create: Joi.object({
       name: Joi.string().required(),
