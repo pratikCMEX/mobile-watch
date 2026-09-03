@@ -94,7 +94,7 @@ router.post(
 // SOS-SMS (SOSSMS) API — turn the watch's "send SMS to SOS numbers
 // after an SOS alarm" switch on/off.
 router.post(
-  "/sos_sms",
+  "/sos_sms_alert",
   checkToken,
   ValidateJoi(Schemas.sosSms.set),
   Device_controller.setSosSms
