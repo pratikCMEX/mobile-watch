@@ -103,10 +103,20 @@ router.post(
 // Language / time zone (LZ) API — set the watch's display language
 // OR its time zone (mutually exclusive per request, per the spec).
 router.post(
-  "/lz",
+  "/language_timezone",
   checkToken,
   ValidateJoi(Schemas.lz.set),
   Device_controller.setLanguageTimezone
+);
+
+// Do-not-disturb / class mode (SILENCETIME / SILENCETIME2) — set
+// up to 4 time periods during which the watch rejects all incoming
+// calls and locks the screen (but SOS still works).
+router.post(
+  "/silence_time",
+  checkToken,
+  ValidateJoi(Schemas.silenceTime.set),
+  Device_controller.setSilenceTime
 );
 
 router.post(

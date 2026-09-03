@@ -617,6 +617,128 @@ export const Schemas = {
           "Provide exactly one of: language OR timezone (not both, not neither).",
       }),
   },
+
+  /**
+   * Do-not-disturb / class-mode (SILENCETIME / SILENCETIME2).
+   *
+   * Per the spec:
+   *
+   *   Classic (SILENCETIME) — up to 4 daily time ranges:
+   *     Server send : [3G*<id>*0037*SILENCETIME,HH:MM-HH:MM,
+   *                    HH:MM-HH:MM,HH:MM-HH:MM,HH:MM-HH:MM]
+   *     Each slot:   "HH:MM-HH:MM"  (24h, dashes separate start/end)
+   *     Example:     [3G*5678901234*0037*SILENCETIME,21:10-7:30,
+   *                   21:10-7:30,21:10-7:30,21:10-7:30]
+   *
+   *   Week-version (SILENCETIME2) — time range + day-of-week mask:
+   *     Server send : [3G*<id>*0037*SILENCETIME2,HH:MM-HH:MM-DDDDDDD,
+   *                    HH:MM-HH:MM-DDDDDDD,HH:MM-HH:MM-DDDDDDD,
+   *                    HH:MM-HH:MM-DDDDDDD]
+   *     Each slot:   "HH:MM-HH:MM-DDDDDDD"  (7 chars: Sun..Sat; 0=off,1=on)
+   *     Example:     21:10-7:30-0111110  (Mon-Fri, weekend off)
+   *
+   *   Device reply (both): [3G*<id>*000B*SILENCETIME]  or  ...*SILENCETIME2
+   *   (000B = 11 bytes — the command word only, no payload)
+   *
+   * During the configured time the watch:
+   *   - rejects all incoming calls,
+   *   - locks the screen,
+   *   - but the SOS button STILL works (for emergencies).
+   */
+  silenceTime: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      mode: Joi.string()
+        .valid("SILENCETIME", "SILENCETIME2")
+        .required()
+        .messages({
+          "any.only":
+            "mode must be 'SILENCETIME' (daily) or 'SILENCETIME2' (per weekday)",
+          "any.required": "mode is required (SILENCETIME or SILENCETIME2)",
+        }),
+      // 1..4 time slots. Use empty strings ("") to skip a slot.
+      slots: Joi.array()
+        .items(
+          Joi.string()
+            .pattern(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/)
+            .allow("")
+            .messages({
+              "string.pattern.base":
+                "Each slot must be 'HH:MM-HH:MM' (24h, e.g. '21:10-07:30')",
+            })
+        )
+        .min(1)
+        .max(4)
+        .required()
+        .messages({
+          "array.min": "Provide 1 to 4 slots",
+          "array.max": "Provide at most 4 slots",
+          "any.required": "slots array is required (1 to 4 entries)",
+        }),
+      // Required only when mode === "SILENCETIME2" — 7-char binary
+      // (Sun..Sat). Single string OR per-slot array (length 1..4).
+      // Example: "0111110" = Mon..Fri on, Sun+Sat off.
+      weekdays: Joi.alternatives()
+        .try(
+          Joi.string()
+            .pattern(/^[01]{7}$/)
+            .messages({
+              "string.pattern.base":
+                "weekdays must be exactly 7 characters of '0' or '1' (Sun..Sat)",
+            }),
+          Joi.array()
+            .items(
+              Joi.string()
+                .pattern(/^[01]{7}$/)
+                .messages({
+                  "string.pattern.base":
+                    "each weekdays mask must be exactly 7 characters of '0' or '1' (Sun..Sat)",
+                })
+            )
+            .min(1)
+            .max(4)
+        )
+        .optional()
+        .messages({
+          "alternatives.match":
+            "weekdays must be a 7-char '0'/'1' string (Sun..Sat) or an array of such strings",
+        }),
+    })
+      .custom((value, helpers) => {
+        // Cross-field validation:
+        //   - When mode === 'SILENCETIME2', `weekdays` is required.
+        //   - When mode === 'SILENCETIME',  `weekdays` is forbidden
+        //     (the classic protocol doesn't carry day-of-week info).
+        if (value.mode === "SILENCETIME2" && !value.weekdays) {
+          return helpers.error("any.invalid", {
+            message:
+              "weekdays is required when mode is 'SILENCETIME2' (a 7-char '0'/'1' string, Sun..Sat)",
+          });
+        }
+        if (value.mode === "SILENCETIME" && value.weekdays !== undefined) {
+          return helpers.error("any.invalid", {
+            message:
+              "weekdays is not allowed when mode is 'SILENCETIME' — the classic protocol has no day-of-week field",
+          });
+        }
+        // If weekdays is an array, its length must match slots.length.
+        if (
+          Array.isArray(value.weekdays) &&
+          value.weekdays.length !== value.slots.length
+        ) {
+          return helpers.error("any.invalid", {
+            message: `weekdays[] length (${value.weekdays.length}) must match slots.length (${value.slots.length})`,
+          });
+        }
+        return value;
+      })
+      .messages({
+        "any.invalid": "{{#message}}",
+      }),
+  },
   familyMember: {
     create: Joi.object({
       name: Joi.string().required(),

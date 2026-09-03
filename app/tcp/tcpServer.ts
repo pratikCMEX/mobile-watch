@@ -630,6 +630,14 @@ class TcpServer {
         this.handleLzResponse(client, parsed);
         break;
 
+      case "SILENCETIME":
+        this.handleSilenceTimeResponse(client, parsed, "SILENCETIME");
+        break;
+
+      case "SILENCETIME2":
+        this.handleSilenceTimeResponse(client, parsed, "SILENCETIME2");
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -3369,6 +3377,156 @@ class TcpServer {
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from LZ: ${error.message}`
+      )
+    );
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send SILENCETIME / SILENCETIME2 (do-not-disturb / class mode)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Set the watch's do-not-disturb / class-mode time periods.
+   *
+   * Two protocols are supported per the spec:
+   *
+   *   Classic (SILENCETIME) — daily time ranges, up to 4 slots:
+   *     [3G*<id>*<LEN>*SILENCETIME,s1,s2,s3,s4]
+   *     Each slot = "HH:MM-HH:MM"  (24h, dash between start/end)
+   *
+   *   Week-version (SILENCETIME2) — same shape plus a 7-bit day mask:
+   *     [3G*<id>*<LEN>*SILENCETIME2,s1,s2,s3,s4]
+   *     Each slot = "HH:MM-HH:MM-DDDDDDD"
+   *                (DDDDDDD = Sun..Sat, 0=off, 1=on)
+   *
+   *   Device reply (both): [3G*<id>*<LEN>*<command>]  (bare ack)
+   *
+   * @param deviceId   e.g. "8800000015"
+   * @param mode       "SILENCETIME" or "SILENCETIME2"
+   * @param slots      array of "HH:MM-HH:MM" strings (1..4 entries).
+   *                   Use "" to skip a slot — we still send the comma
+   *                   so the firmware wipes that slot.
+   * @param weekdays   when mode === "SILENCETIME2":
+   *                   - a single 7-char "0/1" string applied to ALL
+   *                     slots, OR
+   *                   - an array of 7-char strings, one per slot.
+   *                   Ignored when mode === "SILENCETIME".
+   *
+   * @returns { sent, protocol, content }
+   */
+  public sendSilenceTimeCommand(
+    deviceId: string,
+    mode: "SILENCETIME" | "SILENCETIME2",
+    slots: string[],
+    weekdays?: string | string[]
+  ): { sent: boolean; protocol: string; content: string } {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send ${mode} command.`
+      );
+      return { sent: false, protocol: "", content: "" };
+    }
+
+    if (mode !== "SILENCETIME" && mode !== "SILENCETIME2") {
+      Logging.error(
+        `Invalid SILENCETIME mode '${mode}' for device ${deviceId}`
+      );
+      return { sent: false, protocol: "", content: "" };
+    }
+
+    if (!Array.isArray(slots) || slots.length < 1 || slots.length > 4) {
+      Logging.error(
+        `Invalid slots count (${slots?.length}) for ${mode} on device ${deviceId} — must be 1..4`
+      );
+      return { sent: false, protocol: "", content: "" };
+    }
+
+    // Pad to exactly 4 slots so the wire format is always stable.
+    // Empty slots are encoded as "" and the firmware will clear them.
+    const padded = [...slots];
+    while (padded.length < 4) padded.push("");
+
+    // Validate every non-empty slot.
+    const slotPattern = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+    for (let i = 0; i < padded.length; i++) {
+      const s = padded[i];
+      if (s && !slotPattern.test(s)) {
+        Logging.error(
+          `Invalid slot #${
+            i + 1
+          } '${s}' for ${mode} on device ${deviceId} — must be 'HH:MM-HH:MM'`
+        );
+        return { sent: false, protocol: "", content: "" };
+      }
+    }
+
+    // Build each slot string. SILENCETIME2 appends the day mask.
+    const finalSlots: string[] = [];
+    for (let i = 0; i < padded.length; i++) {
+      const s = padded[i];
+      if (mode === "SILENCETIME") {
+        finalSlots.push(s);
+        continue;
+      }
+      // SILENCETIME2 — need a per-slot 7-char mask.
+      let mask = "";
+      if (Array.isArray(weekdays)) {
+        mask = weekdays[i] || "0000000";
+      } else if (typeof weekdays === "string") {
+        mask = weekdays;
+      } else {
+        mask = "0000000";
+      }
+      if (!/^[01]{7}$/.test(mask)) {
+        Logging.error(
+          `Invalid weekday mask '${mask}' for slot #${
+            i + 1
+          } of ${mode} on device ${deviceId}`
+        );
+        return { sent: false, protocol: "", content: "" };
+      }
+      // Compose: HH:MM-HH:MM-DDDDDDD  (or just HH:MM-HH:MM- if slot empty)
+      finalSlots.push(s ? `${s}-${mask}` : `-${mask}`);
+    }
+
+    const content = `${mode},${finalSlots.join(",")}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending do-not-disturb (${mode}) command to device ${deviceId}: ${command}`
+    );
+
+    this.send(client, command);
+    return { sent: true, protocol: command, content };
+  }
+
+  /**
+   * Handle a SILENCETIME / SILENCETIME2 reply.
+   *
+   * Reply shapes:
+   *   [3G*<id>*000B*SILENCETIME]      bare ack → success
+   *   [3G*<id>*000C*SILENCETIME2]     bare ack → success
+   *   [3G*<id>*<L>*SILENCETIME,0]     failure (some firmwares)
+   */
+  private handleSilenceTimeResponse(
+    client: TcpClient,
+    packet: ParsedPacket,
+    command: "SILENCETIME" | "SILENCETIME2"
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `${command} response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from ${command}: ${error.message}`
       )
     );
     void client;

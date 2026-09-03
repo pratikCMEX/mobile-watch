@@ -998,6 +998,121 @@ const setLanguageTimezone = async (
   }
 };
 
+// ────────────────────────────────────────────────────────────
+// Do-not-disturb / class mode (SILENCETIME / SILENCETIME2) —
+// set up to 4 time periods during which the watch rejects all
+// incoming calls and locks the screen (but SOS still works).
+//
+// Wire protocol (per the spec):
+//
+//   Classic (SILENCETIME) — daily, up to 4 slots:
+//     [3G*<id>*<LEN>*SILENCETIME,s1,s2,s3,s4]
+//     Each slot: "HH:MM-HH:MM"  (24h, e.g. "21:10-07:30")
+//
+//   Week-version (SILENCETIME2) — same + day-of-week mask:
+//     [3G*<id>*<LEN>*SILENCETIME2,s1,s2,s3,s4]
+//     Each slot: "HH:MM-HH:MM-DDDDDDD"
+//                (DDDDDDD = Sun..Sat; 0=off, 1=on)
+//     Example:   "21:10-07:30-0111110"  (Mon..Fri on)
+//
+//   Device reply (both): [3G*<id>*<LEN>*SILENCETIME]
+//                        (bare ack = success)
+// ────────────────────────────────────────────────────────────
+
+const setSilenceTime = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, mode, slots, weekdays } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+    if (mode !== "SILENCETIME" && mode !== "SILENCETIME2") {
+      return errorMessage(
+        res,
+        "mode must be 'SILENCETIME' (daily) or 'SILENCETIME2' (per weekday)"
+      );
+    }
+    if (!Array.isArray(slots) || slots.length < 1 || slots.length > 4) {
+      return errorMessage(res, "slots must be an array of 1 to 4 entries");
+    }
+    if (mode === "SILENCETIME2" && !weekdays) {
+      return errorMessage(
+        res,
+        "weekdays is required when mode is 'SILENCETIME2' (a 7-char '0'/'1' string, Sun..Sat)"
+      );
+    }
+    if (mode === "SILENCETIME" && weekdays !== undefined) {
+      return errorMessage(
+        res,
+        "weekdays is not allowed when mode is 'SILENCETIME' — the classic protocol has no day-of-week field"
+      );
+    }
+
+    const device = await db.Device.findOne({ where: { serial_number } });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    if (!tcpServer.getDevice(serial_number)) {
+      return errorMessage(
+        res,
+        `Device is offline. ${mode} command NOT sent — try again once the watch is connected.`
+      );
+    }
+
+    const result = tcpServer.sendSilenceTimeCommand(
+      serial_number,
+      mode,
+      slots,
+      weekdays
+    );
+    if (!result.sent) {
+      return errorMessage(
+        res,
+        `Failed to send ${mode} command. Device may be disconnected or slots/weekdays are invalid.`
+      );
+    }
+
+    Logging.info(
+      `${mode} command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, slots=${JSON.stringify(slots)}, ` +
+        `weekdays=${JSON.stringify(weekdays)})`
+    );
+
+    return successMessage(res, "Do-not-disturb period set successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      mode,
+      slots,
+      weekdays: weekdays ?? null,
+      command_sent: true,
+      command_message:
+        mode === "SILENCETIME"
+          ? `Set ${
+              slots.filter((s) => s && s.length).length
+            } daily do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`
+          : `Set ${
+              slots.filter((s: string) => s && s.length).length
+            } weekday-specific do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`,
+      command_protocol: result.protocol,
+      note: `Device will reply with [3G*<id>*<LEN>*${mode}] (bare ack = success).`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error("setSilenceTime error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error sending SILENCETIME command: " + msg);
+  }
+};
+
 // SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
 // The `/set_sos_numbers` route now points directly at the
 // Emergency_contact controller there.
@@ -1015,4 +1130,5 @@ export default {
   setAutoAnswer,
   setSosSms,
   setLanguageTimezone,
+  setSilenceTime,
 };
