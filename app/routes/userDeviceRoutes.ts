@@ -82,6 +82,15 @@ router.post(
   Device_controller.captureSnapshot
 );
 
+// Auto-answer (ACALL) API — turn the watch's auto-answer feature
+// on/off and (optionally) configure up to 3 whitelisted numbers.
+router.post(
+  "/auto_answer",
+  checkToken,
+  ValidateJoi(Schemas.autoAnswer.set),
+  Device_controller.setAutoAnswer
+);
+
 router.post(
   "/add_family_member",
   checkToken,

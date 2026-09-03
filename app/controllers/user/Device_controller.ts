@@ -1,6 +1,10 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
-import { errorMessage, successMessage } from "../../library/Response";
+import {
+  errorMessage,
+  successMessage,
+  customMessage,
+} from "../../library/Response";
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
 
@@ -700,6 +704,118 @@ const captureSnapshot = async (
   }
 };
 
+// ────────────────────────────────────────────────────────────
+// Auto-Answer (ACALL) — turn the watch's auto-answer feature on
+// or off, and (optionally) configure the up-to-3 phone numbers
+// that are allowed to auto-answer when they call the watch.
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Toggle the watch's auto-answer feature.
+ *
+ * Wire protocol:
+ *   OFF  → [3G*<id>*0007*ACALL,0]
+ *   ON   → [3G*<id>*LEN*ACALL,<num1>,<num2>,<num3>]
+ *
+ *   - When `enabled` is false, `numbers` is ignored.
+ *   - When `enabled` is true, you must provide at least one phone
+ *     number (max 3). Unused slots are sent as empty so the
+ *     firmware wipes any previously-stored numbers in those slots.
+ *   - Phone numbers must be 5–20 ASCII digits (country code
+ *     included, no '+' / '-' / spaces).
+ *
+ * Device reply is handled by TcpServer.handleAutoAnswerResponse().
+ */
+const setAutoAnswer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, enabled, numbers = [] } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Send the ACALL command. tcpServer does additional validation
+    // (refuses empty numbers when enabled=true, etc.) and returns
+    // false on rejection — surface that as a 422 to the caller.
+    const commandSent = tcpServer.sendAutoAnswerCommand(
+      serial_number,
+      Boolean(enabled),
+      Array.isArray(numbers) ? numbers : []
+    );
+
+    if (!commandSent) {
+      const msg = enabled
+        ? "Failed to send ACALL command. Ensure you provide 1–3 valid phone numbers (5–20 ASCII digits, no '+')."
+        : "Failed to send ACALL command. Device may be disconnected.";
+      return customMessage(res, 422, msg);
+    }
+
+    // Build a representative command_protocol string for the
+    // response (mirrors what the on-wire packet looks like).
+    let commandProtocol: string;
+    if (!enabled) {
+      commandProtocol = `[3G*${serial_number}*0007*ACALL,0]`;
+    } else {
+      const cleaned = (numbers || [])
+        .map((n: any) => (n || "").toString().trim())
+        .filter((n: string) => n.length > 0);
+      while (cleaned.length < 3) cleaned.push("");
+      const content = `ACALL,${cleaned.join(",")}`;
+      const lenHex = Buffer.byteLength(content, "utf8")
+        .toString(16)
+        .padStart(4, "0");
+      commandProtocol = `[3G*${serial_number}*${lenHex}*${content}]`;
+    }
+
+    Logging.info(
+      `Auto-answer (ACALL) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, enabled=${Boolean(enabled)}, ` +
+        `numbers=${JSON.stringify(enabled ? numbers : [])})`
+    );
+
+    return successMessage(res, "Auto-answer command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      enabled: Boolean(enabled),
+      numbers: enabled ? numbers : [],
+      command_sent: true,
+      command_message: enabled
+        ? "ACALL ON command sent. Device will auto-answer calls from the listed numbers (1–3)."
+        : "ACALL OFF command sent. Device will no longer auto-answer incoming calls.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [3G*<id>*0005*ACALL] (ack = success) or [3G*<id>*0007*ACALL,0] (failure).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setAutoAnswer error:", err);
+    return errorMessage(res, "Error sending auto-answer command");
+  }
+};
+
 // SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
 // The `/set_sos_numbers` route now points directly at the
 // Emergency_contact controller there.
@@ -714,4 +830,5 @@ export default {
   findDevice,
   setAlarm,
   captureSnapshot,
+  setAutoAnswer,
 };

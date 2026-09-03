@@ -23,6 +23,106 @@ const ensureDir = (dir: string) => {
 ensureDir(SNAPSHOTS_DIR);
 
 // ─────────────────────────────────────────────────────────────
+// Optional JPEG normalization via ffmpeg
+//
+// Some watch firmwares emit JPEGs that Chrome/ImageMagick open fine
+// but Android's BitmapFactory / iOS UIImage choke on ("image
+// decompress error"). The most common causes are:
+//   1. progressive-scan JPEGs (cheap firmware cams love these)
+//   2. missing/garbled EXIF / JFIF APP0 segment
+//   3. unusual chroma subsampling or quantization tables
+//
+// Setting SNAPSHOT_NORMALIZE_FFMPEG=true makes the server pipe the
+// saved JPEG through `ffmpeg` to produce a baseline, standard JFIF
+// JPEG that every mobile decoder accepts. The original file is
+// kept as `<name>.original.jpg` for forensics.
+//
+// If ffmpeg isn't installed, we log a warning once and fall back
+// to writing the raw bytes as-is — so this is safe to leave on.
+// ─────────────────────────────────────────────────────────────
+const { execFile } = require("child_process");
+const NORMALIZE_FFMPEG =
+  String(process.env.SNAPSHOT_NORMALIZE_FFMPEG || "").toLowerCase() === "true";
+
+/**
+ * Try to re-encode the JPEG using ffmpeg into a baseline JFIF JPEG.
+ * Returns the final on-disk path (always equal to `filepath` on
+ * success or ffmpeg-missing; never throws).
+ */
+async function maybeNormalizeJpeg(filepath: string): Promise<string> {
+  if (!NORMALIZE_FFMPEG) return filepath;
+
+  const original = filepath.replace(/\.jpg$/i, ".original.jpg");
+  try {
+    fs.renameSync(filepath, original);
+  } catch (e: any) {
+    Logging.warn(
+      `[SNAPSHOT] Could not move ${filepath} → ${original}: ${e?.message || e}`
+    );
+    return filepath;
+  }
+
+  return new Promise<string>((resolve) => {
+    // -y            overwrite output
+    // -i <in>       input file
+    // -vf "..."     video filter chain
+    //   scale=trunc(iw/2)*2:trunc(ih/2)*2   ensure even dimensions
+    //                                        (ffmpeg requires even w/h
+    //                                         for yuvj420p)
+    //   format=yuvj420p                       full-range 4:2:0 chroma
+    //                                        (universally supported)
+    // -q:v 2        high-quality JPEG (qscale 2 = ~90% quality)
+    // -compression_level 6   balanced
+    const args = [
+      "-y",
+      "-i",
+      original,
+      "-vf",
+      "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuvj420p",
+      "-q:v",
+      "2",
+      filepath,
+    ];
+
+    execFile(
+      "ffmpeg",
+      args,
+      { timeout: 20_000, maxBuffer: 4 * 1024 * 1024 },
+      (err: any, stdout: string, stderr: string) => {
+        if (err) {
+          // ffmpeg missing or failed → restore the original bytes
+          // so the user still gets a viewable file.
+          Logging.warn(
+            `[SNAPSHOT] ffmpeg normalize failed for ${filepath}: ` +
+              (err?.message || err) +
+              `. Falling back to the raw bytes.`
+          );
+          try {
+            fs.copyFileSync(original, filepath);
+          } catch (e: any) {
+            Logging.error(
+              `[SNAPSHOT] Could not restore original after ffmpeg failure: ` +
+                (e?.message || e)
+            );
+          }
+          resolve(filepath);
+          return;
+        }
+        try {
+          const stat = fs.statSync(filepath);
+          Logging.info(
+            `[SNAPSHOT] ffmpeg normalized ${filepath} → ${stat.size} bytes`
+          );
+        } catch {
+          // ignore
+        }
+        resolve(filepath);
+      }
+    );
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
 // Protocol escape codec
 //
 // Per the GPS protocol spec, image and voice data use a byte-level
@@ -516,6 +616,10 @@ class TcpServer {
 
       case "DPHBX":
         this.handleDeletePhonebookResponse(client, parsed);
+        break;
+
+      case "ACALL":
+        this.handleAutoAnswerResponse(client, parsed);
         break;
 
       default:
@@ -1608,6 +1712,21 @@ class TcpServer {
             (writeErr?.message || String(writeErr))
         );
         return;
+      }
+
+      // ── 5b. Optional ffmpeg normalization (mobile-decoder safety) ──
+      // If SNAPSHOT_NORMALIZE_FFMPEG=true and ffmpeg is on the PATH,
+      // re-encode the saved JPEG as a baseline yuvj420p JFIF that
+      // every Android/iOS decoder accepts. The raw bytes are kept as
+      // <name>.original.jpg for forensics.
+      if (NORMALIZE_FFMPEG) {
+        const normalized = await maybeNormalizeJpeg(filepath);
+        if (normalized !== filepath) {
+          // shouldn't happen — maybeNormalizeJpeg resolves to filepath
+          Logging.warn(
+            `${tag} step 5b: unexpected normalized path ${normalized}`
+          );
+        }
       }
 
       // ── 6. Insert DB row ──
@@ -2933,6 +3052,152 @@ class TcpServer {
     this.send(client, command);
 
     return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Auto-Answer (ACALL) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Toggle the watch's auto-answer feature and (optionally) configure
+   * the up-to-3 phone numbers that are allowed to auto-answer.
+   *
+   * Per the protocol spec:
+   *
+   *   OFF Auto Answer :  [3G*<id>*0007*ACALL,0]
+   *   ON  Auto Answer :  [3G*<id>*LEN*ACALL,<num1>,<num2>,<num3>]
+   *
+   * Example:
+   *   [3G*8800000015*001D*ACALL,134********,0755*******]
+   *
+   * Device reply (similar to PHBX):
+   *   [3G*<id>*0005*ACALL]            (bare ack = success)
+   *   [3G*<id>*0007*ACALL,0]          (explicit failure)
+   *   [3G*<id>*0007*ACALL,1]          (explicit success)
+   *
+   * Wire format:
+   *   - Use "3G" prefix (matches other action commands — RESET, TS,
+   *     rcapture, FIND — which the device actually accepts).
+   *   - LEN is the UTF-8 byte length of the content between the third
+   *     and fourth asterisks (i.e. everything from "ACALL" through to
+   *     the last phone number), padded to 4 hex chars.
+   *   - Numbers MUST be ASCII digits (country code included, no '+',
+   *     no spaces, no dashes) — same convention as SOS numbers.
+   *   - When `enabled` is true and fewer than 3 numbers are supplied,
+   *     the remaining slots are sent as empty so the device wipes
+   *     any previously-configured numbers in those slots.
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param enabled   true = auto-answer ON, false = auto-answer OFF
+   * @param numbers   Up to 3 phone numbers. Ignored when enabled=false.
+   *                  Each entry MUST be 5–20 ASCII digits.
+   * @returns true if the command was sent, false if the device is
+   *          not connected (or the input was rejected).
+   */
+  public sendAutoAnswerCommand(
+    deviceId: string,
+    enabled: boolean,
+    numbers: string[] = []
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send ACALL command.`
+      );
+      return false;
+    }
+
+    // Build the content body.
+    let content: string;
+    if (!enabled) {
+      // OFF: a single "0" after the command word.
+      content = "ACALL,0";
+    } else {
+      // ON: validate numbers and pad to 3 slots (empty strings for
+      // unused slots so the device wipes any stale entries).
+      const cleaned = (numbers || [])
+        .map((n) => (n || "").toString().trim())
+        .filter((n) => n.length > 0);
+
+      if (cleaned.length === 0) {
+        Logging.error(
+          `Refusing to send ACALL ON with no phone numbers to device ${deviceId}. ` +
+            `Provide at least one number, or set enabled=false to disable.`
+        );
+        return false;
+      }
+
+      if (cleaned.length > 3) {
+        Logging.error(
+          `Refusing to send ACALL ON with ${cleaned.length} numbers to device ${deviceId}; ` +
+            `max 3 allowed.`
+        );
+        return false;
+      }
+
+      // Validate each number (ASCII digits, 5–20 chars).
+      const phoneRe = /^[0-9]{5,20}$/;
+      for (const num of cleaned) {
+        if (!phoneRe.test(num)) {
+          Logging.error(
+            `Refusing to send ACALL ON to device ${deviceId}: invalid phone ` +
+              `number '${num}'. Must be 5–20 ASCII digits.`
+          );
+          return false;
+        }
+      }
+
+      // Pad to 3 slots. Per spec, the device uses up to 3 whitelist
+      // entries — sending blanks for unused slots makes the firmware
+      // wipe those slots instead of keeping stale numbers.
+      while (cleaned.length < 3) cleaned.push("");
+      content = `ACALL,${cleaned.join(",")}`;
+    }
+
+    // LEN is the UTF-8 byte length of `content` padded to 4 hex chars.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending auto-answer (ACALL) command to device ${deviceId} ` +
+        `(enabled=${enabled}, numbers=${JSON.stringify(
+          enabled ? numbers : []
+        )}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle an ACALL reply from the device.
+   *
+   * Reply shapes:
+   *   [3G*<id>*0005*ACALL]            bare ack → success
+   *   [3G*<id>*0007*ACALL,1]          explicit success
+   *   [3G*<id>*0007*ACALL,0]          failure
+   *
+   * We treat both empty payload and "1" as success.
+   */
+  private handleAutoAnswerResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `ACALL response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from ACALL: ${error.message}`
+      )
+    );
+    void client;
   }
 
   // ───────────────────────────────────────────────────────────

@@ -450,6 +450,53 @@ export const Schemas = {
       }),
     }),
   },
+
+  /**
+   * Toggle the watch's auto-answer feature and (optionally) configure
+   * the up-to-3 phone numbers that are allowed to auto-answer.
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "enabled":       true,
+   *     "numbers":       ["13412345678", "075512345678"]   // optional
+   *   }
+   *
+   * Wire packet:
+   *   enabled=false  →  [3G*<id>*0007*ACALL,0]
+   *   enabled=true   →  [3G*<id>*LEN*ACALL,<n1>,<n2>,<n3>]
+   *
+   * Numbers MUST be 5–20 ASCII digits (country code included, no '+').
+   */
+  autoAnswer: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be a boolean (true or false)",
+        "any.required":
+          "enabled is required (true to turn auto-answer on, false to turn it off)",
+      }),
+      numbers: Joi.array()
+        .items(
+          Joi.string()
+            .pattern(/^[0-9]{5,20}$/)
+            .messages({
+              "string.pattern.base":
+                "Each number must be 5–20 ASCII digits (no '+', '-', or spaces)",
+            })
+        )
+        .min(0)
+        .max(3)
+        .optional()
+        .default([])
+        .messages({
+          "array.max": "At most 3 phone numbers are allowed",
+        }),
+    }),
+  },
   familyMember: {
     create: Joi.object({
       name: Joi.string().required(),
