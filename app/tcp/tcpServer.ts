@@ -421,38 +421,58 @@ class TcpServer {
 
       // Check if this is an image packet (contains binary data)
       // Image packets have format: [3G*DEVICEID*LENGTH*img,TYPE,TIMESTAMP,DATA]
-      // The LENGTH field tells us the exact packet length
       const imgMatch = buffer.match(/^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*img,/);
       if (imgMatch) {
-        // Parse the length as hex
         const packetLength = parseInt(imgMatch[2], 16);
 
-        // Check if we have enough data for the full packet.
-        // Packet = "[" (1) + content (packetLength bytes) + "]" (1),
-        // so the full on-wire length is packetLength + 2 — NOT + 1.
-        // (Off-by-one here silently dropped the packet's last byte,
-        // which for image packets is part of the JPEG's own trailing
-        // data/EOI marker, corrupting every captured snapshot.)
-        if (buffer.length >= packetLength + 2) {
-          // Slice exactly LEN bytes plus the closing "]" — DO NOT
-          // .trim() here. The image region can legitimately end in
-          // 0x20 (space), 0x0D, or 0x0A, and trimming would silently
-          // eat the closing "]" and corrupt the byte-count framing
-          // that the JPEG decoder relies on.
-          const packet = buffer.slice(0, packetLength + 2);
-          buffer = buffer.slice(packetLength + 2);
+        // In principle "[" + content(LEN bytes) + "]" means the
+        // closing "]" sits
+        // at index LEN + 1 (full packet length LEN + 2). In practice
+        // the watch firmware's declared LEN is NOT reliable for image
+        // packets — observed production captures show the true
+        // on-wire byte count running past LEN + 2, so slicing at
+        // exactly LEN + 2 silently truncates the JPEG (cutting off
+        // its own trailing data/EOI marker) before the real "]" ever
+        // arrives.
+        //
+        // Fix: treat LEN + 2 only as a lower bound (skips any stray
+        // "]" that might appear too early inside not-yet-escaped
+        // binary noise), then scan forward for the actual literal
+        // "]" terminator. This is safe because the protocol's escape
+        // codec guarantees 0x5D ("]") never appears unescaped in
+        // legitimate data except as this terminator — the same
+        // assumption the non-image branch below already relies on.
+        const minExpected = packetLength + 2;
 
-          if (packet.length > 0) {
-            packets.push(packet);
-          }
-          continue;
-        } else {
-          // Packet is incomplete, wait for more data
+        if (buffer.length < minExpected) {
+          // Not even the declared length has arrived yet.
           return {
             packets,
             remaining: buffer,
           };
         }
+
+        const closeIdx = buffer.indexOf("]", minExpected - 1);
+        if (closeIdx === -1) {
+          // LEN understated the real packet size and the terminator
+          // hasn't arrived yet — wait for more data.
+          return {
+            packets,
+            remaining: buffer,
+          };
+        }
+
+        // Slice through the real closing "]" — DO NOT .trim() here.
+        // The image region can legitimately end in 0x20 (space),
+        // 0x0D, or 0x0A, and trimming would silently eat bytes that
+        // matter to the JPEG decoder.
+        const packet = buffer.slice(0, closeIdx + 1);
+        buffer = buffer.slice(closeIdx + 1);
+
+        if (packet.length > 0) {
+          packets.push(packet);
+        }
+        continue;
       }
 
       const endIndex = buffer.indexOf("]");
