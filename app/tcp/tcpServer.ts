@@ -1666,25 +1666,30 @@ class TcpServer {
         return;
       }
 
-      // Sanity check: the closing character really is "]". If it
-      // isn't (e.g. upstream .trim() or framing drift stripped it),
-      // RECOVER by trusting the declared packetLength — use the full
-      // remainder of the buffer as the image region. This is what
-      // the spec intends and is safer than refusing the packet.
-      let regionEnd = closingBracketAt;
-      if (rawPacket[closingBracketAt] !== "]") {
+      // Determine the true end of the image region.
+      //
+      // The watch firmware's declared LEN is NOT reliable for image
+      // packets — production captures show it under-reporting the
+      // real on-wire size. extractPackets() (the framer feeding
+      // handleRawImagePacket) already accounts for this: it scans
+      // forward for the actual literal "]" terminator rather than
+      // trusting LEN, so the packet it hands us always ends with the
+      // real closing "]" as its last character. Trust that first.
+      let regionEnd: number;
+      if (rawPacket[rawPacket.length - 1] === "]") {
+        regionEnd = rawPacket.length - 1;
+      } else if (rawPacket[closingBracketAt] === "]") {
+        // Other callers (e.g. handleImageResponse's message-based
+        // path) may hand us a packet framed purely off declared LEN.
+        regionEnd = closingBracketAt;
+      } else {
         Logging.warn(
-          `${tag} step 2 WARNING: closing ']' missing at index ${closingBracketAt} ` +
-            `(found ${JSON.stringify(rawPacket[closingBracketAt])}). ` +
-            `Falling back to declared packetLength and using the rest ` +
-            `of the buffer as the image region. raw length=${rawPacket.length}`
+          `${tag} step 2 WARNING: no closing ']' found (neither at the ` +
+            `packet's last char nor at declared-LEN index ${closingBracketAt}). ` +
+            `Falling back to the full buffer as the image region. ` +
+            `raw length=${rawPacket.length}`
         );
         regionEnd = rawPacket.length;
-      } else {
-        // Skip past the closing "]" for the actual data slice
-        // (substring is exclusive on the end index, so leave it as
-        // closingBracketAt so we include everything up to but not
-        // including "]").
       }
 
       const jpegCharCount = regionEnd - headerEnd;
