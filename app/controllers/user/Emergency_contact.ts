@@ -214,6 +214,19 @@ async function createOrUpdateEmergencyContact(
       );
     }
 
+    // ── Offline guard ──
+    // If the watch is not currently connected via TCP, refuse the save
+    // entirely. The user explicitly asked for this behaviour: the DB
+    // must NOT be touched for an offline device, so the next save
+    // attempt will not be polluted by stale state.
+    if (!tcpServer.getDevice(device.serial_number)) {
+      return errorMessage(
+        res,
+        "Device is offline. SOS contact NOT saved — try again once the watch is connected.",
+        503
+      );
+    }
+
     // ── Upsert the single contact ──
     let contact: any;
     let created = false;
@@ -284,7 +297,7 @@ async function createOrUpdateEmergencyContact(
         sync,
         command_message: sync.online
           ? `Pushed ${sync.wire_results.length} SOS slot(s) to the device in priority order`
-          : "Device is offline — contact saved in DB but not pushed to the watch. It will sync on next reconnect.",
+          : "Device disconnected mid-save. Contact may not be on the watch — verify in /emergency_contact/all.",
       }
     );
   } catch (err: any) {
@@ -341,7 +354,7 @@ async function deleteEmergencyContact(
       command_message: device?.serial_number
         ? sync.online
           ? `Removed contact from DB. Pushed ${sync.wire_results.length} remaining SOS slot(s) to the device.`
-          : "Removed contact from DB. Device is offline, remaining slots will sync when it reconnects."
+          : "Removed contact from DB. Device disconnected before re-sync could complete."
         : "Removed contact from DB. Device has no serial_number, no push attempted.",
     });
   } catch (err) {
@@ -516,7 +529,7 @@ async function setSosNumbers(req: Request, res: Response, next: NextFunction) {
         sync,
         command_message: sync.online
           ? `Pushed ${sync.wire_results.length} SOS slot(s) to the device in priority order`
-          : "Saved to DB; device offline — will sync on reconnect.",
+          : "Device disconnected mid-save. Contacts may not be on the watch — verify in /emergency_contact/all.",
       });
     } catch (err) {
       console.error("setSosNumbers error:", err);
@@ -624,6 +637,18 @@ async function saveEmergencyContacts(
       );
     }
 
+    // ── Offline guard ──
+    // Refuse the save entirely if the watch is not currently connected
+    // via TCP — per product requirement the DB must not be touched when
+    // we can't push the contacts to the device.
+    if (!tcpServer.getDevice(serial_number)) {
+      return errorMessage(
+        res,
+        "Device is offline. SOS contacts NOT saved — try again once the watch is connected.",
+        503
+      );
+    }
+
     // Upsert each contact. Order doesn't matter because we re-read
     // everything from DB at the end before pushing to the watch.
     const dbResults: Array<{
@@ -711,7 +736,7 @@ async function saveEmergencyContacts(
       sync,
       command_message: sync.online
         ? `Stored ${dbResults.length} contact(s) in DB and pushed ${sync.wire_results.length} SOS slot(s) (SOS1..SOS${sync.wire_results.length}) to the device, ordered by priority.`
-        : "Contacts saved in DB. Device is offline — slots will sync on next reconnect.",
+        : "Contacts saved in DB. Device disconnected mid-save — verify in /emergency_contact/all.",
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
@@ -824,6 +849,18 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
       return errorMessage(
         res,
         `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // ── Offline guard ──
+    // Refuse the save entirely if the watch is not currently connected
+    // via TCP — per product requirement the DB must not be touched when
+    // we can't push the contacts to the device.
+    if (!tcpServer.getDevice(serial_number)) {
+      return errorMessage(
+        res,
+        "Device is offline. SOS contacts NOT saved — try again once the watch is connected.",
+        503
       );
     }
     if (!device.serial_number) {
