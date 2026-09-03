@@ -7,6 +7,7 @@ export interface SnapshotAttributes {
   id: string;
   device_id: string;
   image_url: string;
+  captured_at: Date;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date;
@@ -22,6 +23,7 @@ class Snapshot
   public id!: string;
   public device_id!: string;
   public image_url!: string;
+  public captured_at!: Date;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public readonly deletedAt!: Date;
@@ -55,6 +57,11 @@ export default (sequelize: Sequelize, DataTypes: any) => {
       image_url: {
         type: DataTypes.STRING,
         allowNull: false,
+      },
+      captured_at: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
       },
       deletedAt: {
         type: DataTypes.DATE,

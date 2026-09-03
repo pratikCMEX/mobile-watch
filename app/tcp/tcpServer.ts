@@ -1,6 +1,26 @@
 import net from "net";
+import path from "path";
+import fs from "fs";
 import Logging from "../library/Logging";
 import db from "../models";
+
+// ─────────────────────────────────────────────────────────────
+// Snapshot storage (absolute path so it works regardless of CWD
+// — same convention as app/middleware/Multer.ts and app.ts).
+// ─────────────────────────────────────────────────────────────
+const SNAPSHOTS_DIR = path.resolve(
+  __dirname,
+  "..",
+  "..",
+  "uploads",
+  "snapshots"
+);
+const ensureDir = (dir: string) => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+};
+ensureDir(SNAPSHOTS_DIR);
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -1269,15 +1289,10 @@ class TcpServer {
 
       // Generate filename from timestamp
       const filename = `snapshot_${packet.deviceId}_${timestamp}.jpg`;
-      const filepath = `./uploads/snapshots/${filename}`;
+      const filepath = path.join(SNAPSHOTS_DIR, filename);
 
       // Ensure directory exists
-      const fs = require("fs");
-      const path = require("path");
-      const dir = path.dirname(filepath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+      ensureDir(SNAPSHOTS_DIR);
 
       // Save the image
       fs.writeFileSync(filepath, imageBuffer);
@@ -1291,7 +1306,8 @@ class TcpServer {
 
           return db.Snapshot.create({
             device_id: device.id,
-            image_url: filename,
+            image_url: `/uploads/snapshots/${filename}`,
+            captured_at: new Date(),
           });
         })
         .then(() => {
@@ -1429,15 +1445,10 @@ class TcpServer {
 
       // Generate filename
       const filename = `snapshot_${deviceId}_${timestamp}.jpg`;
-      const filepath = `./uploads/snapshots/${filename}`;
+      const filepath = path.join(SNAPSHOTS_DIR, filename);
 
       // Ensure directory exists
-      const fs = require("fs");
-      const path = require("path");
-      const dir = path.dirname(filepath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+      ensureDir(SNAPSHOTS_DIR);
 
       // Save the image
       fs.writeFileSync(filepath, imageBuffer);
@@ -1450,7 +1461,8 @@ class TcpServer {
 
           return db.Snapshot.create({
             device_id: device.id,
-            image_url: filename,
+            image_url: `/uploads/snapshots/${filename}`,
+            captured_at: new Date(),
           });
         })
         .then(() => {

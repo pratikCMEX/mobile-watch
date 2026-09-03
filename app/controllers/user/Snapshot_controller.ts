@@ -21,15 +21,32 @@ const AddSnapshot = async function (
     if (!device) {
       return errorMessage(res, "Device not found");
     }
+
     const files = (req as any).files as { [fieldname: string]: any[] };
-    const image = files?.image?.[0]?.filename ?? null;
+    const uploaded = files?.image?.[0];
+    if (!uploaded || !uploaded.filename) {
+      return errorMessage(
+        res,
+        "image file is required (multipart/form-data field 'image')"
+      );
+    }
+
+    // Store the public URL (matches the static handler in app.ts and the
+    // folder used by the Multer middleware).
+    const image_url = `/uploads/snapshots/${uploaded.filename}`;
+
     const snapshot = await db.Snapshot.create({
       device_id: device_id,
-      image_url: image ?? null,
+      image_url,
+      captured_at: new Date(),
     });
     return successMessage(res, "Snapshot added successfully", snapshot);
-  } catch (err) {
+  } catch (err: any) {
     console.error("AddSnapshot error:", err);
+    // Multer errors (file type / size / etc.) come through here
+    if (err && err.message) {
+      return errorMessage(res, err.message);
+    }
     return errorMessage(res, "Error adding snapshot");
   }
 };
@@ -80,7 +97,17 @@ const ListSnapshots = async (
       offset,
     });
 
-    return successPagination(res, "Snapshots fetched successfully", rows, {
+    const data = rows.map((row: any) => {
+      const j = row.toJSON();
+      j.image_url = j.image_url
+        ? j.image_url.startsWith("/uploads/")
+          ? j.image_url
+          : `/uploads/snapshots/${j.image_url}`
+        : null;
+      return j;
+    });
+
+    return successPagination(res, "Snapshots fetched successfully", data, {
       page: Number(page),
       limit: Number(limit),
       total: count,
@@ -120,14 +147,17 @@ const GetSnapshotsBySerialNumber = async (
       order: [["createdAt", "DESC"]],
     });
 
-    // Add full image URL to each snapshot
+    // Add full image URL to each snapshot (works whether image_url was
+    // stored as just a filename or as a full /uploads/... path).
     const snapshotsWithUrl = snapshots.map((snapshot: any) => {
       const data = snapshot.toJSON();
+      let url: string | null = data.image_url;
+      if (url && !url.startsWith("/uploads/")) {
+        url = `/uploads/snapshots/${url}`;
+      }
       return {
         ...data,
-        image_url: snapshot.image_url
-          ? `/uploads/snapshots/${snapshot.image_url}`
-          : null,
+        image_url: url,
       };
     });
 
