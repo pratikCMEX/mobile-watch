@@ -113,7 +113,7 @@ router.post(
 // up to 4 time periods during which the watch rejects all incoming
 // calls and locks the screen (but SOS still works).
 router.post(
-  "/silence_time",
+  "/do_not_disturb",
   checkToken,
   ValidateJoi(Schemas.silenceTime.set),
   Device_controller.setSilenceTime
