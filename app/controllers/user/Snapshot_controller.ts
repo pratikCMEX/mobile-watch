@@ -226,7 +226,9 @@ const deleteSnapshot = async (
   const snapshot = await db.Snapshot.findByPk(id);
   if (snapshot) {
     await snapshot.destroy();
-    return successMessage(res, "Snapshot deleted successfully");
+    return successMessage(res, "Snapshot deleted successfully", snapshot);
+  } else {
+    return errorMessage(res, "Snapshot not found", 404);
   }
 };
 export default {
