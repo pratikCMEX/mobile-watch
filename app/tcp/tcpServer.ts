@@ -1517,25 +1517,36 @@ class TcpServer {
         return;
       }
 
-      // Sanity check: the closing character really is "]".
+      // Sanity check: the closing character really is "]". If it
+      // isn't (e.g. upstream .trim() or framing drift stripped it),
+      // RECOVER by trusting the declared packetLength — use the full
+      // remainder of the buffer as the image region. This is what
+      // the spec intends and is safer than refusing the packet.
+      let regionEnd = closingBracketAt;
       if (rawPacket[closingBracketAt] !== "]") {
-        Logging.error(
-          `${tag} step 2 FAILED: closing bracket not found at index ${closingBracketAt}. ` +
-            `Found ${JSON.stringify(rawPacket[closingBracketAt])} instead. ` +
-            `raw length=${rawPacket.length}`
+        Logging.warn(
+          `${tag} step 2 WARNING: closing ']' missing at index ${closingBracketAt} ` +
+            `(found ${JSON.stringify(rawPacket[closingBracketAt])}). ` +
+            `Falling back to declared packetLength and using the rest ` +
+            `of the buffer as the image region. raw length=${rawPacket.length}`
         );
-        return;
+        regionEnd = rawPacket.length;
+      } else {
+        // Skip past the closing "]" for the actual data slice
+        // (substring is exclusive on the end index, so leave it as
+        // closingBracketAt so we include everything up to but not
+        // including "]").
       }
 
-      const jpegCharCount = closingBracketAt - headerEnd;
+      const jpegCharCount = regionEnd - headerEnd;
       Logging.info(
-        `${tag} step 3: JPEG region headerEnd=${headerEnd} closingAt=${closingBracketAt} ` +
+        `${tag} step 3: JPEG region headerEnd=${headerEnd} regionEnd=${regionEnd} ` +
           `bytes=${jpegCharCount}`
       );
 
       // ── 3. Build the on-wire (escaped) image Buffer ──
       const escapedBuffer = Buffer.from(
-        rawPacket.substring(headerEnd, closingBracketAt),
+        rawPacket.substring(headerEnd, regionEnd),
         "latin1"
       );
       Logging.info(
