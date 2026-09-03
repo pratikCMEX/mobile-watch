@@ -496,6 +496,28 @@ export const Schemas = {
           "array.max": "At most 3 phone numbers are allowed",
         }),
     }),
+
+    /**
+     * List all auto-answer (ACALL) numbers currently stored
+     * server-side for a device.
+     *
+     * Request body (either serial_number or device_id):
+     *   {
+     *     "serial_number": "8800000015"
+     *   }
+     *   — or —
+     *   {
+     *     "device_id":     "<uuid>"
+     *   }
+     */
+    list: Joi.object({
+      serial_number: Joi.string().trim().optional().allow(null, "").messages({
+        "string.base": "serial_number must be a string",
+      }),
+      device_id: Joi.string().trim().optional().allow(null, "").messages({
+        "string.base": "device_id must be a string",
+      }),
+    }).or("serial_number", "device_id"),
   },
 
   /**

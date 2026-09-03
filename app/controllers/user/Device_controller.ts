@@ -8,6 +8,15 @@ import {
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
 
+/**
+ * Country code auto-prepended to 10-digit national numbers on the wire.
+ * Override with the env var SOS_DEFAULT_COUNTRY_CODE.
+ * (Same convention as the Emergency_contact controller.)
+ */
+const DEFAULT_COUNTRY_CODE = (
+  process.env.SOS_DEFAULT_COUNTRY_CODE || ""
+).replace(/[^0-9]/g, "");
+
 const updateDeviceSettings = async function (
   req: Request,
   res: Response,
@@ -773,16 +782,79 @@ const setAutoAnswer = async (
       return customMessage(res, 422, msg);
     }
 
+    // ── Mirror to the server-side DeviceAutoAnswers table ──
+    // Pad to exactly 3 slots so the table layout matches the wire
+    // packet shape (ACALL,n1,n2,n3). Empty strings = "this slot is
+    // unused — clear it on the watch".
+    const cleaned = (Array.isArray(numbers) ? numbers : [])
+      .map((n: any) => (n || "").toString().trim())
+      .filter((n: string) => n.length > 0);
+    while (cleaned.length < 3) cleaned.push("");
+
+    const db_results: Array<{
+      slot_index: number;
+      name: string | null;
+      phone_number: string;
+      country_code: string | null;
+      created: boolean;
+      id: string;
+    }> = [];
+
+    if (enabled) {
+      for (let i = 0; i < 3; i++) {
+        const slot = i + 1;
+        const raw = cleaned[i];
+        if (!raw) {
+          // Empty slot — wipe any previously-stored row at this slot.
+          await db.DeviceAutoAnswer.destroy({
+            where: { device_id: device.id, slot_index: slot },
+          });
+          continue;
+        }
+        // Split the digits-only phone into country_code + national_number
+        // so analytics / display layers can format it back as +CC NNNNN NNNNN.
+        let cc = "";
+        let pn = raw;
+        if (DEFAULT_COUNTRY_CODE && raw.startsWith(DEFAULT_COUNTRY_CODE)) {
+          cc = DEFAULT_COUNTRY_CODE;
+          pn = raw.substring(DEFAULT_COUNTRY_CODE.length);
+        }
+
+        const [row, created] = await db.DeviceAutoAnswer.findOrCreate({
+          where: { device_id: device.id, slot_index: slot },
+          defaults: {
+            device_id: device.id,
+            slot_index: slot,
+            name: null,
+            phone_number: pn,
+            country_code: cc,
+          },
+        });
+        if (!created) {
+          row.phone_number = pn;
+          row.country_code = cc;
+          await row.save();
+        }
+        db_results.push({
+          id: row.id,
+          slot_index: slot,
+          name: row.name,
+          phone_number: row.phone_number,
+          country_code: row.country_code,
+          created,
+        });
+      }
+    } else {
+      // Auto-answer turned OFF — wipe the entire mirror table.
+      await db.DeviceAutoAnswer.destroy({ where: { device_id: device.id } });
+    }
+
     // Build a representative command_protocol string for the
     // response (mirrors what the on-wire packet looks like).
     let commandProtocol: string;
     if (!enabled) {
       commandProtocol = `[3G*${serial_number}*0007*ACALL,0]`;
     } else {
-      const cleaned = (numbers || [])
-        .map((n: any) => (n || "").toString().trim())
-        .filter((n: string) => n.length > 0);
-      while (cleaned.length < 3) cleaned.push("");
       const content = `ACALL,${cleaned.join(",")}`;
       const lenHex = Buffer.byteLength(content, "utf8")
         .toString(16)
@@ -793,7 +865,7 @@ const setAutoAnswer = async (
     Logging.info(
       `Auto-answer (ACALL) command sent to device ${serial_number} ` +
         `(device_id=${device.id}, enabled=${Boolean(enabled)}, ` +
-        `numbers=${JSON.stringify(enabled ? numbers : [])})`
+        `numbers=${JSON.stringify(enabled ? cleaned.filter((s) => s) : [])})`
     );
 
     return successMessage(res, "Auto-answer command sent successfully", {
@@ -801,7 +873,8 @@ const setAutoAnswer = async (
       device_id: device.id,
       device_name: device.device_name,
       enabled: Boolean(enabled),
-      numbers: enabled ? numbers : [],
+      numbers: enabled ? cleaned.filter((s) => s) : [],
+      db_results,
       command_sent: true,
       command_message: enabled
         ? "ACALL ON command sent. Device will auto-answer calls from the listed numbers (1–3)."
@@ -813,6 +886,88 @@ const setAutoAnswer = async (
   } catch (err) {
     console.error("setAutoAnswer error:", err);
     return errorMessage(res, "Error sending auto-answer command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// List all auto-answer (ACALL) numbers currently stored
+// server-side for a device.
+// ────────────────────────────────────────────────────────────
+const listAutoAnswer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, device_id } = req.body || {};
+
+    // Look up the device
+    let device = null as any;
+    if (device_id) {
+      device = await db.Device.findByPk(device_id);
+    } else if (serial_number) {
+      device = await db.Device.findOne({
+        where: { serial_number: String(serial_number).trim() },
+      });
+    } else {
+      return errorMessage(res, "serial_number or device_id is required");
+    }
+
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with ${
+          device_id ? `id '${device_id}'` : `serial_number '${serial_number}'`
+        } not found`
+      );
+    }
+
+    const rows = await db.DeviceAutoAnswer.findAll({
+      where: { device_id: device.id },
+      attributes: [
+        "id",
+        "slot_index",
+        "name",
+        "phone_number",
+        "country_code",
+        "createdAt",
+        "updatedAt",
+      ],
+      order: [["slot_index", "ASC"]],
+    });
+
+    const numbers = rows.map((r: any) => {
+      const cc = r.country_code || "";
+      const pn = r.phone_number || "";
+      return {
+        id: r.id,
+        slot_index: r.slot_index,
+        name: r.name,
+        phone_number: cc + pn, // digits-only, country code included
+        country_code: cc,
+        national_number: pn,
+        e164: cc ? `+${cc}${pn}` : pn,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      };
+    });
+
+    return successMessage(res, "Auto-answer numbers fetched successfully", {
+      serial_number: device.serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      enabled: numbers.length > 0,
+      count: numbers.length,
+      numbers,
+      command_message:
+        numbers.length === 0
+          ? "No auto-answer numbers stored. Use POST /user/device/auto_answer to enable."
+          : `Stored ${numbers.length} auto-answer number(s) in DeviceAutoAnswers. The watch will auto-answer calls from these numbers.`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("listAutoAnswer error:", err);
+    return errorMessage(res, "Error fetching auto-answer numbers");
   }
 };
 
@@ -1128,6 +1283,7 @@ export default {
   setAlarm,
   captureSnapshot,
   setAutoAnswer,
+  listAutoAnswer,
   setSosSms,
   setLanguageTimezone,
   setSilenceTime,

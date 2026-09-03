@@ -91,6 +91,15 @@ router.post(
   Device_controller.setAutoAnswer
 );
 
+// List the auto-answer numbers currently stored server-side for a
+// device (server-side mirror of the ACALL whitelist on the watch).
+router.post(
+  "/list_auto_answer",
+  checkToken,
+  ValidateJoi(Schemas.autoAnswer.list),
+  Device_controller.listAutoAnswer
+);
+
 // SOS-SMS (SOSSMS) API — turn the watch's "send SMS to SOS numbers
 // after an SOS alarm" switch on/off.
 router.post(
