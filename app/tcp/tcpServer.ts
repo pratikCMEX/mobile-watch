@@ -23,6 +23,79 @@ const ensureDir = (dir: string) => {
 ensureDir(SNAPSHOTS_DIR);
 
 // ─────────────────────────────────────────────────────────────
+// Protocol escape codec
+//
+// Per the GPS protocol spec, image and voice data use a byte-level
+// escape encoding so that the special bytes 0x7D, 0x5B, 0x5D, 0x2C,
+// 0x2A can travel through the [ … ] delimited packet format.
+//
+// Wire (escaped) form  →  Decoded form
+//      0x7D 0x01       →     0x7D
+//      0x7D 0x02       →     0x5B     '['
+//      0x7D 0x03       →     0x5D     ']'
+//      0x7D 0x04       →     0x2C     ','
+//      0x7D 0x05       →     0x2A     '*'
+//
+// (Note: voice/AMR packets use the SAME table. Both directions —
+// device→server and server→device — apply this transform.)
+//
+// We use this for image-region decoding. A 0x7D byte that is NOT
+// immediately followed by 0x01-0x05 is left as-is (defensive).
+// ─────────────────────────────────────────────────────────────
+
+const ESCAPE = 0x7d;
+
+function decodeEscapeSequence(
+  buf: Buffer,
+  start: number,
+  out: number[]
+): number {
+  // buf[start] === 0x7D; buf[start+1] is the second byte.
+  const next = buf[start + 1];
+  switch (next) {
+    case 0x01:
+      out.push(0x7d);
+      return 2;
+    case 0x02:
+      out.push(0x5b);
+      return 2;
+    case 0x03:
+      out.push(0x5d);
+      return 2;
+    case 0x04:
+      out.push(0x2c);
+      return 2;
+    case 0x05:
+      out.push(0x2a);
+      return 2;
+    default:
+      // Not a recognised escape — leave the 0x7D byte verbatim.
+      out.push(0x7d);
+      return 1;
+  }
+}
+
+/**
+ * Decode an escaped buffer (as sent over the wire) back to the
+ * original bytes. Bytes are read left-to-right; every 0x7D is
+ * treated as an escape introducer and the following byte is
+ * inspected.  Unknown escape sequences fall back to leaving 0x7D
+ * verbatim so we never silently drop data.
+ */
+function unescape(buf: Buffer): Buffer {
+  const out: number[] = [];
+  for (let i = 0; i < buf.length; ) {
+    if (buf[i] === ESCAPE && i + 1 < buf.length) {
+      i += decodeEscapeSequence(buf, i, out);
+    } else {
+      out.push(buf[i]);
+      i += 1;
+    }
+  }
+  return Buffer.from(out);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
 
@@ -1248,83 +1321,16 @@ class TcpServer {
    */
   private handleImageResponse(client: TcpClient, packet: ParsedPacket): void {
     Logging.info(
-      `Image data received from device ${
-        packet.deviceId
-      }: ${packet.payload.substring(0, 50)}...`
+      `[SNAPSHOT] handleImageResponse() called for device ${packet.deviceId} ` +
+        `(raw packet length=${packet.raw.length} chars)`
     );
-
-    // Parse image packet: img,TYPE,TIMESTAMP,BINARY_DATA
-    // The image data is raw binary (JPEG), not hex
-    const commaIndex = packet.payload.indexOf(",");
-    if (commaIndex === -1) {
-      Logging.error(`Invalid image payload from device ${packet.deviceId}`);
-      return;
-    }
-
-    const firstPart = packet.payload.substring(0, commaIndex);
-    const secondPart = packet.payload.substring(commaIndex + 1);
-    const secondCommaIndex = secondPart.indexOf(",");
-
-    if (secondCommaIndex === -1) {
-      Logging.error(`Invalid image payload from device ${packet.deviceId}`);
-      return;
-    }
-
-    const imageType = firstPart; // "5" for remote snapshot
-    const timestamp = secondPart.substring(0, secondCommaIndex); // YYMMDDHHmmss format
-    // The rest is binary image data - extract from raw packet
-    const headerEnd = packet.raw.indexOf(timestamp) + timestamp.length + 1;
-    const imageBinaryData = packet.raw.substring(
-      headerEnd,
-      packet.raw.length - 1
-    ); // Remove closing bracket
-
-    Logging.info(
-      `Image type: ${imageType}, timestamp: ${timestamp}, data length: ${imageBinaryData.length}`
+    // Defer all real work to the shared bulletproof parser.
+    void this.processImagePacket(
+      packet.raw,
+      packet.deviceId,
+      "handleImageResponse"
     );
-
-    // Save binary data as JPEG
-    try {
-      const imageBuffer = Buffer.from(imageBinaryData, "binary");
-
-      // Generate filename from timestamp
-      const filename = `snapshot_${packet.deviceId}_${timestamp}.jpg`;
-      const filepath = path.join(SNAPSHOTS_DIR, filename);
-
-      // Ensure directory exists
-      ensureDir(SNAPSHOTS_DIR);
-
-      // Save the image
-      fs.writeFileSync(filepath, imageBuffer);
-
-      Logging.info(`Snapshot saved: ${filepath}`);
-
-      // Save to database
-      this.findDevice(packet.deviceId)
-        .then((device) => {
-          if (!device) return;
-
-          return db.Snapshot.create({
-            device_id: device.id,
-            image_url: `/uploads/snapshots/${filename}`,
-            captured_at: new Date(),
-          });
-        })
-        .then(() => {
-          Logging.info(`Snapshot record created for device ${packet.deviceId}`);
-        })
-        .catch((error: Error) =>
-          Logging.error(
-            `Failed to save snapshot for device ${packet.deviceId}: ${error.message}`
-          )
-        );
-    } catch (error) {
-      Logging.error(
-        `Failed to process image from device ${packet.deviceId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-    }
+    void client;
   }
 
   /**
@@ -1404,80 +1410,220 @@ class TcpServer {
   }
 
   private handleRawImagePacket(client: TcpClient, rawPacket: string): void {
-    try {
-      // Parse the header: [3G*DEVICEID*LENGTH*img,
-      const headerMatch = rawPacket.match(/^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*img,/);
-      if (!headerMatch) {
-        Logging.error(`Invalid image packet header from ${client.id}`);
-        return;
-      }
+    Logging.info(
+      `[SNAPSHOT] handleRawImagePacket() called for connection ${client.id} ` +
+        `(raw packet length=${rawPacket.length} chars)`
+    );
 
-      const deviceId = headerMatch[1];
-      const packetLength = parseInt(headerMatch[2], 16);
-
-      // Store device ID
+    // Parse the ASCII header just enough to learn the device id.
+    // Do NOT search for the timestamp inside the binary region later.
+    const headerMatch = rawPacket.match(/^\[3G\*(\d+)\*[0-9A-Fa-f]+\*img,/);
+    const deviceId = headerMatch ? headerMatch[1] : undefined;
+    if (deviceId) {
       client.deviceId = deviceId;
+    }
 
-      // Find the timestamp (12 digits: YYMMDDHHmmss)
-      const afterImg = rawPacket.substring(rawPacket.indexOf("*img,") + 5);
-      const timestampMatch = afterImg.match(/^(\d{12}),/);
+    // Defer all real work to the shared bulletproof parser.
+    void this.processImagePacket(rawPacket, deviceId, "handleRawImagePacket");
+  }
 
-      if (!timestampMatch) {
-        Logging.error(`Invalid image timestamp from device ${deviceId}`);
-        return;
-      }
+  // ───────────────────────────────────────────────────────────
+  // Shared image-packet processor (used by both handleImageResponse
+  // and handleRawImagePacket). This is the ONLY place that writes
+  // snapshot files and DB rows.
+  // ───────────────────────────────────────────────────────────
 
-      const timestamp = timestampMatch[1];
-
-      // Calculate where binary data starts in the raw string
-      // Format: [3G*DEVICEID*LEN*img,TYPE,12TIMESTAMP_BINARY]
-      const headerEnd = rawPacket.indexOf(timestamp) + timestamp.length + 1;
-
-      // Extract binary data (everything between timestamp+comma and closing bracket)
-      const binaryString = rawPacket.substring(headerEnd, rawPacket.length - 1);
-
+  /**
+   * Parse a complete image packet and persist the JPEG to disk + DB.
+   *
+   * Wire format (len excludes the brackets):
+   *   [3G*<deviceId>*<len>*img,<type>,<12digits-timestamp>,<JPEG bytes>]
+   *
+   * Steps (each one is logged explicitly so you can see exactly
+   * where it fails if anything goes wrong):
+   *   1. Parse ASCII header up to (and including) the comma after
+   *      the 12-digit timestamp — without any indexOf inside the
+   *      binary region.
+   *   2. Compute the JPEG byte range as the remainder of the
+   *      packet minus the closing "]".
+   *   3. Build a Buffer from that byte range using latin1
+   *      (preserves bytes 0x00–0xFF 1:1).
+   *   4. Validate the JPEG magic bytes (FF D8 FF).
+   *   5. writeFileSync to <SNAPSHOTS_DIR>/snapshot_<id>_<ts>.jpg.
+   *   6. findDevice() then Snapshot.create() with captured_at.
+   *
+   * Every error path logs the file path AND the row-level error
+   * so the operator can see exactly what happened.
+   */
+  private async processImagePacket(
+    rawPacket: string,
+    fallbackDeviceId: string | undefined,
+    source: "handleImageResponse" | "handleRawImagePacket"
+  ): Promise<void> {
+    const tag = `[SNAPSHOT:${source}]`;
+    try {
       Logging.info(
-        `Raw image from device ${deviceId}: timestamp=${timestamp}, dataLength=${binaryString.length}`
+        `${tag} step 1: received image packet, raw length=${rawPacket.length}`
       );
 
-      // Convert binary string to Buffer
-      const imageBuffer = Buffer.from(binaryString, "binary");
+      // ── 1. Parse ASCII header up to the comma after the timestamp ──
+      // Pattern is anchored to the start of the packet and matches
+      // ONLY the ASCII portion (deviceId digits, 4-hex length, "img,",
+      // one-char type, comma, 12-digit timestamp, comma). It does
+      // NOT touch the binary region.
+      const headerRe = /^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*img,([^,]*),(\d{12}),/;
+      const m = rawPacket.match(headerRe);
+      if (!m) {
+        Logging.error(
+          `${tag} step 1 FAILED: header did not match expected pattern. ` +
+            `First 80 chars: ${JSON.stringify(rawPacket.substring(0, 80))}`
+        );
+        return;
+      }
 
-      // Generate filename
+      const deviceId = m[1];
+      const packetLength = parseInt(m[2], 16); // bytes inside the brackets
+      const imageType = m[3];
+      const timestamp = m[4];
+
+      Logging.info(
+        `${tag} step 2: parsed header deviceId=${deviceId} type=${imageType} ` +
+          `timestamp=${timestamp} packetLength=${packetLength} ` +
+          `(expected raw length=${packetLength + 2})`
+      );
+
+      // ── 2. Compute the JPEG byte range ──
+      // The match consumed everything up to and including the comma
+      // right after the timestamp. m[0].length is the ASCII header
+      // length in JS chars (= bytes for ASCII).
+      const headerEnd = m[0].length;
+      // The packet total = 1 ('[') + headerEnd_offset_to_closing
+      // The closing "]" is at index `packetLength` from the start of
+      // the packet content (after the opening "["). The full packet
+      // is "[<content>]" where content length = packetLength, so the
+      // closing "]" is at index packetLength + 1.
+      const closingBracketAt = packetLength + 1;
+
+      if (rawPacket.length < closingBracketAt) {
+        Logging.error(
+          `${tag} step 2 FAILED: packet shorter than declared LEN. ` +
+            `raw.length=${rawPacket.length}, expected>=${closingBracketAt}`
+        );
+        return;
+      }
+
+      // Sanity check: the closing character really is "]".
+      if (rawPacket[closingBracketAt] !== "]") {
+        Logging.error(
+          `${tag} step 2 FAILED: closing bracket not found at index ${closingBracketAt}. ` +
+            `Found ${JSON.stringify(rawPacket[closingBracketAt])} instead. ` +
+            `raw length=${rawPacket.length}`
+        );
+        return;
+      }
+
+      const jpegCharCount = closingBracketAt - headerEnd;
+      Logging.info(
+        `${tag} step 3: JPEG region headerEnd=${headerEnd} closingAt=${closingBracketAt} ` +
+          `bytes=${jpegCharCount}`
+      );
+
+      // ── 3. Build the on-wire (escaped) image Buffer ──
+      const escapedBuffer = Buffer.from(
+        rawPacket.substring(headerEnd, closingBracketAt),
+        "latin1"
+      );
+      Logging.info(
+        `${tag} step 3: on-wire escaped region = ${escapedBuffer.length} bytes`
+      );
+
+      // ── 3b. Decode the escape sequences per the protocol spec ──
+      // The device encodes 0x7D, 0x5B, 0x5D, 0x2C, 0x2A as 0x7D 0x0X.
+      // Decoded output is the actual JPEG bytes.
+      const jpegBuffer = unescape(escapedBuffer);
+      Logging.info(
+        `${tag} step 3b: decoded JPEG = ${jpegBuffer.length} bytes ` +
+          `(removed ${escapedBuffer.length - jpegBuffer.length} escape bytes)`
+      );
+
+      // ── 4. Validate JPEG magic bytes (FF D8 FF) ──
+      if (
+        jpegBuffer.length < 4 ||
+        jpegBuffer[0] !== 0xff ||
+        jpegBuffer[1] !== 0xd8 ||
+        jpegBuffer[2] !== 0xff
+      ) {
+        Logging.error(
+          `${tag} step 4 FAILED: data does not start with JPEG magic bytes. ` +
+            `First 8 bytes: ${Array.from(jpegBuffer.slice(0, 8))
+              .map((b) => "0x" + b.toString(16).padStart(2, "0"))
+              .join(" ")}` +
+            ` — saved escape-decoded region to ` +
+            (() => {
+              try {
+                const debugPath = path.join(
+                  SNAPSHOTS_DIR,
+                  `debug_${deviceId}_${timestamp}.bin`
+                );
+                fs.writeFileSync(debugPath, jpegBuffer);
+                return debugPath;
+              } catch {
+                return "<debug-write-failed>";
+              }
+            })()
+        );
+        return;
+      }
+
+      // ── 5. Write file ──
+      ensureDir(SNAPSHOTS_DIR);
       const filename = `snapshot_${deviceId}_${timestamp}.jpg`;
       const filepath = path.join(SNAPSHOTS_DIR, filename);
 
-      // Ensure directory exists
-      ensureDir(SNAPSHOTS_DIR);
-
-      // Save the image
-      fs.writeFileSync(filepath, imageBuffer);
-      Logging.info(`Snapshot saved: ${filepath}`);
-
-      // Save to database
-      this.findDevice(deviceId)
-        .then((device) => {
-          if (!device) return;
-
-          return db.Snapshot.create({
-            device_id: device.id,
-            image_url: `/uploads/snapshots/${filename}`,
-            captured_at: new Date(),
-          });
-        })
-        .then(() => {
-          Logging.info(`Snapshot record created for device ${deviceId}`);
-        })
-        .catch((error: Error) =>
-          Logging.error(
-            `Failed to save snapshot for device ${deviceId}: ${error.message}`
-          )
+      try {
+        fs.writeFileSync(filepath, jpegBuffer);
+        const stat = fs.statSync(filepath);
+        Logging.info(
+          `${tag} step 5 OK: wrote ${stat.size} bytes to ${filepath}`
         );
-    } catch (error) {
+      } catch (writeErr: any) {
+        Logging.error(
+          `${tag} step 5 FAILED: could not write file ${filepath}: ` +
+            (writeErr?.message || String(writeErr))
+        );
+        return;
+      }
+
+      // ── 6. Insert DB row ──
+      try {
+        const device = await this.findDevice(deviceId);
+        if (!device) {
+          Logging.error(
+            `${tag} step 6 FAILED: no Device row found for deviceId=${deviceId} ` +
+              `(file is on disk at ${filepath} but no DB row was created)`
+          );
+          return;
+        }
+        const row = await db.Snapshot.create({
+          device_id: device.id,
+          image_url: `/uploads/snapshots/${filename}`,
+          captured_at: new Date(),
+        });
+        Logging.info(
+          `${tag} step 6 OK: Snapshot row created id=${row.id} device_id=${device.id} ` +
+            `image_url=${row.image_url}`
+        );
+      } catch (dbErr: any) {
+        Logging.error(
+          `${tag} step 6 FAILED: Snapshot.create() threw for device ${deviceId} ` +
+            `(file IS on disk at ${filepath}): ` +
+            (dbErr?.message || String(dbErr))
+        );
+      }
+    } catch (error: any) {
       Logging.error(
-        `Failed to process raw image packet: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        `${tag} UNCAUGHT: ${error?.message || String(error)}` +
+          (error?.stack ? `\nStack: ${error.stack}` : "")
       );
     }
   }
