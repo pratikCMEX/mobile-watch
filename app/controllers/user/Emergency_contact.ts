@@ -152,23 +152,29 @@ async function createOrUpdateEmergencyContact(
   next: NextFunction
 ) {
   try {
-    const { id, name, country_code, phone_number, device_id } = req.body;
+    const { id, name, country_code, phone_number, device_id, serial_number } =
+      req.body;
+
+    // Treat empty-string id as "no id" so mobile clients that always
+    // send id: "" (e.g. for "create new") behave the same as omitting it.
+    const lookupId = id && String(id).trim() ? String(id).trim() : null;
 
     // We need either an id (update), a device_id, or a serial_number to
     // figure out which device this contact belongs to.
     let device = null as any | null;
-    if (id) {
-      const existing = await db.EmergencyContact.findByPk(id);
+    if (lookupId) {
+      const existing = await db.EmergencyContact.findByPk(lookupId);
       if (!existing) {
         return errorMessage(res, "Emergency contact not found", 404);
       }
       device = await db.Device.findByPk(existing.device_id);
     } else if (device_id) {
       device = await db.Device.findByPk(device_id);
+    } else if (serial_number) {
+      device = await db.Device.findOne({
+        where: { serial_number: String(serial_number).trim() },
+      });
     }
-    // else if (serial_number) {
-    //   device = await db.Device.findOne({ where: { serial_number } });
-    // }
 
     if (!device) {
       return errorMessage(
