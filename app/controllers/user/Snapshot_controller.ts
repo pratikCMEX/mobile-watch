@@ -7,6 +7,50 @@ import {
 } from "../../library/Response";
 import { Op } from "sequelize";
 
+/**
+ * Build the FULL public URL for a snapshot file.
+ *
+ * Priority:
+ *   1. PUBLIC_BASE_URL env var (if set) — useful when the API is
+ *      behind a reverse proxy / domain the server doesn't know about.
+ *   2. The incoming request's protocol + Host header
+ *      (`<req.protocol>://<req.get('host')>`).
+ *
+ * `imagePath` may be:
+ *   - a full URL          → returned as-is.
+ *   - a path starting with "/uploads/" → resolved against the base.
+ *   - a bare filename     → wrapped in /uploads/snapshots/<name>.
+ *   - null/empty          → null.
+ */
+const buildImageUrl = (
+  req: Request,
+  imagePath: string | null | undefined
+): string | null => {
+  if (!imagePath) return null;
+
+  // Already an absolute URL (http://, https://) — pass through.
+  if (/^https?:\/\//i.test(imagePath)) {
+    return imagePath;
+  }
+
+  // Normalise whatever is stored into a "/uploads/snapshots/<file>" path.
+  let pathPart: string;
+  if (imagePath.startsWith("/uploads/")) {
+    pathPart = imagePath;
+  } else {
+    // Bare filename or other relative path — assume snapshots dir.
+    const filename = imagePath.replace(/^\/+/, "");
+    pathPart = `/uploads/snapshots/${filename}`;
+  }
+
+  const base =
+    process.env.PUBLIC_BASE_URL ||
+    `${req.protocol}://${req.get("host") || "localhost"}`;
+
+  // Avoid double slashes when joining.
+  return `${base.replace(/\/+$/, "")}${pathPart}`;
+};
+
 const AddSnapshot = async function (
   req: Request,
   res: Response,
@@ -31,8 +75,8 @@ const AddSnapshot = async function (
       );
     }
 
-    // Store the public URL (matches the static handler in app.ts and the
-    // folder used by the Multer middleware).
+    // Store the relative path so the API stays portable; the listing
+    // endpoints will turn this into a full URL on the way out.
     const image_url = `/uploads/snapshots/${uploaded.filename}`;
 
     const snapshot = await db.Snapshot.create({
@@ -40,10 +84,15 @@ const AddSnapshot = async function (
       image_url,
       captured_at: new Date(),
     });
-    return successMessage(res, "Snapshot added successfully", snapshot);
+
+    // Return the freshly-created row with a full URL too, so the
+    // caller doesn't have to do another round-trip to resolve it.
+    const responseRow = snapshot.toJSON();
+    responseRow.image_url = buildImageUrl(req, responseRow.image_url);
+
+    return successMessage(res, "Snapshot added successfully", responseRow);
   } catch (err: any) {
     console.error("AddSnapshot error:", err);
-    // Multer errors (file type / size / etc.) come through here
     if (err && err.message) {
       return errorMessage(res, err.message);
     }
@@ -97,13 +146,10 @@ const ListSnapshots = async (
       offset,
     });
 
+    // Resolve image_url to a FULL absolute URL for every row.
     const data = rows.map((row: any) => {
       const j = row.toJSON();
-      j.image_url = j.image_url
-        ? j.image_url.startsWith("/uploads/")
-          ? j.image_url
-          : `/uploads/snapshots/${j.image_url}`
-        : null;
+      j.image_url = buildImageUrl(req, j.image_url);
       return j;
     });
 
@@ -147,17 +193,14 @@ const GetSnapshotsBySerialNumber = async (
       order: [["createdAt", "DESC"]],
     });
 
-    // Add full image URL to each snapshot (works whether image_url was
-    // stored as just a filename or as a full /uploads/... path).
+    // Resolve every image_url to a FULL absolute URL. Tolerates
+    // rows that were stored as a bare filename (legacy) or as a
+    // /uploads/... path.
     const snapshotsWithUrl = snapshots.map((snapshot: any) => {
       const data = snapshot.toJSON();
-      let url: string | null = data.image_url;
-      if (url && !url.startsWith("/uploads/")) {
-        url = `/uploads/snapshots/${url}`;
-      }
       return {
         ...data,
-        image_url: url,
+        image_url: buildImageUrl(req, data.image_url),
       };
     });
 
