@@ -497,6 +497,38 @@ export const Schemas = {
         }),
     }),
   },
+
+  /**
+   * Toggle the watch's "send SMS to SOS numbers on SOS alarm" switch.
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*<id>*0008*SOSSMS,0]  (off)
+   *                 [3G*<id>*0008*SOSSMS,1]  (on)
+   *   Device reply: [3G*<id>*0006*SOSSMS]    (ack = success)
+   *
+   * When ON, the watch sends an SMS to each configured SOS number
+   * immediately after a long-press SOS event. When OFF, no SMS is
+   * sent (the watch still dials if configured).
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "enabled":       true
+   *   }
+   */
+  sosSms: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be a boolean (true or false)",
+        "any.required":
+          "enabled is required (true = send SMS to SOS numbers on SOS alarm, false = do not send SMS)",
+      }),
+    }),
+  },
   familyMember: {
     create: Joi.object({
       name: Joi.string().required(),

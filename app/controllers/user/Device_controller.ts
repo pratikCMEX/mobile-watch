@@ -816,6 +816,84 @@ const setAutoAnswer = async (
   }
 };
 
+// ────────────────────────────────────────────────────────────
+// SOS-SMS (SOSSMS) — toggle the watch's "send SMS to SOS numbers
+// after an SOS alarm" switch.
+//
+// Wire protocol:
+//   OFF  → [3G*<id>*0008*SOSSMS,0]
+//   ON   → [3G*<id>*0008*SOSSMS,1]
+//
+// Device reply:
+//   [3G*<id>*0006*SOSSMS]            (bare ack = success)
+//   [3G*<id>*0008*SOSSMS,0]          (failure, some firmwares)
+// ────────────────────────────────────────────────────────────
+
+const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { serial_number, enabled } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendSosSmsCommand(
+      serial_number,
+      Boolean(enabled)
+    );
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send SOSSMS command. Device may be disconnected."
+      );
+    }
+
+    const flag = enabled ? "1" : "0";
+    const commandProtocol = `[3G*${serial_number}*0008*SOSSMS,${flag}]`;
+
+    Logging.info(
+      `SOS-SMS (SOSSMS) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, enabled=${Boolean(enabled)})`
+    );
+
+    return successMessage(res, "SOS-SMS command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      enabled: Boolean(enabled),
+      command_sent: true,
+      command_message: enabled
+        ? "SOSSMS ON command sent. Device will send an SMS to each SOS number after an SOS alarm."
+        : "SOSSMS OFF command sent. Device will NOT send an SMS after an SOS alarm (will still dial if configured).",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [3G*<id>*0006*SOSSMS] (ack = success) or [3G*<id>*0008*SOSSMS,0] (failure).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setSosSms error:", err);
+    return errorMessage(res, "Error sending SOS-SMS command");
+  }
+};
+
 // SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
 // The `/set_sos_numbers` route now points directly at the
 // Emergency_contact controller there.
@@ -831,4 +909,5 @@ export default {
   setAlarm,
   captureSnapshot,
   setAutoAnswer,
+  setSosSms,
 };

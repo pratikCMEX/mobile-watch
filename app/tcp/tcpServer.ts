@@ -622,6 +622,10 @@ class TcpServer {
         this.handleAutoAnswerResponse(client, parsed);
         break;
 
+      case "SOSSMS":
+        this.handleSosSmsResponse(client, parsed);
+        break;
+
       default:
         this.handleUnknownCommand(client, parsed);
         break;
@@ -3195,6 +3199,77 @@ class TcpServer {
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from ACALL: ${error.message}`
+      )
+    );
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send SOS-SMS (SOSSMS) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Toggle the watch's "send SMS to SOS numbers after an SOS alarm"
+   * switch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*<id>*0008*SOSSMS,0]  (off, do NOT send SMS)
+   *                 [3G*<id>*0008*SOSSMS,1]  (on, send SMS to SOS list)
+   *
+   *   Device reply: [3G*<id>*0006*SOSSMS]    (bare ack = success)
+   *
+   * When ON, the watch will send an SMS to each configured SOS
+   * number immediately after a long-press SOS event. When OFF, no
+   * SMS is sent (the watch will still dial if SOS dials are
+   * configured).
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param enabled   true = send SMS on SOS alarm, false = do NOT send
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendSosSmsCommand(deviceId: string, enabled: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send SOSSMS command.`
+      );
+      return false;
+    }
+
+    // Content is exactly "SOSSMS,0" or "SOSSMS,1" — 8 chars.
+    const flag = enabled ? "1" : "0";
+    const command = `[3G*${deviceId}*0008*SOSSMS,${flag}]`;
+
+    Logging.info(
+      `Sending SOS-SMS (SOSSMS) command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a SOSSMS reply from the device.
+   *
+   * Reply shapes:
+   *   [3G*<id>*0006*SOSSMS]            bare ack → success
+   *   [3G*<id>*0008*SOSSMS,0]          failure (some firmwares)
+   *   [3G*<id>*0008*SOSSMS,1]          explicit success (some firmwares)
+   */
+  private handleSosSmsResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `SOSSMS response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from SOSSMS: ${error.message}`
       )
     );
     void client;
