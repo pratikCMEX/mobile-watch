@@ -75,6 +75,11 @@ async function maybeNormalizeJpeg(filepath: string): Promise<string> {
     // -compression_level 6   balanced
     const args = [
       "-y",
+      // Watch firmware frequently sends JPEGs with a truncated tail
+      // (missing EOI marker) — decode as leniently as possible so a
+      // few missing trailing bytes don't abort the whole re-encode.
+      "-err_detect",
+      "ignore_err",
       "-i",
       original,
       "-vf",
