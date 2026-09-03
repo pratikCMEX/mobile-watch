@@ -846,7 +846,7 @@ const setAutoAnswer = async (
       }
     } else {
       // Auto-answer turned OFF — wipe the entire mirror table.
-      await db.DeviceAutoAnswer.destroy({ where: { device_id: device.id } });
+      // await db.DeviceAutoAnswer.destroy({ where: { device_id: device.id } });
     }
 
     // Build a representative command_protocol string for the
