@@ -325,11 +325,16 @@ class TcpServer {
         // Check if we have enough data for the full packet
         // +1 for the closing bracket
         if (buffer.length >= packetLength + 1) {
+          // Slice exactly LEN bytes plus the closing "]" — DO NOT
+          // .trim() here. The image region can legitimately end in
+          // 0x20 (space), 0x0D, or 0x0A, and trimming would silently
+          // eat the closing "]" and corrupt the byte-count framing
+          // that the JPEG decoder relies on.
           const packet = buffer.slice(0, packetLength + 1);
           buffer = buffer.slice(packetLength + 1);
 
-          if (packet.trim()) {
-            packets.push(packet.trim());
+          if (packet.length > 0) {
+            packets.push(packet);
           }
           continue;
         } else {
