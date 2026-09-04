@@ -1639,55 +1639,68 @@ const setSilenceTime = async (
     }
 
     // ── Persist to DB (server-side mirror) ────────────────
-    // One row per device — upsert by device_id.
+    // One row per (device_id, slot_index) — 1..4 per device. Each
+    // row carries its own `is_enabled` so the UI can toggle / query
+    // individual slots.
     const padded = [...slots];
     while (padded.length < 4) padded.push("");
-    const filledSlots = padded.filter((s) => s && s.length).length;
-    const enabled = filledSlots > 0;
 
-    let weekdaysArr: string[] | null = null;
-    if (mode === "SILENCETIME2") {
-      weekdaysArr = [];
-      for (let i = 0; i < 4; i++) {
-        if (Array.isArray(weekdays)) {
-          weekdaysArr.push(weekdays[i] || "0000000");
-        } else if (typeof weekdays === "string") {
-          weekdaysArr.push(weekdays);
-        } else {
-          weekdaysArr.push("0000000");
-        }
-      }
-    }
+    const maskFor = (i: number): string | null => {
+      if (mode !== "SILENCETIME2") return null;
+      if (Array.isArray(weekdays)) return weekdays[i] || "0000000";
+      if (typeof weekdays === "string") return weekdays;
+      return "0000000";
+    };
 
-    let persistedRecord: any = null;
+    let persistedRows: any[] = [];
     try {
-      const [record] = await db.DeviceSilenceTime.upsert({
-        device_id: device.id,
-        mode,
-        slot_1: padded[0] || null,
-        slot_2: padded[1] || null,
-        slot_3: padded[2] || null,
-        slot_4: padded[3] || null,
-        weekdays: weekdaysArr,
-        last_command_protocol: result.protocol,
-        last_acked_at: null,
-        enabled,
-      });
-      persistedRecord = record?.toJSON?.() ?? record;
+      for (let i = 0; i < 4; i++) {
+        const raw = padded[i] || "";
+        // `time_section` stores just the time range; weekdays_mask
+        // stores the 7-char '0'/'1' string for SILENCETIME2 (NULL
+        // otherwise). For SILENCETIME2 the raw slot is
+        // "HH:MM-HH:MM-DDDDDDD" — split on "-" and rebuild the
+        // HH:MM-HH:MM part from indices 0..1.
+        let time_section: string | null = null;
+        if (raw) {
+          if (mode === "SILENCETIME2") {
+            const parts = raw.split("-");
+            // parts[0] = HH:MM, parts[1] = HH:MM, parts[2] = DDDDDDD
+            time_section = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : raw;
+          } else {
+            time_section = raw; // "HH:MM-HH:MM"
+          }
+        }
+        const slotRow = Boolean(raw && raw.length);
+        const [row] = await db.DeviceSilenceTime.upsert({
+          device_id: device.id,
+          mode,
+          slot_index: i + 1,
+          time_section,
+          weekdays_mask: slotRow ? maskFor(i) : null,
+          is_enabled: slotRow,
+          last_command_protocol: result.protocol,
+          last_acked_at: null,
+        });
+        persistedRows.push(row?.toJSON?.() ?? row);
+      }
     } catch (dbErr: any) {
       // Don't fail the request — the TCP packet was sent — but log it.
       console.error("setSilenceTime DB persist error:", dbErr);
       Logging.error(
-        `Failed to persist DeviceSilenceTime for device ${device.id}: ${
+        `Failed to persist DeviceSilenceTime rows for device ${device.id}: ${
           dbErr?.message || dbErr
         }`
       );
     }
 
+    const filledSlots = padded.filter((s) => s && s.length).length;
+    const enabled = filledSlots > 0;
+
     Logging.info(
       `${mode} command sent to device ${serial_number} ` +
         `(device_id=${device.id}, slots=${JSON.stringify(slots)}, ` +
-        `weekdays=${JSON.stringify(weekdays)}, enabled=${enabled})`
+        `weekdays=${JSON.stringify(weekdays)}, enabled_slots=${filledSlots})`
     );
 
     return successMessage(res, "Do-not-disturb period set successfully", {
@@ -1698,14 +1711,15 @@ const setSilenceTime = async (
       slots,
       weekdays: weekdays ?? null,
       enabled,
+      enabled_slot_count: filledSlots,
       command_sent: true,
       command_message:
         mode === "SILENCETIME"
           ? `Set ${filledSlots} daily do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`
           : `Set ${filledSlots} weekday-specific do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`,
       command_protocol: result.protocol,
-      stored_in_db: persistedRecord !== null,
-      record: persistedRecord,
+      stored_in_db: persistedRows.length > 0,
+      records: persistedRows,
       note: `Device will reply with [3G*<id>*<LEN>*${mode}] (bare ack = success).`,
       timestamp: new Date().toISOString(),
     });
@@ -1717,22 +1731,24 @@ const setSilenceTime = async (
 };
 
 /**
- * GET /user/device/do_not_disturb  (POST {serial_number})
+ * GET /user/device/get_do_not_disturb  (POST {serial_number}|{device_id})
  *
  * Returns the server-side mirror of the device's Do-Not-Disturb
- * configuration last sent via SILENCETIME / SILENCETIME2.
+ * configuration — one row per (slot_index, 1..4).
  *
  * Response shape:
  *   {
  *     serial_number,
  *     device_id,
- *     mode:               "SILENCETIME" | "SILENCETIME2",
- *     enabled:            boolean,         // at least one slot filled
- *     slots:              string[4],        // "HH:MM-HH:MM" or "HH:MM-HH:MM-DDDDDDD"
- *     weekdays:           string[4] | null, // one 7-char mask per slot
- *     last_command_protocol,
- *     last_acked_at,
- *     updated_at
+ *     mode:               "SILENCETIME" | "SILENCETIME2" | null
+ *                        (null when no rows yet),
+ *     enabled:            boolean   // at least one row has is_enabled=true
+ *     enabled_slot_count: number
+ *     slots: [
+ *                { slot_index, is_enabled, time_section,
+ *                  weekdays_mask, last_command_protocol, last_acked_at }
+ *              ],
+ *     timestamps: { last_command_protocol, last_acked_at, updated_at }
  *   }
  */
 const getDoNotDisturb = async (
@@ -1754,7 +1770,6 @@ const getDoNotDisturb = async (
     }
 
     const where: any = serial_number ? { serial_number } : { id: device_id };
-
     const device = await db.Device.findOne({ where });
     if (!device) {
       return errorMessage(
@@ -1767,24 +1782,51 @@ const getDoNotDisturb = async (
       );
     }
 
-    const record = await db.DeviceSilenceTime.findOne({
+    const rows = await db.DeviceSilenceTime.findAll({
       where: { device_id: device.id },
+      order: [["slot_index", "ASC"]],
     });
 
-    if (!record) {
+    if (rows.length === 0) {
       return successMessage(res, "No Do-Not-Disturb configuration on file", {
         serial_number: device.serial_number,
         device_id: device.id,
         device_name: device.device_name,
         configured: false,
-        mode: "SILENCETIME",
+        mode: null,
         enabled: false,
-        slots: ["", "", "", ""],
-        weekdays: null,
+        enabled_slot_count: 0,
+        slots: [],
+        timestamps: {},
       });
     }
 
-    const data = record.toJSON();
+    const slots = rows.map((r: any) => {
+      const d = r.toJSON();
+      return {
+        slot_index: d.slot_index,
+        is_enabled: d.is_enabled,
+        time_section: d.time_section,
+        weekdays_mask: d.weekdays_mask,
+        last_command_protocol: d.last_command_protocol,
+        last_acked_at: d.last_acked_at,
+        updated_at: d.updatedAt,
+        created_at: d.createdAt,
+      };
+    });
+
+    const enabled_slot_count = slots.filter((s: any) => s.is_enabled).length;
+    const last_acked_at = rows
+      .map((r: any) => r.last_acked_at)
+      .filter((v: any) => v)
+      .sort()
+      .pop() as string | undefined;
+    const last_command_protocol = slots[0]?.last_command_protocol ?? null;
+    const updated_at = slots
+      .map((s: any) => s.updated_at)
+      .sort()
+      .pop() as string | undefined;
+
     return successMessage(
       res,
       "Do-Not-Disturb configuration fetched successfully",
@@ -1793,14 +1835,15 @@ const getDoNotDisturb = async (
         serial_number: device.serial_number,
         device_id: device.id,
         device_name: device.device_name,
-        mode: data.mode,
-        enabled: data.enabled,
-        slots: [data.slot_1, data.slot_2, data.slot_3, data.slot_4],
-        weekdays: data.weekdays,
-        last_command_protocol: data.last_command_protocol,
-        last_acked_at: data.last_acked_at,
-        updated_at: data.updatedAt,
-        created_at: data.createdAt,
+        mode: rows[0].mode,
+        enabled: enabled_slot_count > 0,
+        enabled_slot_count,
+        slots,
+        timestamps: {
+          last_command_protocol,
+          last_acked_at: last_acked_at ?? null,
+          updated_at: updated_at ?? null,
+        },
       }
     );
   } catch (err: any) {

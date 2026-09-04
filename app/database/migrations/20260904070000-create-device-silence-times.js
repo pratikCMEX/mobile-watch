@@ -5,34 +5,32 @@
  * watch's Do-Not-Disturb / class-mode configuration (SILENCETIME /
  * SILENCETIME2 wire command).
  *
- *   - One row per device.  Unique constraint on `device_id` so the
- *     server can safely upsert on every `/do_not_disturb` call.
- *   - `mode` records which protocol variant was used:
- *       * "SILENCETIME"  → daily, slots 1..4 carry "HH:MM-HH:MM"
- *       * "SILENCETIME2" → per-weekday, slots 1..4 carry
- *                          "HH:MM-HH:MM-DDDDDDD"
- *   - Up to four time slots, each stored as the full on-wire string.
- *     Empty string means "no period / wipe the slot on the device".
- *     Stored as TEXT so PostgreSQL/SQLite/MySQL all behave identically
- *     and so we can hold the longest possible slot string
- *     (e.g. "21:10-07:30-0111110" = 19 chars).
- *   - `weekdays` is an ARRAY of up to four 7-char '0'/'1' masks
- *     (Sun..Sat, 0=off, 1=on).  NULL for classic SILENCETIME mode.
- *     Stored as `Sequelize.ARRAY(Sequelize.STRING(7))` — works on
- *     PostgreSQL, on SQLite the array serialises to JSON (still
- *     readable from the API).
+ * Design: one row per (device_id, slot_index), where slot_index is
+ * 1..4 (the four on-wire positions in the protocol).  Each row carries
+ * its own `is_enabled` flag so the UI can toggle / query individual
+ * slots.
  *
- * Mirrors the wire spec:
+ * Wire spec:
  *   Server send : [3G*<id>*<LEN>*SILENCETIME2,s1,s2,s3,s4]
  *   Device reply: [3G*<id>*<LEN>*<MODE>]   (bare ack = success)
  *
- *   Example:
+ *   Examples:
  *     [3G*5678901234*0037*SILENCETIME,21:10-7:30,21:10-7:30,
  *                              21:10-7:30,21:10-7:30]
  *     [3G*5678901234*0037*SILENCETIME2,21:10-7:30-0111110,
  *                               21:10-7:30-0111110,
  *                               21:10-7:30-0111110,
  *                               21:10-7:30-0111110]
+ *
+ * Slot payload storage:
+ *   - `time_section`    : "HH:MM-HH:MM"           (start–end, 24h)
+ *   - `weekdays_mask`   : 7-char '0'/'1' string   (Sun..Sat). NULL when
+ *                         mode === 'SILENCETIME'.
+ *   - `is_enabled`      : BOOLEAN, mirrors whether this slot is part
+ *                         of the active schedule. Slots with empty
+ *                         `time_section` are stored with is_enabled=false
+ *                         so the count of "active" slots is queryable
+ *                         as `SELECT COUNT(*) WHERE device_id=? AND is_enabled=true`.
  */
 module.exports = {
   async up(queryInterface, Sequelize) {
@@ -59,56 +57,49 @@ module.exports = {
         defaultValue: "SILENCETIME",
       },
 
-      slot_1: {
-        type: Sequelize.STRING(32),
-        allowNull: true,
-        defaultValue: null,
+      // 1..4 — the on-wire slot position.
+      slot_index: {
+        type: Sequelize.INTEGER,
+        allowNull: false,
+        validate: { min: 1, max: 4 },
       },
-      slot_2: {
-        type: Sequelize.STRING(32),
-        allowNull: true,
-        defaultValue: null,
-      },
-      slot_3: {
-        type: Sequelize.STRING(32),
-        allowNull: true,
-        defaultValue: null,
-      },
-      slot_4: {
-        type: Sequelize.STRING(32),
+
+      // "HH:MM-HH:MM" (24h, dash between start and end).
+      // NULL when the slot is empty / disabled.
+      time_section: {
+        type: Sequelize.STRING(11), // e.g. "21:10-07:30" = 11 chars
         allowNull: true,
         defaultValue: null,
       },
 
-      // 7-char "0/1" day masks (Sun..Sat), one per slot.
-      // NULL for classic SILENCETIME mode.
-      weekdays: {
-        type: Sequelize.ARRAY(Sequelize.STRING(7)),
+      // 7-char '0'/'1' day mask (Sun..Sat). NULL for classic SILENCETIME.
+      weekdays_mask: {
+        type: Sequelize.STRING(7),
         allowNull: true,
         defaultValue: null,
       },
 
-      // Last wire-protocol packet that was sent to the watch, useful
-      // for diagnostics & resend operations.
+      // Whether this slot is part of the active schedule.
+      is_enabled: {
+        type: Sequelize.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+
+      // Last wire-protocol packet that was sent to the watch for this
+      // slot. Useful for diagnostics / resend operations.
       last_command_protocol: {
         type: Sequelize.TEXT,
         allowNull: true,
         defaultValue: null,
       },
 
-      // Last time the device ACKed a SILENCETIME / SILENCETIME2 reply.
+      // Last time the device ACKed a SILENCETIME(/2) reply that
+      // affected this slot.
       last_acked_at: {
         type: Sequelize.DATE,
         allowNull: true,
         defaultValue: null,
-      },
-
-      // Whether the device currently has DND active at all (either
-      // mode, with at least one slot filled).
-      enabled: {
-        type: Sequelize.BOOLEAN,
-        allowNull: false,
-        defaultValue: false,
       },
 
       createdAt: {
@@ -121,16 +112,29 @@ module.exports = {
       },
     });
 
-    // One Do-Not-Disturb config per device.
-    await queryInterface.addIndex("DeviceSilenceTimes", ["device_id"], {
-      name: "devicesilencetimes_device_id_unique",
-      unique: true,
-    });
+    // One row per (device, slot_index).
+    await queryInterface.addIndex(
+      "DeviceSilenceTimes",
+      ["device_id", "slot_index"],
+      {
+        name: "devicesilencetimes_device_id_slot_index_unique",
+        unique: true,
+      }
+    );
 
-    // Helpful for "list every DND config" / admin queries.
-    await queryInterface.addIndex("DeviceSilenceTimes", ["device_id"], {
-      name: "devicesilencetimes_device_id_idx",
-    });
+    // Helpful for "give me every enabled slot on this device".
+    await queryInterface.addIndex(
+      "DeviceSilenceTimes",
+      ["device_id", "is_enabled"],
+      { name: "devicesilencetimes_device_id_is_enabled_idx" }
+    );
+
+    // Helpful for "give me every slot on this device".
+    await queryInterface.addIndex(
+      "DeviceSilenceTimes",
+      ["device_id", "slot_index"],
+      { name: "devicesilencetimes_device_id_slot_index_idx" }
+    );
   },
 
   async down(queryInterface /*, Sequelize */) {

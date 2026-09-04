@@ -4,10 +4,10 @@ import { Model, DataTypes, Sequelize, Optional, UUIDV4 } from "sequelize";
  * Server-side mirror of the watch's Do-Not-Disturb / class-mode
  * configuration (SILENCETIME / SILENCETIME2 wire command).
  *
- * One row per device.  The 4 wire slots are stored as 4 individual
- * columns so they can be indexed, queried and surfaced as a stable
- * array shape.  When the device replies with a bare ACK we update
- * `last_acked_at` and bump `enabled`.
+ * One row per (device_id, slot_index) — 1..4 slots per device. Each
+ * row carries its own `is_enabled` flag so the UI can toggle / query
+ * individual slots and we can answer "how many slots are active on
+ * device X" with a simple `COUNT(*) WHERE is_enabled=true`.
  */
 
 // ── Interfaces ──────────────────────────────────────────────
@@ -16,22 +16,21 @@ export interface DeviceSilenceTimeAttributes {
   device_id: string;
   /** "SILENCETIME" (daily) or "SILENCETIME2" (per weekday) */
   mode: "SILENCETIME" | "SILENCETIME2";
-  /** Slot 1..4 — "HH:MM-HH:MM" or "HH:MM-HH:MM-DDDDDDD" or "" to skip. */
-  slot_1: string | null;
-  slot_2: string | null;
-  slot_3: string | null;
-  slot_4: string | null;
+  /** 1..4 — the on-wire slot position. */
+  slot_index: number;
+  /** "HH:MM-HH:MM" (24h) or NULL if the slot is empty. */
+  time_section: string | null;
   /**
-   * 7-char '0'/'1' day masks (Sun..Sat), one per slot.
-   * NULL for classic SILENCETIME mode.
+   * 7-char '0'/'1' day mask (Sun..Sat, 0=off, 1=on).
+   * NULL when mode === 'SILENCETIME'.
    */
-  weekdays: string[] | null;
-  /** Last wire-protocol packet sent to the device. */
+  weekdays_mask: string | null;
+  /** Whether this slot is part of the active schedule. */
+  is_enabled: boolean;
+  /** Last wire-protocol packet sent for this slot. */
   last_command_protocol: string | null;
-  /** Last time the device ACKed the SILENCETIME(/2) reply. */
+  /** Last time the device ACKed a SILENCETIME(/2) reply. */
   last_acked_at: Date | null;
-  /** Whether at least one slot is filled (DND is "active"). */
-  enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,14 +38,11 @@ export interface DeviceSilenceTimeAttributes {
 type DeviceSilenceTimeCreationAttributes = Optional<
   DeviceSilenceTimeAttributes,
   | "id"
-  | "slot_1"
-  | "slot_2"
-  | "slot_3"
-  | "slot_4"
-  | "weekdays"
+  | "time_section"
+  | "weekdays_mask"
+  | "is_enabled"
   | "last_command_protocol"
   | "last_acked_at"
-  | "enabled"
 >;
 
 // ── Model Class ──────────────────────────────────────────────
@@ -60,14 +56,12 @@ class DeviceSilenceTime
   public id!: string;
   public device_id!: string;
   public mode!: "SILENCETIME" | "SILENCETIME2";
-  public slot_1!: string | null;
-  public slot_2!: string | null;
-  public slot_3!: string | null;
-  public slot_4!: string | null;
-  public weekdays!: string[] | null;
+  public slot_index!: number;
+  public time_section!: string | null;
+  public weekdays_mask!: string | null;
+  public is_enabled!: boolean;
   public last_command_protocol!: string | null;
   public last_acked_at!: Date | null;
-  public enabled!: boolean;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
 
@@ -104,31 +98,28 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         defaultValue: "SILENCETIME",
       },
 
-      slot_1: {
-        type: DataTypes.STRING(32),
-        allowNull: true,
-        defaultValue: null,
+      slot_index: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        validate: { min: 1, max: 4 },
       },
-      slot_2: {
-        type: DataTypes.STRING(32),
-        allowNull: true,
-        defaultValue: null,
-      },
-      slot_3: {
-        type: DataTypes.STRING(32),
-        allowNull: true,
-        defaultValue: null,
-      },
-      slot_4: {
-        type: DataTypes.STRING(32),
+
+      time_section: {
+        type: DataTypes.STRING(11),
         allowNull: true,
         defaultValue: null,
       },
 
-      weekdays: {
-        type: DataTypes.ARRAY(DataTypes.STRING(7)),
+      weekdays_mask: {
+        type: DataTypes.STRING(7),
         allowNull: true,
         defaultValue: null,
+      },
+
+      is_enabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
       },
 
       last_command_protocol: {
@@ -141,12 +132,6 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.DATE,
         allowNull: true,
         defaultValue: null,
-      },
-
-      enabled: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-        defaultValue: false,
       },
 
       createdAt: {
@@ -163,9 +148,13 @@ export default (sequelize: Sequelize, DataTypes: any) => {
       modelName: "DeviceSilenceTime",
       indexes: [
         {
-          name: "devicesilencetimes_device_id_unique",
+          name: "devicesilencetimes_device_id_slot_index_unique",
           unique: true,
-          fields: ["device_id"],
+          fields: ["device_id", "slot_index"],
+        },
+        {
+          name: "devicesilencetimes_device_id_is_enabled_idx",
+          fields: ["device_id", "is_enabled"],
         },
       ],
     }
