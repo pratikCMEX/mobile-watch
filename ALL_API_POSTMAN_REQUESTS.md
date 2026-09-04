@@ -67,7 +67,51 @@
 
 ---
 
-## 5. Update Device Settings
+## 5. Update Profile (Mobile User)
+
+Update the authenticated user's profile — name, email, phone, password, and/or
+profile image.
+
+Uses **multipart/form-data** when uploading a profile image. The image file is
+sent in the `profile_image` field; text fields (`name`, `email`, etc.) are sent
+as regular form fields. When no image is being uploaded, a plain JSON body also
+works.
+
+**POST** `/auth/update_profile`
+
+**Headers:**
+
+```
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+```
+
+**Form-data fields:**
+
+| Field                  | Type   | Required | Description                                       |
+| ---------------------- | ------ | -------- | ------------------------------------------------- |
+| `name`                 | string | no       | User's display name                               |
+| `email`                | string | no       | User's email address                              |
+| `phone_number`         | string | no       | User's phone number                               |
+| `country_code`         | string | no       | e.g. `+91`                                        |
+| `password`             | string | no       | New password (min 6 chars)                        |
+| `profile_image`        | file   | no       | Profile image file (jpeg, jpg, png, webp)         |
+| `remove_profile_image` | bool   | no       | Set to `true` to remove the current profile image |
+
+**Response fields:**
+
+| Field           | Type   | Description                             |
+| --------------- | ------ | --------------------------------------- |
+| `id`            | string | User UUID                               |
+| `name`          | string | User's display name                     |
+| `email`         | string | User's email address                    |
+| `phone_number`  | string | User's phone number                     |
+| `country_code`  | string | Country code (e.g. `+91`)               |
+| `profile_image` | string | Full URL to the profile image (or null) |
+
+---
+
+## 6. Update Device Settings
 
 **POST** `/user/device/update_device_settings`
 

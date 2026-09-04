@@ -100,27 +100,45 @@ const updateProfile = async (
       return errorMessage(res, "User not found", 404);
     }
 
-    const { name, email, phone_number, country_code, password } = req.body;
+    const {
+      name,
+      // email,
+      phone_number,
+      country_code,
+      // // password,
+      // remove_profile_image,
+    } = req.body;
 
     // If email is being changed, ensure it isn't taken by another user
-    if (email && email !== user.email) {
-      const existing = await db.User.findOne({
-        where: { email, id: { [Op.ne]: userId } },
-      });
-      if (existing) {
-        return errorMessage(res, "Email already in use by another account");
-      }
-      user.email = email;
-    }
+    // if (email && email !== user.email) {
+    //   const existing = await db.User.findOne({
+    //     where: { email, id: { [Op.ne]: userId } },
+    //   });
+    //   if (existing) {
+    //     return errorMessage(res, "Email already in use by another account");
+    //   }
+    //   user.email = email;
+    // }
 
     if (name !== undefined && name !== "") user.name = name;
     if (phone_number !== undefined) user.phone_number = phone_number;
     if (country_code !== undefined) user.country_code = country_code;
 
     // Optional password change — hash if provided
-    if (password !== undefined && password !== "") {
-      user.password = await bcrypt.hash(password, 10);
+    // if (password !== undefined && password !== "") {
+    //   user.password = await bcrypt.hash(password, 10);
+    // }
+
+    // Profile image — uploaded via multipart/form-data (field: "profile_image")
+    const uploadedFile = (req as any).file;
+    if (uploadedFile && uploadedFile.filename) {
+      user.profile_image = uploadedFile.filename;
     }
+
+    // Allow the client to remove the current profile image
+    // if (remove_profile_image === "true" || remove_profile_image === true) {
+    //   user.profile_image = null;
+    // }
 
     await user.save();
 

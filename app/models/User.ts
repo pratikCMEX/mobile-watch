@@ -11,6 +11,7 @@ export interface UserAttributes {
   phone_number: string;
   country_code: string;
   session_token: string;
+  profile_image?: string | null;
   deletedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -30,6 +31,7 @@ class User
   public phone_number!: string;
   public country_code!: string;
   public session_token!: string;
+  public profile_image?: string | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public readonly deletedAt!: Date;
@@ -100,6 +102,17 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.STRING,
         allowNull: false,
         defaultValue: "",
+      },
+      profile_image: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: null,
+        get() {
+          const img = this.getDataValue("profile_image");
+          if (!img) return null;
+          const BASE_URL = process.env.BASE_URL || "http://localhost:3001";
+          return `${BASE_URL}/uploads/profile/${img}`;
+        },
       },
       deletedAt: {
         type: DataTypes.DATE,

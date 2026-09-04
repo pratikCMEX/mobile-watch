@@ -876,6 +876,7 @@ export const Schemas = {
       phone_number: Joi.string().optional().allow(""),
       country_code: Joi.string().optional().allow(""),
       password: Joi.string().min(6).optional().allow(""),
+      remove_profile_image: Joi.boolean().optional(),
     }),
   },
   geofence: {
