@@ -166,8 +166,27 @@ const updateProfile = async (
   }
 };
 
+const getProfile = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = (req as any)?.userinfo?.payload?.id;
+    if (!userId) {
+      return errorMessage(res, "Invalid token payload", 401);
+    }
+
+    const user = await db.User.findByPk(userId);
+    if (!user) {
+      return errorMessage(res, "User not found", 404);
+    }
+
+    return successMessage(res, "Profile fetched successfully", user);
+  } catch (error) {
+    console.error("getProfile error:", error);
+    return errorMessage(res, "Error fetching profile");
+  }
+};
 export default {
   login,
   logout,
   updateProfile,
+  getProfile,
 };

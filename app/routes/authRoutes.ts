@@ -22,4 +22,7 @@ router.post(
   Auth_controller.updateProfile
 );
 
+// Get authenticated user's profile
+router.get("/get_profile", checkToken, Auth_controller.getProfile);
+
 module.exports = router;
