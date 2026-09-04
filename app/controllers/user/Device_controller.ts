@@ -1670,6 +1670,7 @@ const setSilenceTime = async (
 
     let persistedRows: any[] = [];
     let filledCount = 0;
+    let skippedCount = 0;
     try {
       for (let i = 0; i < 4; i++) {
         const raw = padded[i] || "";
@@ -1691,17 +1692,38 @@ const setSilenceTime = async (
           time_section = raw; // "HH:MM-HH:MM"
         }
 
-        const [row] = await db.DeviceSilenceTime.upsert({
-          device_id: device.id,
-          mode,
-          slot_index: i + 1,
-          time_section,
-          weekdays_mask: maskFor(i),
-          is_enabled: true,
-          last_command_protocol: result.protocol,
-          last_acked_at: null,
+        // INSERT-only semantics: only persist if no row exists yet
+        // at (device_id, slot_index).  Existing rows (from a prior
+        // request) are NEVER overwritten, even if the caller
+        // submits a different time_section / mode for the same
+        // slot_index — this matches the "add one-by-one" rule the
+        // user wants.
+        //
+        // findOrCreate returns [instance, created].  When created
+        // is false, we count it as a skip so the caller knows
+        // their slot was preserved.
+        const [row, created] = await db.DeviceSilenceTime.findOrCreate({
+          where: {
+            device_id: device.id,
+            slot_index: i + 1,
+          },
+          defaults: {
+            device_id: device.id,
+            mode,
+            slot_index: i + 1,
+            time_section,
+            weekdays_mask: maskFor(i),
+            is_enabled: true,
+            last_command_protocol: result.protocol,
+            last_acked_at: null,
+          },
         });
-        persistedRows.push(row?.toJSON?.() ?? row);
+
+        if (created) {
+          persistedRows.push(row?.toJSON?.() ?? row);
+        } else {
+          skippedCount++;
+        }
       }
     } catch (dbErr: any) {
       // Don't fail the request — the TCP packet was sent — but log it.
@@ -1730,6 +1752,8 @@ const setSilenceTime = async (
       weekdays: weekdays ?? null,
       enabled,
       enabled_slot_count: filledCount,
+      inserted_count: persistedRows.length,
+      skipped_count: skippedCount,
       command_sent: true,
       command_message:
         mode === "SILENCETIME"
@@ -1738,7 +1762,7 @@ const setSilenceTime = async (
       command_protocol: result.protocol,
       stored_in_db: persistedRows.length > 0,
       records: persistedRows,
-      note: `Device will reply with [3G*<id>*<LEN>*${mode}] (bare ack = success).`,
+      note: `Device will reply with [3G*<id>*<LEN>*${mode}] (bare ack = success). Existing rows at slot_indexes that were already configured are preserved — only empty slot_indexes are skipped, and existing non-empty ones are not overwritten.`,
       timestamp: new Date().toISOString(),
     });
   } catch (err: any) {
