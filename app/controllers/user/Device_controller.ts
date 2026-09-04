@@ -304,6 +304,7 @@ const getDeviceStatus = async (
       device_name: deviceData.device_name,
       serial_number: deviceData.serial_number,
       imei: deviceData.imei,
+      sim_card_number: deviceData.phone_number,
       firmware_version: deviceData.firmware_version,
       is_online: deviceData.is_online,
       connection_status: deviceData.connection_status,

@@ -286,6 +286,7 @@ automatically updates the record.
 | `device_name`                | string  | Device name                                                            |
 | `serial_number`              | string  | Protocol serial number                                                 |
 | `imei`                       | string  | Device IMEI                                                            |
+| `sim_card_number`            | string  | SIM card phone number                                                  |
 | `firmware_version`           | string  | Firmware version (e.g. `G4C_YSC_EMMC_240_5M_En_N_2023.11.10_15.38.00`) |
 | `is_online`                  | boolean | Whether device is currently connected via TCP                          |
 | `connection_status`          | string  | `"online"` or `"offline"`                                              |
