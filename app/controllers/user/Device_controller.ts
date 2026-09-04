@@ -1639,15 +1639,25 @@ const setSilenceTime = async (
     }
 
     // ── Persist to DB (server-side mirror) ────────────────
-    // Strategy: wipe the device's existing DND rows first, then
-    // insert one row per slot that the caller actually filled in.
+    // Strategy: only INSERT/UPDATE the (device_id, slot_index)
+    // pairs that the caller explicitly filled in.  Existing rows
+    // for other slot_indexes are left untouched — they remain
+    // visible to /get_do_not_disturb until the user later modifies
+    // or removes them via another request.
     //
-    // This keeps the DB in lock-step with the on-wire request — if
-    // the user first sets SILENCETIME2 slot #1 with weekdays
-    // ["1111111","0000000","0000000","0000000"] and then sets
-    // SILENCETIME slots #1 & #2, the SILENCETIME2 rows are deleted
-    // and only the two SILENCETIME rows remain (no mixed-mode
-    // leftovers).
+    // Per-slot semantics:
+    //   - slot_index with non-empty value in the request →
+    //     upsert (insert/update) that single slot's row.
+    //   - slot_index with empty value in the request → do nothing
+    //     in the DB (we do NOT touch any existing row at that
+    //     slot_index — the user's existing config for that slot
+    //     stays in place; the on-wire command still sends "" to
+    //     wipe that slot on the watch if needed, but the server's
+    //     mirror stays intact).
+    //
+    // This way slot_index=1 keeps whatever mode/mask it had
+    // before; only the slots the caller actually submits in this
+    // request are modified.
     const padded = [...slots];
     while (padded.length < 4) padded.push("");
 
@@ -1661,16 +1671,9 @@ const setSilenceTime = async (
     let persistedRows: any[] = [];
     let filledCount = 0;
     try {
-      // 1. Drop every existing row for this device so old mode /
-      //    old weekday masks don't linger alongside new ones.
-      await db.DeviceSilenceTime.destroy({
-        where: { device_id: device.id },
-      });
-
-      // 2. Insert only the non-empty slots of the new request.
       for (let i = 0; i < 4; i++) {
         const raw = padded[i] || "";
-        if (!raw) continue; // skip empty slot_indexes — no auto-insert
+        if (!raw) continue; // skip empty slot_indexes — don't touch DB
 
         filledCount++;
 
