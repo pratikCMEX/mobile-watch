@@ -40,6 +40,13 @@ module.exports = {
   async up(queryInterface, Sequelize) {
     const dialect = queryInterface.sequelize.getDialect();
 
+    // Generate UUIDs in JS so the column-level `defaultValue:
+    // Sequelize.UUIDV4` (which the pg driver does NOT translate into
+    // a SQL DEFAULT clause) is never relied on.  Node ≥14.17
+    // provides `crypto.randomUUID()` natively.
+    const crypto = require("crypto");
+    const newUuid = () => crypto.randomUUID();
+
     // Helper: does a table already exist in the current schema?
     const tableExists = async (tableName) => {
       try {
@@ -224,9 +231,17 @@ module.exports = {
       const rows = [];
       for (const d of devices) {
         for (let slot = 1; slot <= 4; slot++) {
-          // No `id` here — let the DB column default (UUIDV4
-          // declared in the createTable step) fill it in.
+          // Always set `id` explicitly via crypto.randomUUID().
+          // The column-level `defaultValue: Sequelize.UUIDV4` is
+          // declared in the createTable step, but Sequelize's pg
+          // dialect does NOT translate that into a SQL DEFAULT
+          // clause, so leaving `id` undefined leads to a NOT NULL
+          // constraint violation on bulk insert.  Generating the
+          // UUIDs in JS avoids that and is consistent with the
+          // rest of the codebase (which already uses `uuid` v4 in
+          // `app/models/index.ts`).
           rows.push({
+            id: newUuid(),
             device_id: d.id,
             mode: "SILENCETIME",
             slot_index: slot,
