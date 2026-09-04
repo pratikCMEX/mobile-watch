@@ -1,12 +1,17 @@
 "use strict";
 
 /**
- * Migration: create the `DeviceSilenceTimes` table, add the
- * indexes used by every query in the codebase, and auto-seed
- * 4 default rows (slot_index 1..4, all disabled) for every
- * existing device.
+ * Migration: create the `DeviceSilenceTimes` table and add the
+ * indexes used by every query in the codebase.
  *
- * One single migration so apply / rollback is atomic.
+ * This migration does NOT seed any rows.  Per the user
+ * requirement, the 4 default slot rows per device
+ * (slot_index 1..4, is_enabled=false) are inserted lazily on the
+ * first Do-Not-Disturb call by
+ *   DeviceSilenceTime.ensureDefaultRowsForDevice(...)
+ * which is called from
+ *   - POST /user/device/do_not_disturb     (setSilenceTime)
+ *   - POST /user/device/get_do_not_disturb (getDoNotDisturb)
  *
  *   ── Table design ──────────────────────────────────────────
  *   One row per (device_id, slot_index) — 1..4 slots per device.
@@ -24,29 +29,14 @@
  *                                      bulk UPDATE by device_id,
  *                                      ensureDefaultRowsForDevice check
  *
- *   ── Auto-seed ─────────────────────────────────────────────
- *   After the table is created, walks every row in `Devices` and
- *   inserts 4 default slot rows per device, all `is_enabled=false`.
- *   Uses dialect-safe "skip duplicates" so re-running this migration
- *   on a database that already has rows is a no-op.
- *
  *   ── Idempotency / self-healing ────────────────────────────
- *   Every step (createTable, addIndex, bulkInsert) checks whether
- *   the target object already exists and skips if so.  This makes
- *   the migration safe to re-run after a previous failure that
- *   left the table / indexes partially in place.
+ *   createTable + addIndex check whether the target object
+ *   already exists and skip if so.  This makes the migration
+ *   safe to re-run after a previous failure that left the table
+ *   or indexes partially in place.
  */
 module.exports = {
   async up(queryInterface, Sequelize) {
-    const dialect = queryInterface.sequelize.getDialect();
-
-    // Generate UUIDs in JS so the column-level `defaultValue:
-    // Sequelize.UUIDV4` (which the pg driver does NOT translate into
-    // a SQL DEFAULT clause) is never relied on.  Node ≥14.17
-    // provides `crypto.randomUUID()` natively.
-    const crypto = require("crypto");
-    const newUuid = () => crypto.randomUUID();
-
     // Helper: does a table already exist in the current schema?
     const tableExists = async (tableName) => {
       try {
@@ -216,79 +206,11 @@ module.exports = {
         name: "idx_dnd_device",
       });
     }
-
-    // ───────────────────────────────────────────────────────
-    // 3. AUTO-SEED 4 DEFAULT ROWS PER EXISTING DEVICE
-    //    (idempotent — ON CONFLICT / INSERT IGNORE / pre-check
-    //     so re-running this migration is a no-op)
-    // ───────────────────────────────────────────────────────
-    const [devices] = await queryInterface.sequelize.query(
-      `SELECT id FROM "Devices";`
-    );
-
-    if (Array.isArray(devices) && devices.length > 0) {
-      const now = new Date();
-      const rows = [];
-      for (const d of devices) {
-        for (let slot = 1; slot <= 4; slot++) {
-          // Always set `id` explicitly via crypto.randomUUID().
-          // The column-level `defaultValue: Sequelize.UUIDV4` is
-          // declared in the createTable step, but Sequelize's pg
-          // dialect does NOT translate that into a SQL DEFAULT
-          // clause, so leaving `id` undefined leads to a NOT NULL
-          // constraint violation on bulk insert.  Generating the
-          // UUIDs in JS avoids that and is consistent with the
-          // rest of the codebase (which already uses `uuid` v4 in
-          // `app/models/index.ts`).
-          rows.push({
-            id: newUuid(),
-            device_id: d.id,
-            mode: "SILENCETIME",
-            slot_index: slot,
-            time_section: null,
-            weekdays_mask: null,
-            is_enabled: false,
-            last_command_protocol: null,
-            last_acked_at: null,
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-      }
-
-      if (dialect === "postgres") {
-        await queryInterface.bulkInsert("DeviceSilenceTimes", rows, {
-          ignoreDuplicates: true, // ON CONFLICT DO NOTHING
-        });
-      } else if (dialect === "mysql" || dialect === "mariadb") {
-        await queryInterface.bulkInsert("DeviceSilenceTimes", rows, {
-          ignore: true, // INSERT IGNORE
-        });
-      } else {
-        // SQLite / unknown: pre-check each (device_id, slot_index)
-        // pair to avoid UNIQUE constraint errors.
-        for (const row of rows) {
-          const [existing] = await queryInterface.sequelize.query(
-            `SELECT id FROM "DeviceSilenceTimes" ` +
-              `WHERE device_id = :device_id AND slot_index = :slot_index LIMIT 1;`,
-            {
-              replacements: {
-                device_id: row.device_id,
-                slot_index: row.slot_index,
-              },
-            }
-          );
-          if (!existing || existing.length === 0) {
-            await queryInterface.bulkInsert("DeviceSilenceTimes", [row]);
-          }
-        }
-      }
-    }
   },
 
   async down(queryInterface /*, Sequelize */) {
     // Atomic rollback — drops the whole table.  This also removes
-    // every seeded row in one step.
+    // every row in one step.
     await queryInterface.dropTable("DeviceSilenceTimes");
   },
 };
