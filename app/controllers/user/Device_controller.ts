@@ -301,6 +301,7 @@ const getDeviceStatus = async (
 
     return successMessage(res, "Device status fetched successfully", {
       device_id: deviceData.id,
+
       device_name: deviceData.device_name,
       serial_number: deviceData.serial_number,
       imei: deviceData.imei,
