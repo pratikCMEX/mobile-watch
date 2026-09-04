@@ -1639,12 +1639,15 @@ const setSilenceTime = async (
     }
 
     // ── Persist to DB (server-side mirror) ────────────────
-    // Only persist the slots that were actually filled in by the
-    // caller.  Empty slots are NOT auto-inserted — the user
-    // explicitly does not want phantom rows.  This means if the
-    // caller submits ["21:10-07:30", "", "", ""], exactly ONE row
-    // (slot_index=1) is upserted; the other three slot_indexes
-    // remain absent in the DB until the user later adds them.
+    // Strategy: wipe the device's existing DND rows first, then
+    // insert one row per slot that the caller actually filled in.
+    //
+    // This keeps the DB in lock-step with the on-wire request — if
+    // the user first sets SILENCETIME2 slot #1 with weekdays
+    // ["1111111","0000000","0000000","0000000"] and then sets
+    // SILENCETIME slots #1 & #2, the SILENCETIME2 rows are deleted
+    // and only the two SILENCETIME rows remain (no mixed-mode
+    // leftovers).
     const padded = [...slots];
     while (padded.length < 4) padded.push("");
 
@@ -1658,6 +1661,13 @@ const setSilenceTime = async (
     let persistedRows: any[] = [];
     let filledCount = 0;
     try {
+      // 1. Drop every existing row for this device so old mode /
+      //    old weekday masks don't linger alongside new ones.
+      await db.DeviceSilenceTime.destroy({
+        where: { device_id: device.id },
+      });
+
+      // 2. Insert only the non-empty slots of the new request.
       for (let i = 0; i < 4; i++) {
         const raw = padded[i] || "";
         if (!raw) continue; // skip empty slot_indexes — no auto-insert
