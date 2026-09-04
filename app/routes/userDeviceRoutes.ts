@@ -109,6 +109,35 @@ router.post(
   Device_controller.setSosSms
 );
 
+// Fall-Down Alarm Alert (FALLDOWN) API — toggle the watch's fall-down
+// alarm alert switch and the "call center number after fall" switch.
+//
+// Wire protocol:
+//   Server send : [3G*<id>*<LEN>*FALLDOWN,X,Y]
+//                 X = fall-down alarm alert switch (1=ON, 0=OFF)
+//                 Y = call center number after fall  (1=ON, 0=OFF)
+//   Device reply: [3G*<id>*<LEN>*FALLDOWN]  (bare ack = success)
+router.post(
+  "/fall_down_alert",
+  checkToken,
+  ValidateJoi(Schemas.fallDownAlert.set),
+  Device_controller.setFallDownAlert
+);
+
+// Fall-Down Sensitivity (LSSET) API — set the watch's fall-down
+// detection sensitivity level.
+//
+// Wire protocol:
+//   Server send : [3G*<id>*<LEN>*LSSET,X+6]   (Android, 1–6 levels)
+//                 [3G*<id>*<LEN>*LSSET,X+8]   (RT OS, 1–8 levels)
+//   Device reply: [3G*<id>*<LEN>*LSSET,X]   (X = current level)
+router.post(
+  "/fall_down_sensitivity",
+  checkToken,
+  ValidateJoi(Schemas.fallDownSensitivity.set),
+  Device_controller.setFallDownSensitivity
+);
+
 // Language / time zone (LZ) API — set the watch's display language
 // OR its time zone (mutually exclusive per request, per the spec).
 router.post(

@@ -1050,6 +1050,267 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
 };
 
 // ────────────────────────────────────────────────────────────
+// Fall-Down Alarm Alert (FALLDOWN) — toggle the watch's
+// fall-down alarm alert switch and the "call center number
+// after fall" switch.
+//
+// Wire protocol:
+//   Server send : [3G*<id>*<LEN>*FALLDOWN,X,Y]
+//                 X = fall-down alarm alert switch (1=ON, 0=OFF)
+//                 Y = call center number after fall  (1=ON, 0=OFF)
+//   Device reply: [3G*<id>*<LEN>*FALLDOWN]  (bare ack = success)
+//
+// Server-side mirror: DeviceSetting.fall_down_alert_enabled
+//                     DeviceSetting.fall_down_reminder_call
+// ────────────────────────────────────────────────────────────
+
+const setFallDownAlert = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, alert_enabled, call_center } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const alertEnabled = Boolean(alert_enabled);
+    const callCenter = Boolean(call_center);
+
+    const commandSent = tcpServer.sendFallDownCommand(
+      serial_number,
+      alertEnabled,
+      callCenter
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send FALLDOWN command. Device may be disconnected."
+      );
+    }
+
+    // Mirror to the server-side DeviceSetting table.
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: alertEnabled,
+        fall_down_reminder_call: callCenter,
+        fall_down_level: 5,
+        scene_mode: 1,
+      });
+    } else {
+      deviceSetting.fall_down_alert_enabled = alertEnabled;
+      deviceSetting.fall_down_reminder_call = callCenter;
+      await deviceSetting.save();
+    }
+
+    const x = alertEnabled ? "1" : "0";
+    const y = callCenter ? "1" : "0";
+    const content = `FALLDOWN,${x},${y}`;
+    const lenHex = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[3G*${serial_number}*${lenHex}*${content}]`;
+
+    Logging.info(
+      `Fall-down alarm (FALLDOWN) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, alert_enabled=${alertEnabled}, call_center=${callCenter})`
+    );
+
+    return successMessage(res, "Fall-down alarm command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      alert_enabled: alertEnabled,
+      call_center: callCenter,
+      command_sent: true,
+      command_message: alertEnabled
+        ? "FALLDOWN ON command sent. Fall-down alarm alert is enabled."
+        : "FALLDOWN OFF command sent. Fall-down alarm alert is disabled.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [3G*<id>*<LEN>*FALLDOWN] (bare ack = success).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setFallDownAlert error:", err);
+    return errorMessage(res, "Error sending fall-down alarm command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// Fall-Down Sensitivity (LSSET) — set the watch's fall-down
+// detection sensitivity level.
+//
+// Wire protocol:
+//   Server send : [3G*<id>*<LEN>*LSSET,X+6]   (Android, 1–6 levels)
+//                 [3G*<id>*<LEN>*LSSET,X+8]   (RT OS, 1–8 levels)
+//                 X = current sensitivity level (1 = most sensitive)
+//   Device reply: [3G*<id>*<LEN>*LSSET,X]   (X = current level)
+//
+// TIP:
+//   Android device  — fall sensitive is 1–6, server default 4 or 5
+//   RT OS device    — fall sensitive is 1–8, server default 5 or 6
+//
+// Server-side mirror: DeviceSetting.fall_down_level
+// ────────────────────────────────────────────────────────────
+
+const setFallDownSensitivity = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, level, device_type } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (level === undefined || level === null) {
+      return errorMessage(res, "level is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Determine the max sensitivity level based on device OS.
+    // Android: 1–6, RT OS: 1–8. Default to Android (6) if not specified.
+    const isRtOs =
+      device_type === "rtos" || device_type === "rt_os" || device_type === "8";
+    const maxLevel: 6 | 8 = isRtOs ? 8 : 6;
+
+    const levelNum = Number(level);
+    if (isNaN(levelNum) || levelNum < 1 || levelNum > maxLevel) {
+      return errorMessage(
+        res,
+        `Invalid fall-down sensitivity level ${levelNum}. Must be 1–${maxLevel} (${
+          isRtOs ? "RT OS" : "Android"
+        } device).`
+      );
+    }
+
+    const commandSent = tcpServer.sendLssetCommand(
+      serial_number,
+      levelNum,
+      maxLevel
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send LSSET command. Device may be disconnected."
+      );
+    }
+
+    // Mirror to the server-side DeviceSetting table.
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: true,
+        fall_down_reminder_call: true,
+        fall_down_level: levelNum,
+        scene_mode: 1,
+      });
+    } else {
+      deviceSetting.fall_down_level = levelNum;
+      await deviceSetting.save();
+    }
+
+    const content = `LSSET,${levelNum}+${maxLevel}`;
+    const lenHex = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[3G*${serial_number}*${lenHex}*${content}]`;
+
+    Logging.info(
+      `Fall-down sensitivity (LSSET) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, level=${levelNum}, max=${maxLevel})`
+    );
+
+    return successMessage(
+      res,
+      "Fall-down sensitivity command sent successfully",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        level: levelNum,
+        max_level: maxLevel,
+        device_type: isRtOs ? "rt_os" : "android",
+        command_sent: true,
+        command_message: `LSSET command sent. Fall-down sensitivity set to level ${levelNum} of ${maxLevel}.`,
+        command_protocol: commandProtocol,
+        note: "Device will reply with [3G*<id>*<LEN>*LSSET,X] (X = current level).",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err) {
+    console.error("setFallDownSensitivity error:", err);
+    return errorMessage(res, "Error sending fall-down sensitivity command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
 // Language / time zone (LZ) — set the watch's display language
 // AND/OR its time zone.
 //
@@ -1285,6 +1546,8 @@ export default {
   setAutoAnswer,
   listAutoAnswer,
   setSosSms,
+  setFallDownAlert,
+  setFallDownSensitivity,
   setLanguageTimezone,
   setSilenceTime,
 };

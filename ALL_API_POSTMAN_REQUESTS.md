@@ -133,7 +133,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 6. Add Family Member
+## 7. Add Family Member
 
 **POST** `/user/device/add_family_member`
 
@@ -147,7 +147,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 7. List Family Members
+## 8. List Family Members
 
 **POST** `/user/device/list_family_members`
 
@@ -163,7 +163,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 8. List Notifications
+## 9. List Notifications
 
 **POST** `/user/device/list_notifications`
 
@@ -183,7 +183,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 9. Add Health Metrics
+## 10. Add Health Metrics
 
 **POST** `/health/add_metrics`
 
@@ -199,7 +199,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 10. Get Health Analytics
+## 11. Get Health Analytics
 
 **POST** `/health/get_analytics`
 
@@ -214,7 +214,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 11. Save / Update Geofence
+## 12. Save / Update Geofence
 
 **POST** `/user/device/save_geofence` (route not in userDeviceRoutes, check actual route)
 
@@ -231,7 +231,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 12. List Geofences
+## 13. List Geofences
 
 **POST** `/user/device/list_geofences` (route not in userDeviceRoutes, check actual route)
 
@@ -247,7 +247,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 13. Toggle Geofence Status
+## 14. Toggle Geofence Status
 
 **POST** `/user/device/toggle_geofence_status` (route not in userDeviceRoutes, check actual route)
 
@@ -260,7 +260,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 14. Create Emergency Contact
+## 15. Create Emergency Contact
 
 **POST** `/user/device/create_emergency_contact` (route not in userDeviceRoutes, check actual route)
 
@@ -275,7 +275,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 15. Update Emergency Contact
+## 16. Update Emergency Contact
 
 **POST** `/user/device/update_emergency_contact` (route not in userDeviceRoutes, check actual route)
 
@@ -291,7 +291,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 16. List Emergency Contacts
+## 17. List Emergency Contacts
 
 **POST** `/user/device/list_emergency_contacts` (route not in userDeviceRoutes, check actual route)
 
@@ -307,7 +307,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 17. Get Device Status
+## 18. Get Device Status
 
 Sends a TS (terminal status) command to the device via TCP to request
 fresh firmware/software status, then returns the current device data
@@ -356,7 +356,7 @@ automatically updates the record.
 
 ---
 
-## 18. Restart Device
+## 19. Restart Device
 
 Sends a RESET (restart) command to the device via TCP. The device will
 restart and, upon coming back online, will re-establish its TCP connection
@@ -383,7 +383,7 @@ and resume sending heartbeats.
 
 ---
 
-## 19. Device Command (Unified API)
+## 20. Device Command (Unified API)
 
 Send various commands to the device via TCP. Use the `command` field to specify
 the action:
@@ -417,7 +417,7 @@ the action:
 
 ---
 
-## 20. Find My Device
+## 21. Find My Device
 
 Send a FIND command to the device via TCP. The device will respond with its
 location or an audible alert to help locate it.
@@ -446,7 +446,7 @@ Protocol: `[CS*YYYYYYYYYY*0004*FIND]`
 
 ---
 
-## 21. Set Alarm Clock
+## 22. Set Alarm Clock
 
 Send alarm clock settings to the device via TCP. You can set up to 3 alarms.
 
@@ -484,7 +484,7 @@ Protocol: `[CS*YYYYYYYYYY*LEN*REMIND,alarm1,alarm2,alarm3]`
 
 ---
 
-## 22. Remote Snapshot (Capture Photo)
+## 23. Remote Snapshot (Capture Photo)
 
 Send a remote snapshot command to the device via TCP. The device will capture
 a photo and send it back as image data.
@@ -524,7 +524,7 @@ and a snapshot record will be created in the database when the device responds.
 
 ---
 
-## 23. Save Emergency Contacts (Bulk)
+## 24. Save Emergency Contacts (Bulk)
 
 Push up to 3 SOS contacts (one per priority slot) to the device in a single call.
 
@@ -569,7 +569,7 @@ Device reply (per slot):
 
 ---
 
-## 24. Save / Update Single Emergency Contact
+## 25. Save / Update Single Emergency Contact
 
 Create or update ONE contact. After saving, the server re-syncs **all** stored
 contacts to the device in priority order.
@@ -602,7 +602,7 @@ contacts to the device in priority order.
 
 ---
 
-## 25. Delete Emergency Contact
+## 26. Delete Emergency Contact
 
 Delete ONE contact by id. After deleting, the server re-syncs the **remaining**
 contacts to the device in priority order.
@@ -628,7 +628,7 @@ contacts to the device in priority order.
 
 ---
 
-## 26. List Emergency Contacts
+## 27. List Emergency Contacts
 
 Paginated list of contacts for a device. Sorted by `priority ASC NULLS LAST`,
 then `createdAt` (use `sorting` to flip).
@@ -649,7 +649,7 @@ then `createdAt` (use `sorting` to flip).
 
 ---
 
-## 27. Get Emergency Contact by ID
+## 28. Get Emergency Contact by ID
 
 Fetch a single contact.
 
@@ -663,7 +663,7 @@ Fetch a single contact.
 
 ---
 
-## 28. Set Phonebook (PHBX)
+## 29. Set Phonebook (PHBX)
 
 Push up to 30 contacts onto the watch's phonebook. Each contact is sent
 as a separate PHBX packet (one round-trip per entry).
@@ -722,7 +722,7 @@ queued for the watch.
 
 ---
 
-## 29. Clear Phonebook Slot (PHBX with empty name AND empty number)
+## 30. Clear Phonebook Slot (PHBX with empty name AND empty number)
 
 Clear a single phonebook slot on the watch. Per the latest protocol spec,
 this firmware clears a slot by sending PHBX again at the same slot index
@@ -777,7 +777,7 @@ Device reply (uses the same PHBX command word):
 
 ---
 
-## 30. List Phonebook Entries (Server-Side Mirror)
+## 31. List Phonebook Entries (Server-Side Mirror)
 
 List all phonebook entries currently stored on the server for a device.
 The server mirrors the watch's PHBX state in a `DevicePhonebooks` table:

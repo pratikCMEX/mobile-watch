@@ -553,6 +553,82 @@ export const Schemas = {
   },
 
   /**
+   * Set the watch's fall-down alarm alert switch and the
+   * "call center number after fall" switch (FALLDOWN command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*<id>*<LEN>*FALLDOWN,X,Y]
+   *                 X = fall-down alarm alert switch (1=ON, 0=OFF)
+   *                 Y = call center number after fall  (1=ON, 0=OFF)
+   *   Device reply: [3G*<id>*<LEN>*FALLDOWN]  (bare ack = success)
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "alert_enabled": true,
+   *     "call_center":   true
+   *   }
+   */
+  fallDownAlert: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      alert_enabled: Joi.boolean().required().messages({
+        "boolean.base": "alert_enabled must be a boolean (true or false)",
+        "any.required":
+          "alert_enabled is required (true = fall-down alarm alert ON, false = OFF)",
+      }),
+      call_center: Joi.boolean().required().messages({
+        "boolean.base": "call_center must be a boolean (true or false)",
+        "any.required":
+          "call_center is required (true = call center number after fall, false = do not call)",
+      }),
+    }),
+  },
+
+  /**
+   * Set the watch's fall-down detection sensitivity level (LSSET command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*<id>*<LEN>*LSSET,X+6]   (Android, 1–6 levels)
+   *                 [3G*<id>*<LEN>*LSSET,X+8]   (RT OS, 1–8 levels)
+   *   Device reply: [3G*<id>*<LEN>*LSSET,X]   (X = current level)
+   *
+   * TIP:
+   *   Android device  — fall sensitive is 1–6, server default 4 or 5
+   *   RT OS device    — fall sensitive is 1–8, server default 5 or 6
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "level": 5,
+   *     "device_type": "android"   // or "rtos"
+   *   }
+   */
+  fallDownSensitivity: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      level: Joi.number().integer().min(1).required().messages({
+        "number.base": "level must be a number",
+        "number.min": "level must be at least 1",
+        "any.required": "level is required (1 = most sensitive)",
+      }),
+      device_type: Joi.string()
+        .valid("android", "rtos", "rt_os")
+        .optional()
+        .default("android")
+        .messages({
+          "any.only": "device_type must be 'android' or 'rtos'",
+        }),
+    }),
+  },
+
+  /**
    * Set the watch's language and/or time zone (LZ command).
    *
    * Per the protocol spec:

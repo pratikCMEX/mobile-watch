@@ -655,6 +655,14 @@ class TcpServer {
         this.handleSosSmsResponse(client, parsed);
         break;
 
+      case "FALLDOWN":
+        this.handleFallDownResponse(client, parsed);
+        break;
+
+      case "LSSET":
+        this.handleLssetResponse(client, parsed);
+        break;
+
       case "LZ":
         this.handleLzResponse(client, parsed);
         break;
@@ -3316,6 +3324,166 @@ class TcpServer {
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from SOSSMS: ${error.message}`
+      )
+    );
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Fall-Down Alarm (FALLDOWN) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Toggle the watch's fall-down alarm alert and the "call center
+   * number after fall" switch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*<id>*<LEN>*FALLDOWN,X,Y]
+   *                 X = fall-down alarm alert switch  (1 = ON, 0 = OFF)
+   *                 Y = call center number after fall  (1 = ON, 0 = OFF)
+   *
+   *   Device reply: [3G*<id>*<LEN>*FALLDOWN]   (bare ack = success)
+   *
+   * Example:
+   *   [3G*8800000015*000B*FALLDOWN,1,1]
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param alertEnabled   true = fall-down alarm alert ON, false = OFF
+   * @param callCenter     true = call center number after fall, false = do NOT
+   * @returns true if the command was sent, false if the device is not connected
+   */
+  public sendFallDownCommand(
+    deviceId: string,
+    alertEnabled: boolean,
+    callCenter: boolean
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send FALLDOWN command.`
+      );
+      return false;
+    }
+
+    const x = alertEnabled ? "1" : "0";
+    const y = callCenter ? "1" : "0";
+    const content = `FALLDOWN,${x},${y}`;
+
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending fall-down alarm (FALLDOWN) command to device ${deviceId} ` +
+        `(alert_enabled=${alertEnabled}, call_center=${callCenter}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a FALLDOWN reply from the device.
+   *
+   * Reply shape:
+   *   [3G*<id>*<LEN>*FALLDOWN]   bare ack → success
+   */
+  private handleFallDownResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `FALLDOWN response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from FALLDOWN: ${error.message}`
+      )
+    );
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Fall-Down Sensitivity (LSSET) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Set the watch's fall-down detection sensitivity level.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*<id>*<LEN>*LSSET,X+6]   (Android, 1–6 levels)
+   *                 [3G*<id>*<LEN>*LSSET,X+8]   (RT OS, 1–8 levels)
+   *
+   *   X = current sensitivity level (1 = most sensitive)
+   *   6 or 8 = total sensitivity levels (based on device OS)
+   *
+   *   Device reply: [3G*<id>*<LEN>*LSSET,X]   (X = current level)
+   *
+   * TIP:
+   *   Android device  — fall sensitive is 1–6, server default 4 or 5
+   *   RT OS device    — fall sensitive is 1–8, server default 5 or 6
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param level     Sensitivity level (1 = most sensitive)
+   * @param maxLevel  Total levels for the device OS (6 for Android, 8 for RT OS)
+   * @returns true if the command was sent, false if the device is not connected
+   */
+  public sendLssetCommand(
+    deviceId: string,
+    level: number,
+    maxLevel: 6 | 8
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send LSSET command.`
+      );
+      return false;
+    }
+
+    if (isNaN(level) || level < 1 || level > maxLevel) {
+      Logging.error(
+        `Invalid fall-down sensitivity level ${level} for device ${deviceId} — must be 1..${maxLevel}`
+      );
+      return false;
+    }
+
+    const content = `LSSET,${level}+${maxLevel}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending fall-down sensitivity (LSSET) command to device ${deviceId} ` +
+        `(level=${level}, max=${maxLevel}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle an LSSET reply from the device.
+   *
+   * Reply shape:
+   *   [3G*<id>*<LEN>*LSSET,X]   (X = current sensitivity level)
+   */
+  private handleLssetResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    Logging.info(
+      `LSSET response from device ${packet.deviceId}: level="${
+        status || "(ack)"
+      }"`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from LSSET: ${error.message}`
       )
     );
     void client;
