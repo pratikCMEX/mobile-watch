@@ -1638,10 +1638,56 @@ const setSilenceTime = async (
       );
     }
 
+    // ── Persist to DB (server-side mirror) ────────────────
+    // One row per device — upsert by device_id.
+    const padded = [...slots];
+    while (padded.length < 4) padded.push("");
+    const filledSlots = padded.filter((s) => s && s.length).length;
+    const enabled = filledSlots > 0;
+
+    let weekdaysArr: string[] | null = null;
+    if (mode === "SILENCETIME2") {
+      weekdaysArr = [];
+      for (let i = 0; i < 4; i++) {
+        if (Array.isArray(weekdays)) {
+          weekdaysArr.push(weekdays[i] || "0000000");
+        } else if (typeof weekdays === "string") {
+          weekdaysArr.push(weekdays);
+        } else {
+          weekdaysArr.push("0000000");
+        }
+      }
+    }
+
+    let persistedRecord: any = null;
+    try {
+      const [record] = await db.DeviceSilenceTime.upsert({
+        device_id: device.id,
+        mode,
+        slot_1: padded[0] || null,
+        slot_2: padded[1] || null,
+        slot_3: padded[2] || null,
+        slot_4: padded[3] || null,
+        weekdays: weekdaysArr,
+        last_command_protocol: result.protocol,
+        last_acked_at: null,
+        enabled,
+      });
+      persistedRecord = record?.toJSON?.() ?? record;
+    } catch (dbErr: any) {
+      // Don't fail the request — the TCP packet was sent — but log it.
+      console.error("setSilenceTime DB persist error:", dbErr);
+      Logging.error(
+        `Failed to persist DeviceSilenceTime for device ${device.id}: ${
+          dbErr?.message || dbErr
+        }`
+      );
+    }
+
     Logging.info(
       `${mode} command sent to device ${serial_number} ` +
         `(device_id=${device.id}, slots=${JSON.stringify(slots)}, ` +
-        `weekdays=${JSON.stringify(weekdays)})`
+        `weekdays=${JSON.stringify(weekdays)}, enabled=${enabled})`
     );
 
     return successMessage(res, "Do-not-disturb period set successfully", {
@@ -1651,16 +1697,15 @@ const setSilenceTime = async (
       mode,
       slots,
       weekdays: weekdays ?? null,
+      enabled,
       command_sent: true,
       command_message:
         mode === "SILENCETIME"
-          ? `Set ${
-              slots.filter((s) => s && s.length).length
-            } daily do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`
-          : `Set ${
-              slots.filter((s: string) => s && s.length).length
-            } weekday-specific do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`,
+          ? `Set ${filledSlots} daily do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`
+          : `Set ${filledSlots} weekday-specific do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`,
       command_protocol: result.protocol,
+      stored_in_db: persistedRecord !== null,
+      record: persistedRecord,
       note: `Device will reply with [3G*<id>*<LEN>*${mode}] (bare ack = success).`,
       timestamp: new Date().toISOString(),
     });
@@ -1668,6 +1713,103 @@ const setSilenceTime = async (
     console.error("setSilenceTime error:", err);
     const msg = (err && err.message) || String(err);
     return errorMessage(res, "Error sending SILENCETIME command: " + msg);
+  }
+};
+
+/**
+ * GET /user/device/do_not_disturb  (POST {serial_number})
+ *
+ * Returns the server-side mirror of the device's Do-Not-Disturb
+ * configuration last sent via SILENCETIME / SILENCETIME2.
+ *
+ * Response shape:
+ *   {
+ *     serial_number,
+ *     device_id,
+ *     mode:               "SILENCETIME" | "SILENCETIME2",
+ *     enabled:            boolean,         // at least one slot filled
+ *     slots:              string[4],        // "HH:MM-HH:MM" or "HH:MM-HH:MM-DDDDDDD"
+ *     weekdays:           string[4] | null, // one 7-char mask per slot
+ *     last_command_protocol,
+ *     last_acked_at,
+ *     updated_at
+ *   }
+ */
+const getDoNotDisturb = async (
+  req: Request,
+  res: Response,
+  _next: NextFunction
+) => {
+  try {
+    const { serial_number, device_id } = req.body as {
+      serial_number?: string;
+      device_id?: string;
+    };
+
+    if (!serial_number && !device_id) {
+      return errorMessage(
+        res,
+        "serial_number (or device_id) is required in the request body"
+      );
+    }
+
+    const where: any = serial_number ? { serial_number } : { id: device_id };
+
+    const device = await db.Device.findOne({ where });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with ${
+          serial_number
+            ? `serial_number '${serial_number}'`
+            : `id '${device_id}'`
+        } not found`
+      );
+    }
+
+    const record = await db.DeviceSilenceTime.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!record) {
+      return successMessage(res, "No Do-Not-Disturb configuration on file", {
+        serial_number: device.serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        configured: false,
+        mode: "SILENCETIME",
+        enabled: false,
+        slots: ["", "", "", ""],
+        weekdays: null,
+      });
+    }
+
+    const data = record.toJSON();
+    return successMessage(
+      res,
+      "Do-Not-Disturb configuration fetched successfully",
+      {
+        configured: true,
+        serial_number: device.serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        mode: data.mode,
+        enabled: data.enabled,
+        slots: [data.slot_1, data.slot_2, data.slot_3, data.slot_4],
+        weekdays: data.weekdays,
+        last_command_protocol: data.last_command_protocol,
+        last_acked_at: data.last_acked_at,
+        updated_at: data.updatedAt,
+        created_at: data.createdAt,
+      }
+    );
+  } catch (err: any) {
+    console.error("getDoNotDisturb error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(
+      res,
+      "Error fetching Do-Not-Disturb configuration: " + msg
+    );
   }
 };
 
@@ -1692,4 +1834,5 @@ export default {
   setFallDownSensitivity,
   setLanguageTimezone,
   setSilenceTime,
+  getDoNotDisturb,
 };

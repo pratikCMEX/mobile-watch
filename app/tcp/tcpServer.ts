@@ -3824,6 +3824,28 @@ class TcpServer {
         `Failed to mark device ${packet.deviceId} online from ${command}: ${error.message}`
       )
     );
+
+    // Mark the server-side mirror as ACK'd.  We do this best-effort —
+    // if the device row or the silence-time row was never created,
+    // just log and continue.
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return null;
+          return db.DeviceSilenceTime.findOne({
+            where: { device_id: device.id },
+          }).then((record: any) => {
+            if (!record) return null;
+            record.last_acked_at = new Date();
+            return record.save();
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to update last_acked_at for ${command} on device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
     void client;
   }
 

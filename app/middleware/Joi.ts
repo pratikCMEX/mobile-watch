@@ -847,6 +847,30 @@ export const Schemas = {
       .messages({
         "any.invalid": "{{#message}}",
       }),
+
+    /**
+     * GET /user/device/get_do_not_disturb
+     *
+     * Body accepts either `serial_number` (preferred) OR `device_id`
+     * (UUID) so the admin/user endpoint stays consistent with the
+     * rest of the API surface.
+     */
+    get: Joi.object({
+      serial_number: Joi.string().optional().messages({
+        "string.empty": "serial_number cannot be empty",
+      }),
+      device_id: Joi.string()
+        .guid({ version: ["uuidv4"] })
+        .optional()
+        .messages({
+          "string.guid": "device_id must be a valid UUID",
+        }),
+    })
+      .or("serial_number", "device_id")
+      .messages({
+        "object.missing":
+          "Provide either serial_number (preferred) or device_id",
+      }),
   },
   familyMember: {
     create: Joi.object({

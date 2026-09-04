@@ -157,6 +157,15 @@ router.post(
   Device_controller.setSilenceTime
 );
 
+// Fetch the server-side mirror of the device's Do-Not-Disturb
+// configuration (what was last sent to the watch).
+router.post(
+  "/get_do_not_disturb",
+  checkToken,
+  ValidateJoi(Schemas.silenceTime.get),
+  Device_controller.getDoNotDisturb
+);
+
 router.post(
   "/add_family_member",
   checkToken,
