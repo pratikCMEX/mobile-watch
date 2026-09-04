@@ -1638,6 +1638,10 @@ const setSilenceTime = async (
       );
     }
 
+    // Make sure this device has its 4 default slot rows (newly
+    // created devices may not have any yet).  Idempotent.
+    await db.DeviceSilenceTime.ensureDefaultRowsForDevice(device.id, mode);
+
     // ── Persist to DB (server-side mirror) ────────────────
     // One row per (device_id, slot_index) — 1..4 per device. Each
     // row carries its own `is_enabled` so the UI can toggle / query
@@ -1781,6 +1785,10 @@ const getDoNotDisturb = async (
         } not found`
       );
     }
+
+    // Idempotently make sure every device has 4 slot rows, even if
+    // it was created after the seed migration ran.
+    await db.DeviceSilenceTime.ensureDefaultRowsForDevice(device.id);
 
     const rows = await db.DeviceSilenceTime.findAll({
       where: { device_id: device.id },

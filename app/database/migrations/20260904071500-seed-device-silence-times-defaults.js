@@ -22,47 +22,10 @@
  *                               21:10-7:30-0111110,
  *                               21:10-7:30-0111110]
  *
- * ────────────────────────────────────────────────────────────
- * INDEXING STRATEGY
- * ────────────────────────────────────────────────────────────
- *
- * Every query the codebase issues against this table is covered by
- * one of the indexes below.  The "Auto" composite index covers
- * 1:1 the hot path used by both controllers and the TCP handler.
- *
- *   1. UNIQUE idx_dnd_device_slot
- *        fields: (device_id, slot_index)
- *        used by:
- *          - upsert by (device_id, slot_index)            [set]
- *          - findOne({ where:{device_id, slot_index} })  [unused today,
- *                                                         reserved]
- *          - SELECT id ... WHERE device_id=? AND slot_index=?
- *                                                         [seed SQLite branch]
- *
- *   2. idx_dnd_device_enabled
- *        fields: (device_id, is_enabled)
- *        used by:
- *          - COUNT(*) WHERE device_id=? AND is_enabled=true
- *                                                         [future analytics]
- *          - "give me all enabled slots on this device"
- *
- *   3. idx_dnd_device
- *        fields: (device_id)
- *        used by:
- *          - findAll({ where:{device_id} }) ordered by slot_index
- *                                                         [getDoNotDisturb]
- *          - UPDATE ... WHERE device_id=?                  [TCP ACK handler]
- *          - ensureDefaultRowsForDevice's existence check  [set/get]
- *
- * (The composite UNIQUE index in #1 also satisfies queries that
- *  filter only by device_id because the leftmost column is the
- *  same; #3 just makes it explicit and lets the planner pick it
- *  unambiguously.)
- *
  * Slot payload storage:
- *   - `time_section`    : "HH:MM-HH:MM"                    (start–end, 24h)
- *   - `weekdays_mask`   : 7-char '0'/'1' string            (Sun..Sat). NULL
- *                         when mode === 'SILENCETIME'.
+ *   - `time_section`    : "HH:MM-HH:MM"           (start–end, 24h)
+ *   - `weekdays_mask`   : 7-char '0'/'1' string   (Sun..Sat). NULL when
+ *                         mode === 'SILENCETIME'.
  *   - `is_enabled`      : BOOLEAN, mirrors whether this slot is part
  *                         of the active schedule. Slots with empty
  *                         `time_section` are stored with is_enabled=false
@@ -120,7 +83,7 @@ module.exports = {
       is_enabled: {
         type: Sequelize.BOOLEAN,
         allowNull: false,
-        defaultValue: false,
+        defaultValue: true,
       },
 
       // Last wire-protocol packet that was sent to the watch for this
@@ -149,31 +112,29 @@ module.exports = {
       },
     });
 
-    // 1. UNIQUE composite — used by upsert / existence checks.
+    // One row per (device, slot_index).
     await queryInterface.addIndex(
       "DeviceSilenceTimes",
       ["device_id", "slot_index"],
       {
-        name: "idx_dnd_device_slot_unique",
+        name: "devicesilencetimes_device_id_slot_index_unique",
         unique: true,
       }
     );
 
-    // 2. (device_id, is_enabled) — used by enabled-slot counting
-    //    and "list enabled slots for this device".
+    // Helpful for "give me every enabled slot on this device".
     await queryInterface.addIndex(
       "DeviceSilenceTimes",
       ["device_id", "is_enabled"],
-      { name: "idx_dnd_device_enabled" }
+      { name: "devicesilencetimes_device_id_is_enabled_idx" }
     );
 
-    // 3. (device_id) — explicit prefix index for the
-    //    ensureDefaultRowsForDevice existence check, the TCP
-    //    ACK handler's bulk UPDATE by device_id, and the GET
-    //    handler's findAll({ where:{device_id} }).
-    await queryInterface.addIndex("DeviceSilenceTimes", ["device_id"], {
-      name: "idx_dnd_device",
-    });
+    // Helpful for "give me every slot on this device".
+    await queryInterface.addIndex(
+      "DeviceSilenceTimes",
+      ["device_id", "slot_index"],
+      { name: "devicesilencetimes_device_id_slot_index_idx" }
+    );
   },
 
   async down(queryInterface /*, Sequelize */) {
