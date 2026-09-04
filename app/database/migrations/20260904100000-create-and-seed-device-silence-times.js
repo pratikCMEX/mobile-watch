@@ -165,8 +165,11 @@ module.exports = {
       const rows = [];
       for (const d of devices) {
         for (let slot = 1; slot <= 4; slot++) {
+          // No `id` here — let the DB column default (Sequelize.UUIDV4
+          // declared in the createTable step) fill it in.  Passing
+          // Sequelize.UUIDV4 as a value (or invoking it without a
+          // UUID library) raises "Invalid value UUIDV4 {}".
           rows.push({
-            id: Sequelize.UUIDV4(),
             device_id: d.id,
             mode: "SILENCETIME",
             slot_index: slot,
