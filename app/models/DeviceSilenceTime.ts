@@ -72,48 +72,6 @@ class DeviceSilenceTime
       as: "DeviceSilenceTimeDevice",
     });
   }
-
-  /**
-   * Ensure a device has exactly 4 Do-Not-Disturb rows
-   * (slot_index 1..4, all disabled).  Idempotent — only inserts
-   * rows for slot_indexes that don't already exist for the device.
-   *
-   * Called automatically by the seed migration and by the
-   * /do_not_disturb + /get_do_not_disturb controllers so newly
-   * created devices are always represented by 4 toggleable rows.
-   */
-  static async ensureDefaultRowsForDevice(
-    deviceId: string,
-    mode: "SILENCETIME" | "SILENCETIME2" = "SILENCETIME"
-  ): Promise<void> {
-    const existing = await DeviceSilenceTime.findAll({
-      where: { device_id: deviceId },
-      attributes: ["slot_index"],
-    });
-    const have = new Set<number>(
-      existing.map((r: any) => Number(r.get("slot_index")))
-    );
-    const missing: any[] = [];
-    for (let slot = 1; slot <= 4; slot++) {
-      if (!have.has(slot)) {
-        missing.push({
-          device_id: deviceId,
-          mode,
-          slot_index: slot,
-          time_section: null,
-          weekdays_mask: null,
-          is_enabled: false,
-          last_command_protocol: null,
-          last_acked_at: null,
-        });
-      }
-    }
-    if (missing.length > 0) {
-      await DeviceSilenceTime.bulkCreate(missing, {
-        ignoreDuplicates: true,
-      });
-    }
-  }
 }
 
 // ── Init & Export ────────────────────────────────────────────
@@ -201,10 +159,9 @@ export default (sequelize: Sequelize, DataTypes: any) => {
           name: "idx_dnd_device_enabled",
           fields: ["device_id", "is_enabled"],
         },
-        // 3. (device_id) — explicit prefix index for the
-        //    ensureDefaultRowsForDevice existence check, the TCP
-        //    ACK handler's bulk UPDATE by device_id, and the GET
-        //    handler's findAll({ where:{device_id} }).
+        // 3. (device_id) — explicit prefix index for the GET handler's
+        //    findAll({ where:{device_id} }) and the TCP ACK
+        //    handler's bulk UPDATE by device_id.
         {
           name: "idx_dnd_device",
           fields: ["device_id"],

@@ -1638,14 +1638,13 @@ const setSilenceTime = async (
       );
     }
 
-    // Make sure this device has its 4 default slot rows (newly
-    // created devices may not have any yet).  Idempotent.
-    await db.DeviceSilenceTime.ensureDefaultRowsForDevice(device.id, mode);
-
     // ── Persist to DB (server-side mirror) ────────────────
-    // One row per (device_id, slot_index) — 1..4 per device. Each
-    // row carries its own `is_enabled` so the UI can toggle / query
-    // individual slots.
+    // Only persist the slots that were actually filled in by the
+    // caller.  Empty slots are NOT auto-inserted — the user
+    // explicitly does not want phantom rows.  This means if the
+    // caller submits ["21:10-07:30", "", "", ""], exactly ONE row
+    // (slot_index=1) is upserted; the other three slot_indexes
+    // remain absent in the DB until the user later adds them.
     const padded = [...slots];
     while (padded.length < 4) padded.push("");
 
@@ -1657,32 +1656,35 @@ const setSilenceTime = async (
     };
 
     let persistedRows: any[] = [];
+    let filledCount = 0;
     try {
       for (let i = 0; i < 4; i++) {
         const raw = padded[i] || "";
+        if (!raw) continue; // skip empty slot_indexes — no auto-insert
+
+        filledCount++;
+
         // `time_section` stores just the time range; weekdays_mask
         // stores the 7-char '0'/'1' string for SILENCETIME2 (NULL
         // otherwise). For SILENCETIME2 the raw slot is
         // "HH:MM-HH:MM-DDDDDDD" — split on "-" and rebuild the
         // HH:MM-HH:MM part from indices 0..1.
-        let time_section: string | null = null;
-        if (raw) {
-          if (mode === "SILENCETIME2") {
-            const parts = raw.split("-");
-            // parts[0] = HH:MM, parts[1] = HH:MM, parts[2] = DDDDDDD
-            time_section = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : raw;
-          } else {
-            time_section = raw; // "HH:MM-HH:MM"
-          }
+        let time_section: string;
+        if (mode === "SILENCETIME2") {
+          const parts = raw.split("-");
+          // parts[0] = HH:MM, parts[1] = HH:MM, parts[2] = DDDDDDD
+          time_section = parts.length >= 2 ? `${parts[0]}-${parts[1]}` : raw;
+        } else {
+          time_section = raw; // "HH:MM-HH:MM"
         }
-        const slotRow = Boolean(raw && raw.length);
+
         const [row] = await db.DeviceSilenceTime.upsert({
           device_id: device.id,
           mode,
           slot_index: i + 1,
           time_section,
-          weekdays_mask: slotRow ? maskFor(i) : null,
-          is_enabled: slotRow,
+          weekdays_mask: maskFor(i),
+          is_enabled: true,
           last_command_protocol: result.protocol,
           last_acked_at: null,
         });
@@ -1698,13 +1700,12 @@ const setSilenceTime = async (
       );
     }
 
-    const filledSlots = padded.filter((s) => s && s.length).length;
-    const enabled = filledSlots > 0;
+    const enabled = filledCount > 0;
 
     Logging.info(
       `${mode} command sent to device ${serial_number} ` +
         `(device_id=${device.id}, slots=${JSON.stringify(slots)}, ` +
-        `weekdays=${JSON.stringify(weekdays)}, enabled_slots=${filledSlots})`
+        `weekdays=${JSON.stringify(weekdays)}, enabled_slots=${filledCount})`
     );
 
     return successMessage(res, "Do-not-disturb period set successfully", {
@@ -1715,12 +1716,12 @@ const setSilenceTime = async (
       slots,
       weekdays: weekdays ?? null,
       enabled,
-      enabled_slot_count: filledSlots,
+      enabled_slot_count: filledCount,
       command_sent: true,
       command_message:
         mode === "SILENCETIME"
-          ? `Set ${filledSlots} daily do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`
-          : `Set ${filledSlots} weekday-specific do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`,
+          ? `Set ${filledCount} daily do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`
+          : `Set ${filledCount} weekday-specific do-not-disturb period(s) on device ${serial_number}. During these times the watch will reject calls and lock the screen (SOS still works).`,
       command_protocol: result.protocol,
       stored_in_db: persistedRows.length > 0,
       records: persistedRows,
@@ -1786,10 +1787,9 @@ const getDoNotDisturb = async (
       );
     }
 
-    // Idempotently make sure every device has 4 slot rows, even if
-    // it was created after the seed migration ran.
-    await db.DeviceSilenceTime.ensureDefaultRowsForDevice(device.id);
-
+    // Only return the slots that have actually been configured by
+    // the user — no auto-insert, no phantom rows.  Empty /
+    // never-touched slot_indexes are simply absent from the result.
     const rows = await db.DeviceSilenceTime.findAll({
       where: { device_id: device.id },
       order: [["slot_index", "ASC"]],

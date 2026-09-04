@@ -4,14 +4,17 @@
  * Migration: create the `DeviceSilenceTimes` table and add the
  * indexes used by every query in the codebase.
  *
- * This migration does NOT seed any rows.  Per the user
- * requirement, the 4 default slot rows per device
- * (slot_index 1..4, is_enabled=false) are inserted lazily on the
- * first Do-Not-Disturb call by
- *   DeviceSilenceTime.ensureDefaultRowsForDevice(...)
- * which is called from
+ * Per the user requirement, this migration does NOT seed any rows.
+ * Slot rows are inserted strictly on-demand by the application —
+ * one row per (device_id, slot_index) that the caller actually
+ * fills in.  If the caller submits `slots: ["21:10-07:30", "", "",
+ * ""]`, exactly ONE row (slot_index=1) is upserted; the other
+ * three slot_indexes remain absent in the DB until the user later
+ * adds them.
+ *
+ * The insert path lives in
  *   - POST /user/device/do_not_disturb     (setSilenceTime)
- *   - POST /user/device/get_do_not_disturb (getDoNotDisturb)
+ * which upserts only the non-empty slots.
  *
  *   ── Table design ──────────────────────────────────────────
  *   One row per (device_id, slot_index) — 1..4 slots per device.
@@ -26,8 +29,7 @@
  *   1. UNIQUE (device_id, slot_index) — upsert / existence check
  *   2. (device_id, is_enabled)        — enabled-slot counts
  *   3. (device_id)                   — findAll({where:{device_id}}),
- *                                      bulk UPDATE by device_id,
- *                                      ensureDefaultRowsForDevice check
+ *                                      bulk UPDATE by device_id
  *
  *   ── Idempotency / self-healing ────────────────────────────
  *   createTable + addIndex check whether the target object
@@ -197,10 +199,9 @@ module.exports = {
       );
     }
 
-    // 3. (device_id) — explicit prefix index for the
-    //    ensureDefaultRowsForDevice existence check, the TCP ACK
-    //    handler's bulk UPDATE by device_id, and the GET handler's
-    //    findAll({ where:{device_id} }).
+    // 3. (device_id) — explicit prefix index for the GET handler's
+    //    findAll({ where:{device_id} }) and the TCP ACK handler's
+    //    bulk UPDATE by device_id.
     if (!(await indexExists("DeviceSilenceTimes", "idx_dnd_device"))) {
       await queryInterface.addIndex("DeviceSilenceTimes", ["device_id"], {
         name: "idx_dnd_device",
