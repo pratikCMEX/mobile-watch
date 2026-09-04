@@ -17,6 +17,22 @@ const DEFAULT_COUNTRY_CODE = (
   process.env.SOS_DEFAULT_COUNTRY_CODE || ""
 ).replace(/[^0-9]/g, "");
 
+/**
+ * Convert a value that may be a boolean or a string "1"/"0" into a
+ * proper boolean.  This keeps the API backward-compatible with clients
+ * that still send the legacy string form while the model stores BOOLEAN.
+ */
+function toBoolean(value: any): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value === "1") return true;
+    if (value === "0") return false;
+  }
+  if (typeof value === "number") return value !== 0;
+  return Boolean(value);
+}
+
 const updateDeviceSettings = async function (
   req: Request,
   res: Response,
@@ -25,6 +41,7 @@ const updateDeviceSettings = async function (
   try {
     const {
       device_id,
+      device_type,
       sms_alert_enabled,
       take_off_device_alert,
       safe_mode,
@@ -47,6 +64,32 @@ const updateDeviceSettings = async function (
       return errorMessage(res, "Device not found");
     }
 
+    // ── Normalise fall-down fields to booleans ──────────────
+    // The API may receive "1"/"0" strings (legacy) or true/false
+    // booleans.  The DeviceSetting model stores BOOLEAN, so we
+    // normalise here before persisting.
+    const fallDownAlertEnabled = toBoolean(fall_down_alert_enabled);
+    const fallDownReminderCall = toBoolean(fall_down_reminder_call);
+
+    // ── Determine max sensitivity level from device_type ────
+    // Android: 1–6, RT OS: 1–8.  Default to Android (6).
+    const isRtOs =
+      device_type === "rtos" || device_type === "rt_os" || device_type === "8";
+    const maxLevel: 6 | 8 = isRtOs ? 8 : 6;
+
+    // ── Validate fall_down_level against device type ────────
+    if (fall_down_level !== undefined && fall_down_level !== null) {
+      const levelNum = Number(fall_down_level);
+      if (isNaN(levelNum) || levelNum < 1 || levelNum > maxLevel) {
+        return errorMessage(
+          res,
+          `Invalid fall_down_level ${fall_down_level}. Must be 1–${maxLevel} (${
+            isRtOs ? "RT OS" : "Android"
+          } device).`
+        );
+      }
+    }
+
     let deviceSetting = await db.DeviceSetting.findOne({
       where: { device_id },
     });
@@ -61,8 +104,8 @@ const updateDeviceSettings = async function (
         night_power_saving: night_power_saving ?? "0",
         volume: volume ?? 50,
         brightness: brightness ?? 50,
-        fall_down_alert_enabled: fall_down_alert_enabled ?? true,
-        fall_down_reminder_call: fall_down_reminder_call ?? true,
+        fall_down_alert_enabled: fallDownAlertEnabled ?? true,
+        fall_down_reminder_call: fallDownReminderCall ?? true,
         fall_down_level: fall_down_level ?? 5,
         scene_mode: scene_mode ?? 1,
       });
@@ -78,21 +121,102 @@ const updateDeviceSettings = async function (
         deviceSetting.night_power_saving = night_power_saving;
       if (volume !== undefined) deviceSetting.volume = volume;
       if (brightness !== undefined) deviceSetting.brightness = brightness;
-      if (fall_down_alert_enabled !== undefined)
-        deviceSetting.fall_down_alert_enabled = fall_down_alert_enabled;
-      if (fall_down_reminder_call !== undefined)
-        deviceSetting.fall_down_reminder_call = fall_down_reminder_call;
+      if (fallDownAlertEnabled !== undefined)
+        deviceSetting.fall_down_alert_enabled = fallDownAlertEnabled;
+      if (fallDownReminderCall !== undefined)
+        deviceSetting.fall_down_reminder_call = fallDownReminderCall;
       if (fall_down_level !== undefined)
-        deviceSetting.fall_down_level = fall_down_level;
+        deviceSetting.fall_down_level = Number(fall_down_level);
       if (scene_mode !== undefined) deviceSetting.scene_mode = scene_mode;
 
       await deviceSetting.save();
     }
 
+    // ── Push fall-down settings to the device via TCP ───────
+    // Only attempt if the device has a serial_number and is
+    // currently connected via TCP.
+    const tcpCommands: string[] = [];
+
+    if (device.serial_number) {
+      const tcpClient = tcpServer.getDevice(device.serial_number);
+
+      if (tcpClient) {
+        // Send FALLDOWN command if alert or call-center switch changed
+        if (
+          fallDownAlertEnabled !== undefined ||
+          fallDownReminderCall !== undefined
+        ) {
+          const alertVal =
+            fallDownAlertEnabled !== undefined
+              ? fallDownAlertEnabled
+              : deviceSetting.fall_down_alert_enabled;
+          const callVal =
+            fallDownReminderCall !== undefined
+              ? fallDownReminderCall
+              : deviceSetting.fall_down_reminder_call;
+
+          const sent = tcpServer.sendFallDownCommand(
+            device.serial_number,
+            alertVal,
+            callVal
+          );
+          if (sent) {
+            const x = alertVal ? "1" : "0";
+            const y = callVal ? "1" : "0";
+            tcpCommands.push(
+              `[3G*${device.serial_number}*${Buffer.byteLength(
+                `FALLDOWN,${x},${y}`,
+                "utf8"
+              )
+                .toString(16)
+                .padStart(4, "0")}*FALLDOWN,${x},${y}]`
+            );
+          }
+        }
+
+        // Send LSSET command if sensitivity level changed
+        if (fall_down_level !== undefined && fall_down_level !== null) {
+          const levelNum = Number(fall_down_level);
+          const sent = tcpServer.sendLssetCommand(
+            device.serial_number,
+            levelNum,
+            maxLevel
+          );
+          if (sent) {
+            const content = `LSSET,${levelNum}+${maxLevel}`;
+            tcpCommands.push(
+              `[3G*${device.serial_number}*${Buffer.byteLength(content, "utf8")
+                .toString(16)
+                .padStart(4, "0")}*${content}]`
+            );
+          }
+        }
+      }
+    }
+
+    const response: any = {
+      device_id: device.id,
+      device_name: device.device_name,
+      serial_number: device.serial_number,
+      settings: deviceSetting,
+    };
+
+    if (tcpCommands.length > 0) {
+      response.tcp_commands_sent = tcpCommands;
+      response.command_message =
+        "Fall-down settings pushed to device via TCP. Device will acknowledge.";
+    } else if (device.serial_number) {
+      response.command_message =
+        "Device is not connected via TCP. Settings saved to database only. They will be applied when the device reconnects.";
+    } else {
+      response.command_message =
+        "Device has no serial_number. Settings saved to database only.";
+    }
+
     return successMessage(
       res,
       "Device settings updated successfully",
-      deviceSetting
+      response
     );
   } catch (err) {
     console.error("updateDeviceSettings error:", err);

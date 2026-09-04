@@ -115,9 +115,15 @@ Content-Type: multipart/form-data
 
 **POST** `/user/device/update_device_settings`
 
+> When `fall_down_alert_enabled`, `fall_down_reminder_call`, or
+> `fall_down_level` are provided, the server also pushes the
+> corresponding `FALLDOWN` and/or `LSSET` command to the device via
+> TCP (if the device is currently connected).
+
 ```json
 {
   "device_id": "DEVICE_UUID",
+  "device_type": "android",
   "sms_alert_enabled": "1",
   "take_off_device_alert": "0",
   "safe_mode": "1",
@@ -125,11 +131,20 @@ Content-Type: multipart/form-data
   "night_power_saving": "0",
   "volume": 50,
   "brightness": 70,
-  "fall_down_alert_enabled": "1",
-  "fall_down_reminder_call": "1",
+  "fall_down_alert_enabled": true,
+  "fall_down_reminder_call": true,
   "fall_down_level": 5
 }
 ```
+
+**Field notes:**
+
+| Field                     | Type    | Description                                                              |
+| ------------------------- | ------- | ------------------------------------------------------------------------ |
+| `device_type`             | string  | `"android"` (default) or `"rtos"` — determines max fall-down sensitivity |
+| `fall_down_alert_enabled` | boolean | Fall-down alarm alert switch (true = ON, false = OFF)                    |
+| `fall_down_reminder_call` | boolean | Call center number after fall (true = ON, false = OFF)                   |
+| `fall_down_level`         | number  | Sensitivity level: 1–6 (Android) or 1–8 (RT OS). 1 = most sensitive      |
 
 ---
 
@@ -834,6 +849,82 @@ Each `contacts[]` entry:
 | `photo`          | string  | Opaque photo blob (hex or base64), or `null` if none                       |
 | `createdAt`      | string  | ISO timestamp of when the row was first created                            |
 | `updatedAt`      | string  | ISO timestamp of when the row was last updated (every set call bumps this) |
+
+---
+
+## 32. Fall-Down Alarm Alert (FALLDOWN)
+
+Toggle the watch's fall-down alarm alert switch and the "call center
+number after fall" switch.
+
+**POST** `/user/device/fall_down_alert`
+
+Wire protocol:
+
+- Server send: `[3G*<id>*<LEN>*FALLDOWN,X,Y]`
+  - `X` = fall-down alarm alert switch (1 = ON, 0 = OFF)
+  - `Y` = call center number after fall (1 = ON, 0 = OFF)
+- Device reply: `[3G*<id>*<LEN>*FALLDOWN]` (bare ack = success)
+
+```json
+{
+  "serial_number": "8800000015",
+  "alert_enabled": true,
+  "call_center": true
+}
+```
+
+**Response fields:**
+
+| Field              | Type    | Description                                            |
+| ------------------ | ------- | ------------------------------------------------------ |
+| `serial_number`    | string  | Device serial number (protocol ID)                     |
+| `device_id`        | string  | Device UUID                                            |
+| `device_name`      | string  | Device name                                            |
+| `alert_enabled`    | boolean | Fall-down alarm alert switch (true = ON, false = OFF)  |
+| `call_center`      | boolean | Call center number after fall (true = ON, false = OFF) |
+| `command_sent`     | boolean | Whether the TCP command was sent                       |
+| `command_protocol` | string  | The on-wire protocol string that was sent              |
+
+---
+
+## 33. Fall-Down Sensitivity (LSSET)
+
+Set the watch's fall-down detection sensitivity level.
+
+**POST** `/user/device/fall_down_sensitivity`
+
+Wire protocol:
+
+- Server send: `[3G*<id>*<LEN>*LSSET,X+6]` (Android, 1–6 levels)
+- Server send: `[3G*<id>*<LEN>*LSSET,X+8]` (RT OS, 1–8 levels)
+  - `X` = current sensitivity level (1 = most sensitive)
+  - `6` or `8` = total sensitivity levels (based on device OS)
+- Device reply: `[3G*<id>*<LEN>*LSSET,X]` (X = current level)
+
+> **TIP:** Android devices use 1–6 (server default 4 or 5).
+> RT OS devices use 1–8 (server default 5 or 6).
+
+```json
+{
+  "serial_number": "8800000015",
+  "level": 5,
+  "device_type": "android"
+}
+```
+
+**Response fields:**
+
+| Field              | Type    | Description                                                 |
+| ------------------ | ------- | ----------------------------------------------------------- |
+| `serial_number`    | string  | Device serial number (protocol ID)                          |
+| `device_id`        | string  | Device UUID                                                 |
+| `device_name`      | string  | Device name                                                 |
+| `level`            | number  | Sensitivity level (1 = most sensitive)                      |
+| `max_level`        | number  | Total levels for the device OS (6 for Android, 8 for RT OS) |
+| `device_type`      | string  | `"android"` or `"rt_os"`                                    |
+| `command_sent`     | boolean | Whether the TCP command was sent                            |
+| `command_protocol` | string  | The on-wire protocol string that was sent                   |
 
 ---
 

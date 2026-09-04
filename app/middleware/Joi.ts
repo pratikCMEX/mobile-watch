@@ -137,6 +137,13 @@ export const Schemas = {
   deviceSetting: {
     update: Joi.object({
       device_id: Joi.string().required(),
+      device_type: Joi.string()
+        .valid("android", "rtos", "rt_os")
+        .optional()
+        .default("android")
+        .messages({
+          "any.only": "device_type must be 'android' or 'rtos'",
+        }),
       sms_alert_enabled: Joi.string().valid("1", "0").optional(),
       take_off_device_alert: Joi.string().valid("1", "0").optional(),
       safe_mode: Joi.string().valid("1", "0").optional(),
@@ -144,9 +151,13 @@ export const Schemas = {
       night_power_saving: Joi.string().valid("1", "0").optional(),
       volume: Joi.number().integer().min(0).max(100).optional(),
       brightness: Joi.number().integer().min(0).max(100).optional(),
-      fall_down_alert_enabled: Joi.string().valid("1", "0").optional(),
-      fall_down_reminder_call: Joi.string().valid("1", "0").optional(),
-      fall_down_level: Joi.number().integer().min(1).max(10).optional(),
+      fall_down_alert_enabled: Joi.alternatives()
+        .try(Joi.boolean(), Joi.string().valid("1", "0"))
+        .optional(),
+      fall_down_reminder_call: Joi.alternatives()
+        .try(Joi.boolean(), Joi.string().valid("1", "0"))
+        .optional(),
+      fall_down_level: Joi.number().integer().min(1).max(8).optional(),
       scene_mode: Joi.number().integer().min(1).max(4).optional(),
     }),
   },

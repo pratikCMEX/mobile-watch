@@ -3400,11 +3400,38 @@ class TcpServer {
         status || "(ack)"
       }" (${ok ? "OK" : "FAILED"})`
     );
+
+    // The device sends a bare ack ([3G*<id>*<LEN>*FALLDOWN]) on
+    // success.  There is no payload to parse, but we mark the device
+    // online and create a notification so the user knows the command
+    // was acknowledged.
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from FALLDOWN: ${error.message}`
       )
     );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Fall-down alarm updated",
+            body: `Device ${packet.deviceId} acknowledged fall-down alarm command.`,
+            metadata: { kind: "fall_down", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save fall-down notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
     void client;
   }
 
@@ -3481,11 +3508,77 @@ class TcpServer {
         status || "(ack)"
       }"`
     );
+
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from LSSET: ${error.message}`
       )
     );
+
+    // The device replies with [3G*<id>*<LEN>*LSSET,X] where X is the
+    // current sensitivity level.  Parse it and persist to the
+    // DeviceSetting table so the server-side mirror stays in sync
+    // with what the watch actually has.
+    const levelNum = parseInt(status, 10);
+
+    if (!isNaN(levelNum) && levelNum >= 1 && levelNum <= 8) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return null;
+          return db.DeviceSetting.findOne({
+            where: { device_id: device.id },
+          })
+            .then((setting: any) => {
+              if (!setting) {
+                // Create a minimal setting row if none exists yet.
+                return db.DeviceSetting.create({
+                  device_id: device.id,
+                  sms_alert_enabled: "0",
+                  take_off_device_alert: "0",
+                  safe_mode: "0",
+                  talking_clock: "0",
+                  night_power_saving: "0",
+                  volume: 50,
+                  brightness: 50,
+                  fall_down_alert_enabled: true,
+                  fall_down_reminder_call: true,
+                  fall_down_level: levelNum,
+                  scene_mode: 1,
+                });
+              }
+              setting.fall_down_level = levelNum;
+              return setting.save();
+            })
+            .then((savedSetting: any) => {
+              // savedSetting is the DeviceSetting row (or the created one).
+              // We need device.id for the notification, which we captured
+              // in the outer closure.
+              return { deviceId: device.id, setting: savedSetting };
+            });
+        })
+        .then((result) => {
+          if (!result) return;
+          return db.Notification.create({
+            device_id: result.deviceId,
+            user_id: null,
+            type: "general",
+            title: "Fall-down sensitivity updated",
+            body: `Device ${packet.deviceId} acknowledged LSSET level ${levelNum}.`,
+            metadata: {
+              kind: "fall_down_sensitivity",
+              deviceId: packet.deviceId,
+              level: levelNum,
+            },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to update fall-down level for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
     void client;
   }
 

@@ -55,13 +55,13 @@ const imageOnlyFilter = (req: any, file: any, cb: any) => {
 const uploadProfile = multer({
   storage: profile,
   fileFilter: imageOnlyFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  // limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
 const uploadSnapshot = multer({
   storage: snapshot,
   fileFilter: imageOnlyFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  // limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
 export { uploadProfile, uploadSnapshot };
