@@ -211,8 +211,8 @@ const getDeviceSettings = async function (
           night_power_saving: "0",
           volume: 0,
           brightness: 0,
-          fall_down_alert_enabled: false,
-          fall_down_reminder_call: false,
+          fall_down_alert_enabled: "0",
+          fall_down_reminder_call: "0",
           fall_down_level: 0,
         }
       );

@@ -11,8 +11,8 @@ export interface DeviceSettingAttributes {
   night_power_saving: string;
   volume: number;
   brightness: number;
-  fall_down_alert_enabled: boolean;
-  fall_down_reminder_call: boolean;
+  fall_down_alert_enabled: string;
+  fall_down_reminder_call: string;
   fall_down_level: number;
   scene_mode: number;
   createdAt: Date;
@@ -35,8 +35,8 @@ class DeviceSetting
   public night_power_saving!: string;
   public volume!: number;
   public brightness!: number;
-  public fall_down_alert_enabled!: boolean;
-  public fall_down_reminder_call!: boolean;
+  public fall_down_alert_enabled!: string;
+  public fall_down_reminder_call!: string;
   public fall_down_level!: number;
   public scene_mode!: number;
 
@@ -111,14 +111,14 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         },
       },
       fall_down_alert_enabled: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-        defaultValue: true,
+        type: DataTypes.ENUM("1", "0"),
+        allowNull: true,
+        defaultValue: "0",
       },
       fall_down_reminder_call: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-        defaultValue: true,
+        type: DataTypes.ENUM("1", "0"),
+        allowNull: true,
+        defaultValue: "0",
       },
       fall_down_level: {
         type: DataTypes.INTEGER,

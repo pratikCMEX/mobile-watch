@@ -89,8 +89,8 @@ const updateSceneMode = async (
           night_power_saving: "0",
           volume: 50,
           brightness: 50,
-          fall_down_alert_enabled: true,
-          fall_down_reminder_call: true,
+          fall_down_alert_enabled: "0",
+          fall_down_reminder_call: "0",
           fall_down_level: 5,
           scene_mode: scene_mode,
         });

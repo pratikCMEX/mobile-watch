@@ -104,8 +104,18 @@ const updateDeviceSettings = async function (
         night_power_saving: night_power_saving ?? "0",
         volume: volume ?? 50,
         brightness: brightness ?? 50,
-        fall_down_alert_enabled: fallDownAlertEnabled ?? true,
-        fall_down_reminder_call: fallDownReminderCall ?? true,
+        fall_down_alert_enabled:
+          fallDownAlertEnabled === undefined
+            ? "0"
+            : fallDownAlertEnabled
+            ? "1"
+            : "0",
+        fall_down_reminder_call:
+          fallDownReminderCall === undefined
+            ? "0"
+            : fallDownReminderCall
+            ? "1"
+            : "0",
         fall_down_level: fall_down_level ?? 5,
         scene_mode: scene_mode ?? 1,
       });
@@ -122,9 +132,13 @@ const updateDeviceSettings = async function (
       if (volume !== undefined) deviceSetting.volume = volume;
       if (brightness !== undefined) deviceSetting.brightness = brightness;
       if (fallDownAlertEnabled !== undefined)
-        deviceSetting.fall_down_alert_enabled = fallDownAlertEnabled;
+        deviceSetting.fall_down_alert_enabled = fallDownAlertEnabled
+          ? "1"
+          : "0";
       if (fallDownReminderCall !== undefined)
-        deviceSetting.fall_down_reminder_call = fallDownReminderCall;
+        deviceSetting.fall_down_reminder_call = fallDownReminderCall
+          ? "1"
+          : "0";
       if (fall_down_level !== undefined)
         deviceSetting.fall_down_level = Number(fall_down_level);
       if (scene_mode !== undefined) deviceSetting.scene_mode = scene_mode;
@@ -149,11 +163,11 @@ const updateDeviceSettings = async function (
           const alertVal =
             fallDownAlertEnabled !== undefined
               ? fallDownAlertEnabled
-              : deviceSetting.fall_down_alert_enabled;
+              : deviceSetting.fall_down_alert_enabled === "1";
           const callVal =
             fallDownReminderCall !== undefined
               ? fallDownReminderCall
-              : deviceSetting.fall_down_reminder_call;
+              : deviceSetting.fall_down_reminder_call === "1";
 
           const sent = tcpServer.sendFallDownCommand(
             device.serial_number,
@@ -198,7 +212,11 @@ const updateDeviceSettings = async function (
       device_id: device.id,
       device_name: device.device_name,
       serial_number: device.serial_number,
-      settings: deviceSetting,
+      settings: {
+        ...deviceSetting.toJSON(),
+        fall_down_alert_enabled: deviceSetting.fall_down_alert_enabled === "1",
+        fall_down_reminder_call: deviceSetting.fall_down_reminder_call === "1",
+      },
     };
 
     if (tcpCommands.length > 0) {
@@ -314,8 +332,8 @@ const getDeviceSettings = async (
         night_power_saving: "0",
         volume: 50,
         brightness: 50,
-        fall_down_alert_enabled: true,
-        fall_down_reminder_call: true,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
         fall_down_level: 5,
         scene_mode: 1,
       });
@@ -341,8 +359,8 @@ const getDeviceSettings = async (
         night_power_saving: deviceSetting.night_power_saving,
         volume: deviceSetting.volume,
         brightness: deviceSetting.brightness,
-        fall_down_alert_enabled: deviceSetting.fall_down_alert_enabled,
-        fall_down_reminder_call: deviceSetting.fall_down_reminder_call,
+        fall_down_alert_enabled: deviceSetting.fall_down_alert_enabled === "1",
+        fall_down_reminder_call: deviceSetting.fall_down_reminder_call === "1",
         fall_down_level: deviceSetting.fall_down_level,
         scene_mode: deviceSetting.scene_mode,
         scene_mode_description:
@@ -1250,14 +1268,14 @@ const setFallDownAlert = async (
         night_power_saving: "0",
         volume: 50,
         brightness: 50,
-        fall_down_alert_enabled: alertEnabled,
-        fall_down_reminder_call: callCenter,
+        fall_down_alert_enabled: alertEnabled ? "1" : "0",
+        fall_down_reminder_call: callCenter ? "1" : "0",
         fall_down_level: 5,
         scene_mode: 1,
       });
     } else {
-      deviceSetting.fall_down_alert_enabled = alertEnabled;
-      deviceSetting.fall_down_reminder_call = callCenter;
+      deviceSetting.fall_down_alert_enabled = alertEnabled ? "1" : "0";
+      deviceSetting.fall_down_reminder_call = callCenter ? "1" : "0";
       await deviceSetting.save();
     }
 
@@ -1390,8 +1408,8 @@ const setFallDownSensitivity = async (
         night_power_saving: "0",
         volume: 50,
         brightness: 50,
-        fall_down_alert_enabled: true,
-        fall_down_reminder_call: true,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
         fall_down_level: levelNum,
         scene_mode: 1,
       });
