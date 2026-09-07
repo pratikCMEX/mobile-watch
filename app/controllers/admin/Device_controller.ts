@@ -218,8 +218,9 @@ const getDeviceSettings = async function (
           fall_down_alert_enabled: "0",
           fall_down_reminder_call: "0",
           fall_down_level: 0,
-          language: device.language,
-          timezone: device.timezone,
+
+          language: "0",
+          timezone: "1",
         }
       );
     }
