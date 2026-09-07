@@ -214,6 +214,19 @@ router.post(
   Device_controller.voiceMonitor
 );
 
+// Set dynamic-state upload time interval in seconds (UPLOAD command).
+// The device will report position data every `interval_seconds` while
+// in dynamic (moving) state. After ~2 minutes of no motion the watch
+// goes to sleep / power-save mode and stops sending position data
+// (only LK link-keep is sent). Any movement wakes it and uploads
+// resume at the configured interval. Allowed range: 60..65535 seconds.
+router.post(
+  "/upload_interval",
+  checkToken,
+  ValidateJoi(Schemas.uploadInterval.set),
+  Device_controller.setUploadInterval
+);
+
 router.post(
   "/add_family_member",
   checkToken,

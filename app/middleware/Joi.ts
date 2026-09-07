@@ -802,6 +802,47 @@ export const Schemas = {
   },
 
   /**
+   * Set the dynamic-state upload time interval (seconds) on the
+   * device (UPLOAD command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*LEN*UPLOAD,time interval seconds]
+   *                 Example: [3G*8800000015*000A*UPLOAD,600]
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*UPLOAD]
+   *                 (bare ack = success)
+   *
+   * Note: This interval applies while the device is in dynamic
+   * state only. If the gravity sensor detects no motion for ~2
+   * minutes the device enters sleep / power-save mode and stops
+   * sending position data (only an LK link-keep is sent to hold
+   * the TCP socket). Any movement wakes the device and uploads
+   * resume at the configured interval.
+   * Minimum: 60 seconds. Maximum: 65535 seconds.
+   */
+  uploadInterval: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      interval_seconds: Joi.number()
+        .integer()
+        .min(60)
+        .max(65535)
+        .required()
+        .messages({
+          "number.base":
+            "interval_seconds must be a number (integer, 60-65535)",
+          "number.integer": "interval_seconds must be an integer (no decimals)",
+          "number.min": "interval_seconds must be at least 60 seconds",
+          "number.max": "interval_seconds must be at most 65535 seconds",
+          "any.required": "interval_seconds is required",
+        }),
+    }),
+  },
+
+  /**
    * Set the watch's language and/or time zone (LZ command).
    *
    * Per the protocol spec:

@@ -708,6 +708,10 @@ class TcpServer {
         this.handleMonitorResponse(client, parsed);
         break;
 
+      case "UPLOAD":
+        this.handleUploadResponse(client, parsed);
+        break;
+
       case "DEVREFUSEPHONESWITCH":
         this.handleDevRefusePhoneSwitchResponse(client, parsed);
         break;
@@ -3861,6 +3865,118 @@ class TcpServer {
     Logging.info(
       `Sending MONITOR command to device ${deviceId} ` +
         `(monitor=${digits}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // UPLOAD - Dynamic-state upload time interval (seconds)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle a UPLOAD response from the device.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*UPLOAD,time interval seconds]
+   *                 Example: [3G*8800000015*000A*UPLOAD,600]
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*UPLOAD]
+   *                 Example: [3G*8800000015*0006*UPLOAD]
+   *                 (bare ack = device accepted the new interval)
+   *
+   * Semantics:
+   *   The upload interval applies while the device is in dynamic
+   *   (moving) state only. If the gravity sensor detects no motion
+   *   for ~2 minutes the watch enters sleep / power-save mode and
+   *   stops reporting position data (it only sends an LK link-keep
+   *   to hold the TCP socket open). Any subsequent movement wakes it
+   *   and it begins reporting again at the configured interval.
+   *   Minimum: 60 seconds. Maximum: 65535 seconds.
+   */
+  private handleUploadResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `UPLOAD response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from UPLOAD: ${error.message}`
+      )
+    );
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Upload-Interval (UPLOAD) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a UPLOAD command to configure how often (in seconds) the
+   * device uploads its data while in dynamic (moving) state.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*UPLOAD,time interval seconds]
+   *                 Example: [3G*8800000015*000A*UPLOAD,600]
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*UPLOAD]
+   *                 Example: [3G*8800000015*0006*UPLOAD]
+   *                 (bare ack = success)
+   *
+   * Allowed range: 60..65535 seconds. Out-of-range or non-integer
+   * values are rejected up-front and the command is NOT sent — this
+   * prevents the firmware from accepting a useless / harmful value.
+   *
+   * While in dynamic state the device reports every `interval`
+   * seconds. After ~2 minutes of no motion the gravity sensor puts
+   * the watch into sleep / power-save mode (no position data; only
+   * an LK link-keep is sent to hold the TCP socket). Any movement
+   * wakes it up and re-starts the periodic uploads.
+   *
+   * @param deviceId       The device ID (e.g., 8800000015)
+   * @param intervalSeconds Dynamic-state upload interval, in seconds
+   * @returns true if command was sent; false on validation failure
+   *          or if the device is not connected.
+   */
+  public sendUploadIntervalCommand(
+    deviceId: string,
+    intervalSeconds: number
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send UPLOAD command.`
+      );
+      return false;
+    }
+
+    // Validate range (per protocol, min 60s, max 65535s).
+    const n = Math.floor(Number(intervalSeconds));
+    if (!Number.isFinite(n) || n < 60 || n > 65535) {
+      Logging.error(
+        `Refusing to send UPLOAD to device ${deviceId}: interval=${intervalSeconds} ` +
+          `must be an integer in [60, 65535] seconds.`
+      );
+      return false;
+    }
+
+    const content = `UPLOAD,${n}`;
+    // LEN is the UTF-8 byte length of `content` padded to 4 hex chars.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending UPLOAD command to device ${deviceId} ` +
+        `(interval=${n}s): ${command}`
     );
 
     this.send(client, command);

@@ -2381,6 +2381,119 @@ const voiceMonitor = async function (
   }
 };
 
+/**
+ * POST /user/device/upload_interval
+ *
+ * Set the dynamic-state upload time interval (seconds) on the device.
+ *
+ * Per the protocol spec:
+ *   Server send : [3G*YYYYYYYYYY*LEN*UPLOAD,time interval seconds]
+ *                 Example: [3G*8800000015*000A*UPLOAD,600]
+ *
+ *   Device reply: [3G*YYYYYYYYYY*LEN*UPLOAD]
+ *                 (bare ack = success)
+ *
+ * Note: This interval applies while the device is in dynamic state
+ * only. After ~2 minutes of no motion the gravity sensor puts the
+ * watch into sleep / power-save mode and position data is no longer
+ * reported (only an LK link-keep is sent). Any movement wakes the
+ * device and uploads resume at the configured interval.
+ * Allowed range: 60..65535 seconds.
+ *
+ * The interval is also mirrored to Device.location_interval_minutes
+ * (rounded down to whole minutes) so the dashboard always reflects
+ * the last known setting, even when the device is offline.
+ *
+ * Body: { serial_number, interval_seconds }
+ */
+const setUploadInterval = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, interval_seconds } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (
+      interval_seconds === undefined ||
+      interval_seconds === null ||
+      typeof interval_seconds !== "number" ||
+      !Number.isFinite(interval_seconds) ||
+      !Number.isInteger(interval_seconds) ||
+      interval_seconds < 60 ||
+      interval_seconds > 65535
+    ) {
+      return errorMessage(
+        res,
+        "interval_seconds must be an integer between 60 and 65535 seconds"
+      );
+    }
+
+    // Find the device
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // Verify the watch is currently connected via TCP
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot send UPLOAD command."
+      );
+    }
+
+    // Send the UPLOAD command (tcpServer does additional validation)
+    const commandSent = tcpServer.sendUploadIntervalCommand(
+      serial_number,
+      interval_seconds
+    );
+
+    if (!commandSent) {
+      return errorMessage(res, "Failed to send UPLOAD command to device");
+    }
+
+    // Mirror the new interval to the device row so dashboards reflect
+    // the last-known value even when the watch is offline.
+    // The Device model stores MINUTES (legacy column name).
+    const intervalMinutes = Math.floor(interval_seconds / 60);
+    await device.update({ location_interval_minutes: intervalMinutes });
+
+    return successMessage(
+      res,
+      "Upload interval command sent. The device will report at this interval while moving.",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        interval_seconds,
+        interval_minutes: intervalMinutes,
+        command_sent: true,
+        command_protocol: `[3G*${serial_number}*LEN*UPLOAD,${interval_seconds}]`,
+        note:
+          "This interval applies while the device is in dynamic (moving) state. " +
+          "If the gravity sensor detects no motion for ~2 minutes the device " +
+          "enters sleep / power-save mode and stops sending position data " +
+          "(only LK link-keep is sent). Any movement wakes the device and " +
+          "uploads resume at the configured interval.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("setUploadInterval error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error setting upload interval: " + msg);
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -2404,4 +2517,5 @@ export default {
   setRejectStranger,
   setNightPowerSaving,
   voiceMonitor,
+  setUploadInterval,
 };
