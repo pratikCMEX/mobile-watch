@@ -258,6 +258,13 @@ const getAnalytics = async (
             ? Math.round(Number(r.avg_secondary) * 100) / 100
             : null,
       })),
+      readings: readings.map((r: any) => ({
+        value_primary: Number(r.value_primary),
+        value_secondary:
+          r.value_secondary !== null ? Number(r.value_secondary) : null,
+        unit: r.unit,
+        recorded_at: r.recorded_at,
+      })),
       summary,
       last_synced: latest?.recorded_at ?? null,
     });
