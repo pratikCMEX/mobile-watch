@@ -29,12 +29,12 @@ router.delete(
   Device_controller.deleteDevice
 );
 
-router.get(
-  "/get_device_settings/:device_id",
-  checkToken,
-  ValidateJoi(Schemas.device.getSettings, "params"),
-  Device_controller.getDeviceSettings
-);
+// router.get(
+//   "/get_device_settings/:device_id",
+//   checkToken,
+//   ValidateJoi(Schemas.device.getSettings, "params"),
+//   Device_controller.getDeviceSettings
+// );
 
 router.post(
   "/list_unlinked_devices",
