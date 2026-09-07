@@ -314,6 +314,137 @@ const sendVoiceMessage = async function (
   }
 };
 
+const sendReminder = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, type, reminder_settings, number, reminder_text } =
+      req.body;
+    const voiceFile = (req as any).file as
+      | { path: string; originalname: string; size: number }
+      | undefined;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+    if (!type) {
+      return errorMessage(
+        res,
+        "type is required (pill, water, general, sedentary)"
+      );
+    }
+    if (!reminder_settings) {
+      return errorMessage(
+        res,
+        "reminder_settings is required (e.g. 11:25-1-2)"
+      );
+    }
+    if (!number) {
+      return errorMessage(res, "number is required (1-3)");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number as string },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const tcpClient = tcpServer.getDevice(serial_number as string);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Convert reminder_text to hex if provided
+    let hexText: string | null = null;
+    if (reminder_text) {
+      // Encode text as UTF-8, then convert to uppercase hex
+      hexText = Buffer.from(reminder_text, "utf8")
+        .toString("hex")
+        .toUpperCase();
+    }
+
+    // Read voice file if provided
+    let voiceBuffer: Buffer | null = null;
+    if (voiceFile) {
+      voiceBuffer = require("fs").readFileSync(voiceFile.path);
+    }
+
+    const commandSent = tcpServer.sendTakePillsCommand(
+      serial_number as string,
+      reminder_settings as string,
+      Number(number),
+      hexText,
+      voiceBuffer
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send TAKEPILLS command. Device may be disconnected."
+      );
+    }
+
+    // Persist to database
+    const reminder = await db.Reminder.create({
+      device_id: device.id,
+      type: type as string,
+      reminder_settings: reminder_settings as string,
+      number: Number(number),
+      reminder_text: hexText,
+      voice_data: voiceBuffer,
+      is_active: true,
+    });
+
+    // Build command protocol string for response
+    const num = Math.max(1, Math.min(3, Math.floor(Number(number) || 1)));
+    let contentStr: string;
+    if (hexText) {
+      contentStr = `TAKEPILLS,${reminder_settings},${num},${hexText},`;
+    } else {
+      contentStr = `TAKEPILLS,${reminder_settings},${num},,`;
+    }
+    const length = Buffer.byteLength(contentStr, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[3G*${serial_number}*${length}*${contentStr}]`;
+
+    Logging.info(
+      `TAKEPILLS (reminder) command sent to device ${serial_number} ` +
+        `(type=${type}, settings=${reminder_settings}, number=${num})`
+    );
+
+    return successMessage(res, "Reminder sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      reminder_id: reminder.id,
+      type,
+      reminder_settings,
+      number: num,
+      reminder_text: reminder_text || null,
+      voice_file: voiceFile ? voiceFile.originalname : null,
+      command_sent: true,
+      command_message:
+        "TAKEPILLS command sent to device. The device will set the reminder.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [3G*<id>*<LEN>*TAKEPILLS,1] (success) or [3G*<id>*<LEN>*TAKEPILLS,0] (failure).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("sendReminder error:", err);
+    return errorMessage(res, "Error sending reminder");
+  }
+};
+
 const listUnlinkedDevices = async function (
   req: Request,
   res: Response,
@@ -433,6 +564,7 @@ export default {
   deleteDevice,
   getDeviceSettings,
   sendVoiceMessage,
+  sendReminder,
   listUnlinkedDevices,
   assignOwner,
   updateDeviceIdentity,

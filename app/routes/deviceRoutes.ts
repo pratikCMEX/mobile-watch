@@ -45,6 +45,15 @@ router.post(
   Device_controller.sendVoiceMessage
 );
 
+// Send reminder (TAKEPILLS) to device — supports pill, water, general, sedentary types
+router.post(
+  "/send_reminder",
+  checkToken,
+  uploadVoice.single("voice_file"),
+  ValidateJoi(Schemas.device.sendReminder),
+  Device_controller.sendReminder
+);
+
 router.post(
   "/list_unlinked_devices",
 

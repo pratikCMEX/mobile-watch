@@ -125,6 +125,29 @@ export const Schemas = {
         "any.required": "serial_number is required",
       }),
     }),
+    sendReminder: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      type: Joi.string()
+        .valid("pill", "water", "general", "sedentary")
+        .required()
+        .messages({
+          "any.only": "type must be one of: pill, water, general, sedentary",
+          "any.required": "type is required",
+        }),
+      reminder_settings: Joi.string().required().messages({
+        "string.empty": "reminder_settings is required",
+        "any.required": "reminder_settings is required",
+      }),
+      number: Joi.number().integer().min(1).max(3).required().messages({
+        "number.min": "number must be >= 1",
+        "number.max": "number must be <= 3 (max 3 reminders)",
+        "any.required": "number is required",
+      }),
+      reminder_text: Joi.string().optional().allow(""),
+    }),
     listUnlinked: Joi.object({
       page: Joi.number().integer().min(1).optional().default(1),
       limit: Joi.number().integer().min(1).optional().default(20),

@@ -668,6 +668,10 @@ class TcpServer {
         this.handleDeviceStatusResponse(client, parsed);
         break;
 
+      case "TAKEPILLS":
+        this.handleTakePillsResponse(client, parsed);
+        break;
+
       case "RESET":
         this.handleRestartResponse(client, parsed);
         break;
@@ -3123,6 +3127,129 @@ class TcpServer {
     this.send(client, command);
 
     return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Take Pills / Reminder (TAKEPILLS) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a medication/reminder command to the watch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*<id>*<LEN>*TAKEPILLS,reminder_settings,number,reminder_text,voice_data]
+   *
+   *   Device reply: [3G*<id>*<LEN>*TAKEPILLS,status]
+   *                 status: 1 = success, 0 = failure
+   *
+   * Parameters:
+   *   - reminder_settings: same format as alarm clock (time-switch-frequency-custom)
+   *                        e.g. "11:25-1-2" (11:25, type=1, repeat=2)
+   *   - number: 1-3 (which reminder slot, up to 3 reminders max)
+   *   - reminder_text: unicode hex-encoded text, e.g. "006f00770070006d0067"
+   *   - voice_data: optional AMR audio Buffer (can be null/empty, but the
+   *                  comma separator is still included in the protocol)
+   *
+   * Note: The medication reminder function (DD) in CONFIG must be set to "2".
+   *
+   * @param deviceId        The device ID (e.g. 8800000015)
+   * @param reminderSettings e.g. "11:25-1-2"
+   * @param number          1-3
+   * @param reminderText    Unicode hex string (e.g. "006f00770070006d0067") or null
+   * @param voiceData       Optional AMR Buffer or null
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendTakePillsCommand(
+    deviceId: string,
+    reminderSettings: string,
+    number: number,
+    reminderText: string | null,
+    voiceData: Buffer | null
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send TAKEPILLS command.`
+      );
+      return false;
+    }
+
+    // Validate number (1-3)
+    const num = Math.max(1, Math.min(3, Math.floor(Number(number) || 1)));
+
+    // Build the content parts
+    const textPart = reminderText || "";
+    const voicePart =
+      voiceData && voiceData.length > 0 ? escape(voiceData) : null;
+
+    // Build content: TAKEPILLS,settings,number,text,voice
+    // Voice data is always included as a comma separator even if empty
+    let content: string | Buffer;
+    if (voicePart) {
+      // Text + voice data: need to build as Buffer for binary safety
+      const header = Buffer.from(
+        `TAKEPILLS,${reminderSettings},${num},${textPart},`,
+        "ascii"
+      );
+      content = Buffer.concat([header, voicePart]);
+    } else {
+      // No voice data: plain string with trailing comma
+      content = `TAKEPILLS,${reminderSettings},${num},${textPart},`;
+    }
+
+    // LEN is the byte length of the content, hex, 4 digits
+    const length = Buffer.isBuffer(content)
+      ? content.length.toString(16).padStart(4, "0")
+      : Buffer.byteLength(content, "utf8").toString(16).padStart(4, "0");
+
+    // Build the full packet
+    let command: string | Buffer;
+    if (Buffer.isBuffer(content)) {
+      const prefix = Buffer.from(`[3G*${deviceId}*${length}*`, "ascii");
+      const suffix = Buffer.from("]", "ascii");
+      command = Buffer.concat([prefix, content, suffix]);
+    } else {
+      command = `[3G*${deviceId}*${length}*${content}]`;
+    }
+
+    Logging.info(
+      `Sending TAKEPILLS (reminder) command to device ${deviceId} ` +
+        `(settings=${reminderSettings}, number=${num}, text=${textPart}, ` +
+        `voice=${voiceData ? voiceData.length + "B" : "none"})`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a TAKEPILLS reply from the device.
+   *
+   * Reply shapes:
+   *   [3G*<id>*<LEN>*TAKEPILLS,1]   success
+   *   [3G*<id>*<LEN>*TAKEPILLS,0]   failure
+   *
+   * We treat "1" as success and "0" as failure.
+   */
+  private handleTakePillsResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "1";
+    Logging.info(
+      `TAKEPILLS response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from TAKEPILLS: ${error.message}`
+      )
+    );
+    void client;
   }
 
   // ───────────────────────────────────────────────────────────
