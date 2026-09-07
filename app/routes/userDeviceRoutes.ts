@@ -247,6 +247,28 @@ router.post(
   Device_controller.getWalkTime
 );
 
+// Press the "Locate" pin in the app (sends CR command).
+// Wakes up the device GPS system, performs constant positioning
+// for ~3 minutes and reports fixes every ~20 seconds. Each fix is
+// stored in the Locations table AND cached on the Device row so
+// the dashboard can render the current pin immediately.
+router.post(
+  "/locate",
+  checkToken,
+  ValidateJoi(Schemas.locate.send),
+  Device_controller.locateDevice
+);
+
+// Read back the device's cached current location plus a small
+// recent Locations history window (for map playback / freshness
+// checks).
+router.post(
+  "/get_location",
+  checkToken,
+  ValidateJoi(Schemas.locate.get),
+  Device_controller.getDeviceLocation
+);
+
 router.post(
   "/add_family_member",
   checkToken,

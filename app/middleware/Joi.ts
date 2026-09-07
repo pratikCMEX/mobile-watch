@@ -909,6 +909,48 @@ export const Schemas = {
   },
 
   /**
+   * CR — Real-time position / Locate pin command.
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*0002*CR]
+   *                 Example: [3G*5678901234*0002*CR]
+   *   Device reply: [3G*YYYYYYYYYY*0002*CR]
+   *
+   * Wakes up the device's GPS system, performs constant positioning
+   * for ~3 minutes, and reports position data every ~20 seconds.
+   * Stops positioning automatically after ~3 minutes.
+   */
+  locate: {
+    send: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+    }),
+    /**
+     * Read back the cached latest location (and a small recent
+     * history window) for a device.
+     */
+    get: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      // Optional: how many recent Locations rows to include in the
+      // response (max 100). Default 10.
+      history_limit: Joi.number()
+        .integer()
+        .min(0)
+        .max(100)
+        .default(10)
+        .messages({
+          "number.base": "history_limit must be an integer 0..100",
+          "number.max": "history_limit cannot exceed 100",
+        }),
+    }),
+  },
+
+  /**
    * Set the watch's language and/or time zone (LZ command).
    *
    * Per the protocol spec:

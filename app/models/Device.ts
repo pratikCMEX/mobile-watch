@@ -35,6 +35,13 @@ export interface DeviceAttributes {
   gprs_enabled?: boolean | null;
   gps_status?: string | null;
   network_status?: string | null;
+  // Latest known position cache (refreshed by every location
+  // packet the watch sends — also surfaced by the CR / Locate
+  // endpoint).
+  latest_lat?: number | null;
+  latest_lng?: number | null;
+  latest_location_at?: Date | null;
+  latest_location_is_valid?: boolean | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -77,6 +84,10 @@ class Device
   public gprs_enabled?: boolean | null;
   public gps_status?: string | null;
   public network_status?: string | null;
+  public latest_lat?: number | null;
+  public latest_lng?: number | null;
+  public latest_location_at?: Date | null;
+  public latest_location_is_valid?: boolean | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -261,6 +272,29 @@ export default (sequelize: Sequelize, DataTypes: any) => {
       },
       network_status: {
         type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: null,
+      },
+      // Latest known position cache (refreshed by every location
+      // packet the watch sends — also surfaced by the CR / Locate
+      // endpoint).
+      latest_lat: {
+        type: DataTypes.DECIMAL(10, 7),
+        allowNull: true,
+        defaultValue: null,
+      },
+      latest_lng: {
+        type: DataTypes.DECIMAL(10, 7),
+        allowNull: true,
+        defaultValue: null,
+      },
+      latest_location_at: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        defaultValue: null,
+      },
+      latest_location_is_valid: {
+        type: DataTypes.BOOLEAN,
         allowNull: true,
         defaultValue: null,
       },

@@ -2858,6 +2858,209 @@ const getWalkTime = async function (
   }
 };
 
+/**
+ * POST /user/device/locate
+ *
+ * Pressing the "Locate" pin in the app sends a CR command to the
+ * device.
+ *
+ * Per the protocol spec:
+ *   Server send : [3G*YYYYYYYYYY*0002*CR]
+ *                 Example: [3G*5678901234*0002*CR]
+ *   Device reply: [3G*YYYYYYYYYY*0002*CR]
+ *                 (bare ack = device is now in active GPS mode)
+ *
+ * Semantics:
+ *   The device wakes up its GPS system immediately, performs
+ *   constant positioning for ~3 minutes and reports position data
+ *   every ~20 seconds. It stops positioning automatically after
+ *   ~3 minutes.
+ *
+ * Each fix the watch sends is stored in the Locations table AND
+ * cached on the Device row's latest_lat / latest_lng /
+ * latest_location_at / latest_location_is_valid columns so the
+ * dashboard can show the pin as soon as the first fix arrives
+ * without polling the full history.
+ *
+ * Body: { serial_number }
+ */
+const locateDevice = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot send CR command."
+      );
+    }
+
+    // Send the CR command. tcpServer will reject (return false) only
+    // if the device is offline; here we already verified connectivity
+    // above so this should always succeed.
+    const commandSent = tcpServer.sendCrCommand(serial_number);
+
+    if (!commandSent) {
+      return errorMessage(res, "Failed to send CR command to device");
+    }
+
+    // Snapshot the device's current cached position so the API
+    // caller can immediately render *something* on the map while
+    // waiting for the first new fix from the device.
+    const latestKnown = await db.Location.findOne({
+      where: { device_id: device.id },
+      order: [["recorded_at", "DESC"]],
+    });
+
+    return successMessage(
+      res,
+      "Locate command sent. Device will start real-time GPS positioning for ~3 minutes and report fixes every ~20 seconds.",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        command_sent: true,
+        command_protocol: `[3G*${serial_number}*0002*CR]`,
+        positioning: {
+          duration_seconds: 180,
+          report_interval_seconds: 20,
+          note:
+            "Each fix is stored as a Locations row AND cached on " +
+            "Device.latest_lat / latest_lng / latest_location_at so the " +
+            "dashboard can render the pin immediately. The watch stops " +
+            "positioning automatically after ~3 minutes.",
+        },
+        // Surface the last known fix so the UI doesn't have to do a
+        // second round-trip to render the initial pin.
+        current_location: latestKnown
+          ? {
+              latitude: Number(latestKnown.latitude),
+              longitude: Number(latestKnown.longitude),
+              speed_kmh:
+                latestKnown.speed_kmh != null
+                  ? Number(latestKnown.speed_kmh)
+                  : null,
+              direction: latestKnown.direction,
+              is_valid_fix: latestKnown.is_valid_fix,
+              recorded_at: latestKnown.recorded_at,
+              is_from_locate_session: false,
+            }
+          : null,
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("locateDevice error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error sending locate command: " + msg);
+  }
+};
+
+/**
+ * POST /user/device/get_location
+ *
+ * Read back the device's current location and a small recent
+ * history window. Combines the cached Device.latest_* columns
+ * (instant render) with the most recent Location rows (path
+ * playback / freshness check).
+ *
+ * Body: { serial_number, history_limit? }
+ */
+const getDeviceLocation = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number } = req.body;
+    const historyLimit = Math.max(
+      0,
+      Math.min(100, Number(req.body.history_limit ?? 10))
+    );
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Cached "current pin" straight off the Device row.
+    const cached = {
+      latitude: device.latest_lat != null ? Number(device.latest_lat) : null,
+      longitude: device.latest_lng != null ? Number(device.latest_lng) : null,
+      recorded_at: device.latest_location_at ?? null,
+      is_valid_fix: device.latest_location_is_valid ?? null,
+    };
+
+    // Recent history window for path playback / freshness checks.
+    let recentRows: any[] = [];
+    if (historyLimit > 0) {
+      recentRows = await db.Location.findAll({
+        where: { device_id: device.id },
+        order: [["recorded_at", "DESC"]],
+        limit: historyLimit,
+      });
+    }
+
+    const recent = recentRows.map((r) => ({
+      id: r.id,
+      latitude: Number(r.latitude),
+      longitude: Number(r.longitude),
+      speed_kmh: r.speed_kmh != null ? Number(r.speed_kmh) : null,
+      direction: r.direction,
+      address: r.address,
+      total_distance_km:
+        r.total_distance_km != null ? Number(r.total_distance_km) : null,
+      is_valid_fix: r.is_valid_fix,
+      recorded_at: r.recorded_at,
+    }));
+
+    return successMessage(res, "Device location fetched successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      // Fast-render pin (single Device row lookup, no scan)
+      current: cached,
+      // Recent history rows for path playback / freshness check
+      recent,
+      history_limit: historyLimit,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error("getDeviceLocation error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error fetching device location: " + msg);
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -2884,4 +3087,6 @@ export default {
   setUploadInterval,
   setWalkTime,
   getWalkTime,
+  locateDevice,
+  getDeviceLocation,
 };

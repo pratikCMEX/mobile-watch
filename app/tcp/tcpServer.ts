@@ -716,6 +716,10 @@ class TcpServer {
         this.handleWalkTimeResponse(client, parsed);
         break;
 
+      case "CR":
+        this.handleCrResponse(client, parsed);
+        break;
+
       case "DEVREFUSEPHONESWITCH":
         this.handleDevRefusePhoneSwitchResponse(client, parsed);
         break;
@@ -1165,14 +1169,17 @@ class TcpServer {
       return;
     }
 
+    const recordedAt = this.parseRecordedAt(location.date, location.time);
+    const isValidFix = location.gpsStatus === "A";
+
     await db.Location.create({
       device_id: device.id,
       latitude,
       longitude,
       speed_kmh: parseFloat(location.speed) || null,
       direction: location.direction || null,
-      is_valid_fix: location.gpsStatus === "A",
-      recorded_at: this.parseRecordedAt(location.date, location.time),
+      is_valid_fix: isValidFix,
+      recorded_at: recordedAt,
     });
 
     const battery = parseInt(location.battery || "", 10);
@@ -1188,6 +1195,17 @@ class TcpServer {
         ? { battery_percentage: battery }
         : {}),
     });
+
+    // Refresh the cached "latest position" columns on the Device row
+    // so dashboards can render the current pin immediately without
+    // scanning the Locations history.
+    await this.cacheLatestLocationOnDevice(
+      device,
+      latitude,
+      longitude,
+      recordedAt,
+      isValidFix
+    );
   }
 
   // ───────────────────────────────────────────────────────────
@@ -2632,6 +2650,35 @@ class TcpServer {
     return new Date();
   }
 
+  /**
+   * Cache the latest GPS fix on the Device row so dashboards can
+   * render the current pin without scanning the Locations history.
+   * Called by saveLocation / saveLteLocation on every new fix
+   * (and therefore also during a CR / Locate session).
+   */
+  private async cacheLatestLocationOnDevice(
+    device: any,
+    latitude: number,
+    longitude: number,
+    recordedAt: Date,
+    isValidFix: boolean
+  ): Promise<void> {
+    try {
+      await device.update({
+        latest_lat: latitude,
+        latest_lng: longitude,
+        latest_location_at: recordedAt,
+        latest_location_is_valid: isValidFix,
+      });
+    } catch (err: any) {
+      Logging.warn(
+        `Failed to cache latest location on device ${
+          device.serial_number || device.id
+        }: ` + (err?.message || String(err))
+      );
+    }
+  }
+
   private async saveLocation(
     deviceId: string,
     location: GpsLocation,
@@ -2660,14 +2707,17 @@ class TcpServer {
       return;
     }
 
+    const recordedAt = this.parseRecordedAt(location.date, location.time);
+    const isValidFix = location.gpsStatus === "A";
+
     await db.Location.create({
       device_id: device.id,
       latitude,
       longitude,
       speed_kmh: parseFloat(location.speed) || null,
       direction: location.direction || null,
-      is_valid_fix: location.gpsStatus === "A",
-      recorded_at: this.parseRecordedAt(location.date, location.time),
+      is_valid_fix: isValidFix,
+      recorded_at: recordedAt,
     });
 
     await device.update({
@@ -2675,6 +2725,17 @@ class TcpServer {
       gps_strength: parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
       network_type: networkType,
     });
+
+    // Refresh the cached "latest position" columns on the Device
+    // row so dashboards can render the current pin immediately
+    // without scanning the Locations history.
+    await this.cacheLatestLocationOnDevice(
+      device,
+      latitude,
+      longitude,
+      recordedAt,
+      isValidFix
+    );
   }
 
   private async saveHeartRate(
@@ -4141,6 +4202,78 @@ class TcpServer {
     Logging.info(
       `Sending WALKTIME command to device ${deviceId} ` +
         `(sections=${JSON.stringify(normalised)}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // CR - Real-time position / Locate pin (manual GPS fix)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle a CR response from the device.
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*0002*CR]
+   *                 Example: [3G*5678901234*0002*CR]
+   *   Device reply: [3G*YYYYYYYYYY*0002*CR]
+   *                 Example: [3G*5678901234*0002*CR]
+   *
+   * The reply is just the same bare ack — the actual GPS fixes
+   * arrive afterwards as regular `UD` (or `UD_LTE`) packets at a
+   * ~20s cadence for ~3 minutes. Each fix is stored as a Location
+   * row by the existing handleLocation / saveLteLocation handlers,
+   * AND we additionally surface the device's `latest_lat` /
+   * `latest_lng` / `latest_location_at` columns on the Device row
+   * for fast UI rendering.
+   */
+  private handleCrResponse(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `CR (locate) response from device ${packet.deviceId}: ` +
+        `status="${(packet.payload || "(ack)").trim()}"`
+    );
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from CR: ${error.message}`
+      )
+    );
+
+    void client;
+  }
+
+  /**
+   * Send a CR (locate / real-time position) command to the device.
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*0002*CR]
+   *
+   * The device wakes up its GPS system immediately, starts real-time
+   * positioning for ~3 minutes and reports position data every
+   * ~20 seconds (each report arrives as a normal UD / UD_LTE packet
+   * and is stored via handleLocation / saveLteLocation). The watch
+   * stops positioning automatically after ~3 minutes.
+   *
+   * @param deviceId The device ID (e.g., 5678901234)
+   * @returns true if command sent; false if device is not connected.
+   */
+  public sendCrCommand(deviceId: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send CR command.`
+      );
+      return false;
+    }
+
+    // CR has a fixed 4-char payload ("CR"), so LEN is always 0x0002.
+    const command = `[3G*${deviceId}*0002*CR]`;
+
+    Logging.info(
+      `Sending CR (locate) command to device ${deviceId}: ${command}`
     );
 
     this.send(client, command);
