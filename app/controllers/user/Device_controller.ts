@@ -307,6 +307,10 @@ const getDeviceSettings = async (
 ) => {
   try {
     const { device_id } = req.params;
+    const { language, timezone } = req.query as {
+      language?: string;
+      timezone?: string;
+    };
 
     if (!device_id) {
       return errorMessage(res, "device_id is required");
@@ -347,29 +351,110 @@ const getDeviceSettings = async (
       4: "Silence",
     };
 
-    return successMessage(res, "Device settings fetched successfully", {
-      device_id: device.id,
-      device_name: device.device_name,
-      serial_number: device.serial_number,
-      settings: {
-        sms_alert_enabled: deviceSetting.sms_alert_enabled,
-        take_off_device_alert: deviceSetting.take_off_device_alert,
-        safe_mode: deviceSetting.safe_mode,
-        talking_clock: deviceSetting.talking_clock,
-        night_power_saving: deviceSetting.night_power_saving,
-        volume: deviceSetting.volume,
-        brightness: deviceSetting.brightness,
-        fall_down_alert_enabled: deviceSetting.fall_down_alert_enabled === "1",
-        fall_down_reminder_call: deviceSetting.fall_down_reminder_call === "1",
-        fall_down_level: deviceSetting.fall_down_level,
-        scene_mode: deviceSetting.scene_mode,
-        scene_mode_description:
-          sceneModeDescriptions[deviceSetting.scene_mode] || "Unknown",
-        // Locale (last-known values sent to the device via LZ command)
-        language: device.language,
-        timezone: device.timezone,
-      },
-    });
+    // If language or timezone query params are provided, send the
+    // LZ command to the device and persist the values.
+    let lzCommandSent = false;
+    let lzCommandProtocol: string | null = null;
+    if (language !== undefined || timezone !== undefined) {
+      const serial_number = device.serial_number;
+      if (!serial_number) {
+        return errorMessage(
+          res,
+          "Device has no serial_number. Cannot send LZ command."
+        );
+      }
+
+      if (!tcpServer.getDevice(serial_number)) {
+        return errorMessage(
+          res,
+          "Device is offline. LZ command NOT sent — try again once the watch is connected."
+        );
+      }
+
+      const langArg: number | null =
+        language === undefined ? null : Number(language);
+      const tzArg: number | null =
+        timezone === undefined ? null : Number(timezone);
+
+      if (langArg === null && tzArg === null) {
+        return errorMessage(
+          res,
+          "Provide exactly one of: language OR timezone (not both, not neither)."
+        );
+      }
+      if (langArg !== null && tzArg !== null) {
+        return errorMessage(
+          res,
+          "Provide exactly one of: language OR timezone (not both)."
+        );
+      }
+
+      const result = tcpServer.sendLzCommand(serial_number, langArg, tzArg);
+      if (!result.sent) {
+        return errorMessage(
+          res,
+          "Failed to send LZ command. Device may be disconnected."
+        );
+      }
+
+      // Persist to Device model
+      const updateData: any = {};
+      if (langArg !== null) updateData.language = String(langArg);
+      if (tzArg !== null) updateData.timezone = String(tzArg);
+      if (Object.keys(updateData).length > 0) {
+        await device.update(updateData);
+      }
+
+      lzCommandSent = true;
+      lzCommandProtocol = result.protocol;
+
+      Logging.info(
+        `Language/timezone (LZ) command sent via getDeviceSettings to device ${serial_number} ` +
+          `(device_id=${device.id}, language=${langArg}, timezone=${tzArg})`
+      );
+    }
+
+    return successMessage(
+      res,
+      lzCommandSent
+        ? "Device settings updated successfully"
+        : "Device settings fetched successfully",
+      {
+        device_id: device.id,
+        device_name: device.device_name,
+        serial_number: device.serial_number,
+        settings: {
+          sms_alert_enabled: deviceSetting.sms_alert_enabled,
+          take_off_device_alert: deviceSetting.take_off_device_alert,
+          safe_mode: deviceSetting.safe_mode,
+          talking_clock: deviceSetting.talking_clock,
+          night_power_saving: deviceSetting.night_power_saving,
+          volume: deviceSetting.volume,
+          brightness: deviceSetting.brightness,
+          fall_down_alert_enabled:
+            deviceSetting.fall_down_alert_enabled === "1",
+          fall_down_reminder_call:
+            deviceSetting.fall_down_reminder_call === "1",
+          fall_down_level: deviceSetting.fall_down_level,
+          scene_mode: deviceSetting.scene_mode,
+          scene_mode_description:
+            sceneModeDescriptions[deviceSetting.scene_mode] || "Unknown",
+          // Locale (last-known values sent to the device via LZ command)
+          language: device.language,
+          timezone: device.timezone,
+        },
+        ...(lzCommandSent && {
+          command_sent: true,
+          command_message:
+            language !== undefined
+              ? `Set watch language to code ${language} on device ${device.serial_number}.`
+              : `Set watch time zone to GMT${
+                  Number(timezone) >= 0 ? "+" : ""
+                }${timezone} on device ${device.serial_number}.`,
+          command_protocol: lzCommandProtocol,
+        }),
+      }
+    );
   } catch (err) {
     console.error("getDeviceSettings error:", err);
     return errorMessage(res, "Error fetching device settings");
