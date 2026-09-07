@@ -199,6 +199,10 @@ const getDeviceSettings = async function (
       where: { device_id: device_id as string },
     });
 
+    const device = await db.Device.findByPk(device_id);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
     if (!settings) {
       return successMessage(
         res,
@@ -214,6 +218,8 @@ const getDeviceSettings = async function (
           fall_down_alert_enabled: "0",
           fall_down_reminder_call: "0",
           fall_down_level: 0,
+          language: device.language,
+          timezone: device.timezone,
         }
       );
     }
