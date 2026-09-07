@@ -180,7 +180,7 @@ router.post(
 
 // Request real-time body temperature from device (sends bodytemp2 command)
 // The device will measure and reply with temperature data stored as HealthMetric
-router.post(
+router.get(
   "/request_body_temperature",
   checkToken,
   ValidateJoi(Schemas.bodyTemperature.request),
