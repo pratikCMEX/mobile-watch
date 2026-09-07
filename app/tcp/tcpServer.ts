@@ -704,6 +704,10 @@ class TcpServer {
         this.handleSosSmsResponse(client, parsed);
         break;
 
+      case "DEVREFUSEPHONESWITCH":
+        this.handleDevRefusePhoneSwitchResponse(client, parsed);
+        break;
+
       case "FALLDOWN":
         this.handleFallDownResponse(client, parsed);
         break;
@@ -3739,6 +3743,96 @@ class TcpServer {
       )
     );
     void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // DEVREFUSEPHONESWITCH - Reject stranger calling switch
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle a DEVREFUSEPHONESWITCH response from the device.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*DEVREFUSEPHONESWITCH,1]
+   *                 switch state: 0 = OFF, 1 = ON
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*DEVREFUSEPHONESWITCH]
+   *                 (bare ack = success)
+   *
+   * Note: This is only valid once after you preset the SOS numbers and
+   * contacts in phone book in the app or server.
+   */
+  private handleDevRefusePhoneSwitchResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `DEVREFUSEPHONESWITCH response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from DEVREFUSEPHONESWITCH: ${error.message}`
+      )
+    );
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Reject Stranger Calling (DEVREFUSEPHONESWITCH) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a DEVREFUSEPHONESWITCH command to enable/disable the reject
+   * stranger calling feature on the watch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*DEVREFUSEPHONESWITCH,1]
+   *                 switch state: 0 = OFF, 1 = ON
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*DEVREFUSEPHONESWITCH]
+   *                 (bare ack = success)
+   *
+   * Note: This is only valid once after you preset the SOS numbers and
+   * contacts in phone book in the app or server.
+   *
+   * @param deviceId - The device ID (e.g., 8800000015)
+   * @param enabled - true to enable reject stranger calling, false to disable
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendDevRefusePhoneSwitchCommand(
+    deviceId: string,
+    enabled: boolean
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send DEVREFUSEPHONESWITCH command.`
+      );
+      return false;
+    }
+
+    const switchState = enabled ? "1" : "0";
+    const content = `DEVREFUSEPHONESWITCH,${switchState}`;
+    // LEN is the UTF-8 byte length of `content` padded to 4 hex chars.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending DEVREFUSEPHONESWITCH command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
   }
 
   // ───────────────────────────────────────────────────────────

@@ -2097,6 +2097,108 @@ const requestBodyTemperature = async function (
   }
 };
 
+/**
+ * POST /user/device/reject_stranger
+ *
+ * Set the reject stranger calling feature on the device.
+ *
+ * Per the protocol spec:
+ *   Server send : [3G*YYYYYYYYYY*LEN*DEVREFUSEPHONESWITCH,1]
+ *                 switch state: 0 = OFF, 1 = ON
+ *
+ *   Device reply: [3G*YYYYYYYYYY*LEN*DEVREFUSEPHONESWITCH]
+ *                 (bare ack = success)
+ *
+ * Note: This is only valid once after you preset the SOS numbers and
+ * contacts in phone book in the app or server.
+ *
+ * Body: { serial_number, enabled: true/false }
+ */
+const setRejectStranger = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, enabled } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (typeof enabled !== "boolean") {
+      return errorMessage(res, "enabled must be true or false");
+    }
+
+    // Find the device
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // Verify the watch is currently connected via TCP
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot send DEVREFUSEPHONESWITCH command."
+      );
+    }
+
+    // Send the DEVREFUSEPHONESWITCH command
+    const commandSent = tcpServer.sendDevRefusePhoneSwitchCommand(
+      serial_number,
+      enabled
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send DEVREFUSEPHONESWITCH command to device"
+      );
+    }
+
+    // Update the device settings in the database
+    const deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (deviceSetting) {
+      await deviceSetting.update({
+        reject_stranger_enabled: enabled ? "1" : "0",
+      });
+    }
+
+    return successMessage(
+      res,
+      enabled
+        ? "Reject stranger calling enabled. Device will reject calls from numbers not in phone book or SOS contacts."
+        : "Reject stranger calling disabled. Device will accept all incoming calls.",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        enabled,
+        command_sent: true,
+        command_protocol: `[3G*${serial_number}*LEN*DEVREFUSEPHONESWITCH,${
+          enabled ? "1" : "0"
+        }]`,
+        note:
+          "Device will reply with [3G*<id>*LEN*DEVREFUSEPHONESWITCH] (bare ack = success). " +
+          "Note: This feature is only valid after setting SOS numbers and phone book contacts.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("setRejectStranger error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error setting reject stranger: " + msg);
+  }
+};
+
 // SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
 // The `/set_sos_numbers` route now points directly at the
 // Emergency_contact controller there.
@@ -2121,4 +2223,5 @@ export default {
   setSilenceTime,
   getDoNotDisturb,
   requestBodyTemperature,
+  setRejectStranger,
 };

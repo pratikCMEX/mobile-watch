@@ -180,11 +180,20 @@ router.post(
 
 // Request real-time body temperature from device (sends bodytemp2 command)
 // The device will measure and reply with temperature data stored as HealthMetric
-router.get(
+router.post(
   "/request_body_temperature",
   checkToken,
   ValidateJoi(Schemas.bodyTemperature.request),
   Device_controller.requestBodyTemperature
+);
+
+// Set reject stranger calling feature (DEVREFUSEPHONESWITCH command)
+// When enabled, device will reject calls from numbers not in phone book or SOS contacts
+router.post(
+  "/reject_unknown_call",
+  checkToken,
+  ValidateJoi(Schemas.rejectStranger.set),
+  Device_controller.setRejectStranger
 );
 
 router.post(

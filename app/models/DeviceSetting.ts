@@ -15,6 +15,7 @@ export interface DeviceSettingAttributes {
   fall_down_reminder_call: string;
   fall_down_level: number;
   scene_mode: number;
+  reject_stranger_enabled: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +40,7 @@ class DeviceSetting
   public fall_down_reminder_call!: string;
   public fall_down_level!: number;
   public scene_mode!: number;
+  public reject_stranger_enabled!: string;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -133,6 +135,11 @@ export default (sequelize: Sequelize, DataTypes: any) => {
           min: 1,
           max: 4,
         },
+      },
+      reject_stranger_enabled: {
+        type: DataTypes.ENUM("1", "0"),
+        allowNull: true,
+        defaultValue: "0",
       },
 
       createdAt: {

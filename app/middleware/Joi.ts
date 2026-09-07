@@ -717,6 +717,32 @@ export const Schemas = {
   },
 
   /**
+   * Set the reject stranger calling feature (DEVREFUSEPHONESWITCH command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*LEN*DEVREFUSEPHONESWITCH,1]
+   *                 switch state: 0 = OFF, 1 = ON
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*DEVREFUSEPHONESWITCH]
+   *                 (bare ack = success)
+   *
+   * Note: This is only valid once after you preset the SOS numbers and
+   * contacts in phone book in the app or server.
+   */
+  rejectStranger: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be true or false",
+        "any.required": "enabled is required",
+      }),
+    }),
+  },
+
+  /**
    * Set the watch's language and/or time zone (LZ command).
    *
    * Per the protocol spec:
