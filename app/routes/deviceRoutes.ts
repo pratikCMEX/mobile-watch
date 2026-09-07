@@ -38,6 +38,7 @@ router.delete(
 
 router.post(
   "/list_unlinked_devices",
+
   checkToken,
   ValidateJoi(Schemas.device.listUnlinked),
   Device_controller.listUnlinkedDevices
