@@ -33,7 +33,6 @@ router.get(
   "/get_device_settings/:device_id",
   checkToken,
   ValidateJoi(Schemas.device.getSettings, "params"),
-  ValidateJoi(Schemas.device.getSettings, "query"),
   Device_controller.getDeviceSettings
 );
 

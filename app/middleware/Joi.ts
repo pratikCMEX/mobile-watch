@@ -118,50 +118,6 @@ export const Schemas = {
     }),
     getSettings: Joi.object({
       device_id: Joi.string().required(),
-      language: Joi.number()
-        .integer()
-        .valid(
-          0,
-          1,
-          3,
-          4,
-          5,
-          7,
-          8,
-          9,
-          10,
-          11,
-          12,
-          13,
-          14,
-          15,
-          16,
-          17,
-          18,
-          19,
-          22,
-          23,
-          25,
-          26,
-          27,
-          28,
-          29,
-          34,
-          36
-        )
-        .optional()
-        .messages({
-          "any.only":
-            "language must be one of the supported codes: 0, 1, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22, 23, 25, 26, 27, 28, 29, 34, 36",
-          "number.base":
-            "language must be a number (one of the supported codes)",
-        }),
-      timezone: Joi.number().integer().min(-12).max(14).optional().messages({
-        "number.min": "timezone must be >= -12",
-        "number.max": "timezone must be <= 14",
-        "number.base":
-          "timezone must be a number (GMT offset, e.g. 8 for GMT+8)",
-      }),
     }),
     listUnlinked: Joi.object({
       page: Joi.number().integer().min(1).optional().default(1),
