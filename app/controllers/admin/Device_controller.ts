@@ -225,11 +225,11 @@ const getDeviceSettings = async function (
       );
     }
 
-    return successMessage(
-      res,
-      "Device settings fetched successfully",
-      settings
-    );
+    return successMessage(res, "Device settings fetched successfully", {
+      ...settings.toJSON(),
+      language: device.language,
+      timezone: device.timezone,
+    });
   } catch (err) {
     console.error("getDeviceSettings error:", err);
     return errorMessage(res, "Error fetching device settings");
