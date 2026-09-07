@@ -118,6 +118,8 @@ const updateDeviceSettings = async function (
             : "0",
         fall_down_level: fall_down_level ?? 5,
         scene_mode: scene_mode ?? 1,
+        reject_stranger_enabled: "0",
+        upload_interval_seconds: null,
       });
     } else {
       if (sms_alert_enabled !== undefined)
@@ -365,6 +367,9 @@ const getDeviceSettings = async (
         scene_mode: deviceSetting.scene_mode,
         scene_mode_description:
           sceneModeDescriptions[deviceSetting.scene_mode] || "Unknown",
+        // Dynamic-state upload time interval (UPLOAD command).
+        // Stored in seconds to match the wire protocol exactly.
+        upload_interval_seconds: deviceSetting.upload_interval_seconds ?? null,
         // Locale (last-known values sent to the device via LZ command)
         language: device.language,
         timezone: device.timezone,
@@ -2461,10 +2466,40 @@ const setUploadInterval = async function (
       return errorMessage(res, "Failed to send UPLOAD command to device");
     }
 
-    // Mirror the new interval to the device row so dashboards reflect
-    // the last-known value even when the watch is offline.
-    // The Device model stores MINUTES (legacy column name).
+    // Mirror the new interval to both the Device row and the
+    // DeviceSetting row so dashboards reflect the last-known value
+    // even when the watch is offline. We store seconds in the
+    // settings table (matches the wire protocol exactly) and
+    // whole minutes on the legacy Device.location_interval_minutes
+    // column (used by older dashboards).
     const intervalMinutes = Math.floor(interval_seconds / 60);
+
+    // Upsert DeviceSetting row (create default if missing).
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
+        fall_down_level: 5,
+        scene_mode: 1,
+        reject_stranger_enabled: "0",
+        upload_interval_seconds: interval_seconds,
+      });
+    } else {
+      deviceSetting.upload_interval_seconds = interval_seconds;
+      await deviceSetting.save();
+    }
+
     await device.update({ location_interval_minutes: intervalMinutes });
 
     return successMessage(
@@ -2476,6 +2511,8 @@ const setUploadInterval = async function (
         device_name: device.device_name,
         interval_seconds,
         interval_minutes: intervalMinutes,
+        upload_interval_seconds: interval_seconds,
+        device_setting_id: deviceSetting.id,
         command_sent: true,
         command_protocol: `[3G*${serial_number}*LEN*UPLOAD,${interval_seconds}]`,
         note:

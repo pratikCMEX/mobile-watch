@@ -16,6 +16,7 @@ export interface DeviceSettingAttributes {
   fall_down_level: number;
   scene_mode: number;
   reject_stranger_enabled: string;
+  upload_interval_seconds: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,6 +42,7 @@ class DeviceSetting
   public fall_down_level!: number;
   public scene_mode!: number;
   public reject_stranger_enabled!: string;
+  public upload_interval_seconds!: number | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -140,6 +142,15 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.ENUM("1", "0"),
         allowNull: true,
         defaultValue: "0",
+      },
+      upload_interval_seconds: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+        validate: {
+          min: 60,
+          max: 65535,
+        },
       },
 
       createdAt: {
