@@ -651,6 +651,10 @@ class TcpServer {
         this.handleAutoAnswerResponse(client, parsed);
         break;
 
+      case "CALL":
+        this.handleCallResponse(client, parsed);
+        break;
+
       case "SOSSMS":
         this.handleSosSmsResponse(client, parsed);
         break;
@@ -3253,6 +3257,106 @@ class TcpServer {
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from ACALL: ${error.message}`
+      )
+    );
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Outgoing Call (CALL) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Instruct the watch to dial a phone number.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*<id>*<LEN>*CALL,<phoneNumber>]
+   *
+   * Example:
+   *   [3G*8800000015*0010*CALL,00000000000]
+   *
+   * Device reply:
+   *   [3G*<id>*0004*CALL]   (bare ack = the device is dialing)
+   *
+   * Wire format:
+   *   - Use "3G" prefix (same as other action commands).
+   *   - LEN is the UTF-8 byte length of the content between the third
+   *     and fourth asterisks (i.e. everything from "CALL" through to
+   *     the end of the phone number), padded to 4 hex chars.
+   *   - Phone number MUST be ASCII digits (country code included,
+   *     no '+', no spaces, no dashes).
+   *
+   * @param deviceId   The device ID (e.g. 8800000015)
+   * @param phoneNumber Digits-only phone number (country code included)
+   * @returns true if the command was sent, false if the device is
+   *          not connected or the input was rejected.
+   */
+  public sendOutgoingCallCommand(
+    deviceId: string,
+    phoneNumber: string
+  ): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send CALL command.`
+      );
+      return false;
+    }
+
+    // Strip any non-digit characters defensively.
+    const digits = (phoneNumber || "").replace(/[^0-9]/g, "");
+
+    if (!digits) {
+      Logging.error(
+        `Refusing to send CALL with empty/invalid phone number to device ${deviceId}.`
+      );
+      return false;
+    }
+
+    // Validate length (5–20 digits, same convention as SOS/ACALL).
+    if (digits.length < 5 || digits.length > 20) {
+      Logging.error(
+        `Refusing to send CALL to device ${deviceId}: phone number '${digits}' ` +
+          `must be 5–20 ASCII digits.`
+      );
+      return false;
+    }
+
+    const content = `CALL,${digits}`;
+    // LEN is the UTF-8 byte length of `content` padded to 4 hex chars.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending outgoing call (CALL) command to device ${deviceId} ` +
+        `(phone=${digits}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a CALL reply from the device.
+   *
+   * Reply shapes:
+   *   [3G*<id>*0004*CALL]   bare ack → device is dialing
+   *
+   * We treat the bare ack as success.
+   */
+  private handleCallResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `CALL response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK - dialing" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from CALL: ${error.message}`
       )
     );
     void client;

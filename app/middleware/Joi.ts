@@ -532,6 +532,36 @@ export const Schemas = {
   },
 
   /**
+   * Instruct the watch to dial an outgoing phone number (CALL command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*<id>*<LEN>*CALL,<phoneNumber>]
+   *   Device reply: [3G*<id>*0004*CALL]   (bare ack = device is dialing)
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "phone_number":  "00000000000"
+   *   }
+   */
+  outgoingCall: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      phone_number: Joi.string()
+        .pattern(/^[0-9]{5,20}$/)
+        .required()
+        .messages({
+          "string.pattern.base":
+            "phone_number must be 5–20 ASCII digits (no '+', '-', or spaces)",
+          "any.required": "phone_number is required",
+        }),
+    }),
+  },
+
+  /**
    * Toggle the watch's "send SMS to SOS numbers on SOS alarm" switch.
    *
    * Per the protocol spec:

@@ -1034,6 +1034,113 @@ const setAutoAnswer = async (
 };
 
 // ────────────────────────────────────────────────────────────
+// Outgoing Call (CALL) — instruct the watch to dial a phone number.
+// ────────────────────────────────────────────────────────────
+
+/**
+ * POST /user/device/make_outgoing_call
+ *
+ * Instructs the watch to dial the given phone number.
+ *
+ * Wire protocol:
+ *   Server send : [3G*<id>*<LEN>*CALL,<phoneNumber>]
+ *   Device reply: [3G*<id>*0004*CALL]   (bare ack = device is dialing)
+ *
+ * Request body:
+ *   {
+ *     "serial_number": "8800000015",
+ *     "phone_number":  "00000000000"
+ *   }
+ *
+ * Phone numbers MUST be digits only — no '+', no spaces, no dashes.
+ * Always include the country code (e.g. "919999999999" for an Indian
+ * mobile). If the country code is missing, prefix it before calling
+ * this method.
+ */
+const makeOutgoingCall = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, phone_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (!phone_number) {
+      return errorMessage(res, "phone_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Send the CALL command. tcpServer does additional validation
+    // (refuses empty/short/long numbers) and returns false on
+    // rejection — surface that as a 422 to the caller.
+    const commandSent = tcpServer.sendOutgoingCallCommand(
+      serial_number,
+      phone_number
+    );
+
+    if (!commandSent) {
+      return customMessage(
+        res,
+        422,
+        "Failed to send CALL command. Ensure phone_number is 5–20 ASCII digits (no '+')."
+      );
+    }
+
+    // Build the command protocol string for response (LEN is hex).
+    const digits = (phone_number || "").replace(/[^0-9]/g, "");
+    const content = `CALL,${digits}`;
+    const length = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[3G*${serial_number}*${length}*${content}]`;
+
+    Logging.info(
+      `Outgoing call (CALL) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, phone=${digits})`
+    );
+
+    return successMessage(res, "Outgoing call command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      phone_number: digits,
+      command_sent: true,
+      command_message:
+        "CALL command sent to device. The device will dial the specified phone number.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [3G*<id>*0004*CALL] (ack = device is dialing).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("makeOutgoingCall error:", err);
+    return errorMessage(res, "Error sending outgoing call command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
 // List all auto-answer (ACALL) numbers currently stored
 // server-side for a device.
 // ────────────────────────────────────────────────────────────
@@ -1917,6 +2024,7 @@ export default {
   captureSnapshot,
   setAutoAnswer,
   listAutoAnswer,
+  makeOutgoingCall,
   setSosSms,
   setFallDownAlert,
   setFallDownSensitivity,
