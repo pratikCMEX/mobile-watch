@@ -365,6 +365,9 @@ const getDeviceSettings = async (
         scene_mode: deviceSetting.scene_mode,
         scene_mode_description:
           sceneModeDescriptions[deviceSetting.scene_mode] || "Unknown",
+        // Locale (last-known values sent to the device via LZ command)
+        language: device.language,
+        timezone: device.timezone,
       },
     });
   } catch (err) {
@@ -1626,6 +1629,17 @@ const setLanguageTimezone = async (
         res,
         "Failed to send LZ command. Device may be disconnected."
       );
+    }
+
+    // Persist the language and/or timezone to the Device model so
+    // subsequent GET /settings and GET /about_device calls reflect
+    // the last-known values sent to the watch.
+    const updateData: any = {};
+    if (langArg !== null) updateData.language = String(langArg);
+    if (tzArg !== null) updateData.timezone = String(tzArg);
+
+    if (Object.keys(updateData).length > 0) {
+      await device.update(updateData);
     }
 
     Logging.info(
