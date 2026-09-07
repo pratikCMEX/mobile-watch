@@ -2290,9 +2290,96 @@ const setNightPowerSaving = async function (
   }
 };
 
-// SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
-// The `/set_sos_numbers` route now points directly at the
-// Emergency_contact controller there.
+/**
+ * POST /user/device/voice_monitor
+ *
+ * Send a MONITOR command to request the device to call a monitor number
+ * for voice monitoring / listen-in functionality.
+ *
+ * Per the protocol spec:
+ *   Server send : [3G*YYYYYYYYYY*LEN*MONITOR,phone number]
+ *                 Example: [3G*8800000015*0013*MONITOR,13100010002]
+ *                 - OK for any number
+ *
+ *   Device reply: [3G*YYYYYYYYYY*LEN*MONITOR]
+ *                 (bare ack = device is calling the monitor number)
+ *
+ * Note: The device will auto-dial the monitor number.
+ * The smartphone end can hear all surrounding voice.
+ * The device end is unnoticeable.
+ *
+ * This feature is OPTIONAL. If this feature is illegal in your region,
+ * it can be removed from the software.
+ *
+ * Body: { serial_number, phone_number }
+ */
+const voiceMonitor = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, phone_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (!phone_number) {
+      return errorMessage(res, "phone_number is required");
+    }
+
+    // Find the device
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // Verify the watch is currently connected via TCP
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot send MONITOR command."
+      );
+    }
+
+    // Send the MONITOR command
+    const commandSent = tcpServer.sendMonitorCommand(
+      serial_number,
+      phone_number
+    );
+
+    if (!commandSent) {
+      return errorMessage(res, "Failed to send MONITOR command to device");
+    }
+
+    return successMessage(
+      res,
+      "Voice monitor command sent. The device will call the monitor number.",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        phone_number,
+        command_sent: true,
+        command_protocol: `[3G*${serial_number}*LEN*MONITOR,${phone_number}]`,
+        note:
+          "Device will reply with [3G*<id>*LEN*MONITOR] (bare ack = success). " +
+          "The device will auto-dial the monitor number. You can hear surrounding sounds. " +
+          "This feature is optional - remove from software if illegal in your region.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("voiceMonitor error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error sending voice monitor: " + msg);
+  }
+};
 
 export default {
   updateDeviceSettings,
@@ -2316,4 +2403,5 @@ export default {
   requestBodyTemperature,
   setRejectStranger,
   setNightPowerSaving,
+  voiceMonitor,
 };

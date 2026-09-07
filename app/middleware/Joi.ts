@@ -767,6 +767,41 @@ export const Schemas = {
   },
 
   /**
+   * Voice Monitor / Listen In (MONITOR command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*LEN*MONITOR,phone number]
+   *                 Example: [3G*8800000015*0013*MONITOR,13100010002]
+   *                 - OK for any number
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*MONITOR]
+   *                 (bare ack = device is calling the monitor number)
+   *
+   * Note: The device will auto-dial the preset monitor number.
+   * The smartphone end can hear all surrounding voice.
+   * The device end is unnoticeable.
+   *
+   * This feature is OPTIONAL. If this feature is illegal in your region,
+   * it can be removed from the software.
+   */
+  monitor: {
+    send: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      phone_number: Joi.string()
+        .pattern(/^[0-9]{5,20}$/)
+        .required()
+        .messages({
+          "string.pattern.base":
+            "phone_number must be 5-20 digits (digits only, no spaces or dashes)",
+          "any.required": "phone_number is required",
+        }),
+    }),
+  },
+
+  /**
    * Set the watch's language and/or time zone (LZ command).
    *
    * Per the protocol spec:

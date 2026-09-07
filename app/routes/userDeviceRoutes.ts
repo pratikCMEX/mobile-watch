@@ -204,6 +204,16 @@ router.post(
   Device_controller.setNightPowerSaving
 );
 
+// Voice Monitor / Listen In (MONITOR command) - OPTIONAL FEATURE
+// The device will auto-dial a monitor number for voice monitoring
+// Note: Remove this feature if it is illegal in your region
+router.post(
+  "/sound_guardian",
+  checkToken,
+  ValidateJoi(Schemas.monitor.send),
+  Device_controller.voiceMonitor
+);
+
 router.post(
   "/add_family_member",
   checkToken,

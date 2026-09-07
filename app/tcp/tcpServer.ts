@@ -704,6 +704,10 @@ class TcpServer {
         this.handleSosSmsResponse(client, parsed);
         break;
 
+      case "MONITOR":
+        this.handleMonitorResponse(client, parsed);
+        break;
+
       case "DEVREFUSEPHONESWITCH":
         this.handleDevRefusePhoneSwitchResponse(client, parsed);
         break;
@@ -3747,6 +3751,120 @@ class TcpServer {
       )
     );
     void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // MONITOR - Voice Monitor / Listen In
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle a MONITOR response from the device.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*MONITOR,phone number]
+   *                 Example: [3G*8800000015*0013*MONITOR,13100010002]
+   *                 - OK for any number
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*MONITOR]
+   *                 Example: [3G*8800000015*0007*MONITOR]
+   *                 (bare ack = device is calling the monitor number)
+   *
+   * Note: The device will auto-dial the preset monitor number.
+   * The smartphone end can hear all surrounding voice.
+   * The device end is unnoticeable.
+   *
+   * This feature is OPTIONAL. If this feature is illegal in your region,
+   * it can be removed from the software.
+   */
+  private handleMonitorResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `MONITOR response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from MONITOR: ${error.message}`
+      )
+    );
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Voice Monitor (MONITOR) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a MONITOR command to request the device to call a monitor number
+   * for voice monitoring / listen-in functionality.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*MONITOR,phone number]
+   *                 Example: [3G*8800000015*0013*MONITOR,13100010002]
+   *                 - OK for any number
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*MONITOR]
+   *                 Example: [3G*8800000015*0007*MONITOR]
+   *                 (bare ack = device is calling the monitor number)
+   *
+   * Note: The device will auto-dial the monitor number.
+   * The smartphone end can hear all surrounding voice.
+   * The device end is unnoticeable.
+   *
+   * This feature is OPTIONAL. If this feature is illegal in your region,
+   * it can be removed from the software.
+   *
+   * @param deviceId - The device ID (e.g., 8800000015)
+   * @param phoneNumber - The monitor phone number to call
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendMonitorCommand(deviceId: string, phoneNumber: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send MONITOR command.`
+      );
+      return false;
+    }
+
+    // Strip any non-digit characters defensively.
+    const digits = (phoneNumber || "").replace(/[^0-9]/g, "");
+
+    if (!digits) {
+      Logging.error(
+        `Refusing to send MONITOR with empty/invalid phone number to device ${deviceId}.`
+      );
+      return false;
+    }
+
+    // Validate length (5–20 digits)
+    if (digits.length < 5 || digits.length > 20) {
+      Logging.error(
+        `Refusing to send MONITOR to device ${deviceId}: phone number '${digits}' ` +
+          `must be 5–20 ASCII digits.`
+      );
+      return false;
+    }
+
+    const content = `MONITOR,${digits}`;
+    // LEN is the UTF-8 byte length of `content` padded to 4 hex chars.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending MONITOR command to device ${deviceId} ` +
+        `(monitor=${digits}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
   }
 
   // ───────────────────────────────────────────────────────────
