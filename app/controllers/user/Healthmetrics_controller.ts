@@ -247,23 +247,23 @@ const getAnalytics = async (
 
     return successMessage(res, "Analytics fetched successfully", {
       range,
-      chart: chartRows.map((r) => ({
-        bucket: r.bucket,
-        value_primary:
-          r.avg_primary !== null
-            ? Math.round(Number(r.avg_primary) * 100) / 100
-            : null,
-        value_secondary:
-          r.avg_secondary !== null
-            ? Math.round(Number(r.avg_secondary) * 100) / 100
-            : null,
-      })),
-      readings: readings.map((r: any) => ({
+      // chart: chartRows.map((r) => ({
+      //   bucket: r.bucket,
+      //   value_primary:
+      //     r.avg_primary !== null
+      //       ? Math.round(Number(r.avg_primary) * 100) / 100
+      //       : null,
+      //   value_secondary:
+      //     r.avg_secondary !== null
+      //       ? Math.round(Number(r.avg_secondary) * 100) / 100
+      //       : null,
+      // })),
+      chart: readings.map((r: any) => ({
         value_primary: Number(r.value_primary),
         value_secondary:
           r.value_secondary !== null ? Number(r.value_secondary) : null,
         unit: r.unit,
-        recorded_at: r.recorded_at,
+        bucket: r.recorded_at,
       })),
       summary,
       last_synced: latest?.recorded_at ?? null,
