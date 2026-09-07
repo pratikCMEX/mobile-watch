@@ -200,6 +200,43 @@ function unescape(buf: Buffer): Buffer {
   return Buffer.from(out);
 }
 
+/**
+ * Encode a raw buffer into the wire-escaped form.
+ *
+ * Wire (escaped) form  →  Decoded form
+ *      0x7D 0x01       →     0x7D
+ *      0x7D 0x02       →     0x5B     '['
+ *      0x7D 0x03       →     0x5D     ']'
+ *      0x7D 0x04       →     0x2C     ','
+ *      0x7D 0x05       →     0x2A     '*'
+ */
+function escape(buf: Buffer): Buffer {
+  const out: number[] = [];
+  for (let i = 0; i < buf.length; i++) {
+    const byte = buf[i];
+    switch (byte) {
+      case 0x7d:
+        out.push(0x7d, 0x01);
+        break;
+      case 0x5b:
+        out.push(0x7d, 0x02);
+        break;
+      case 0x5d:
+        out.push(0x7d, 0x03);
+        break;
+      case 0x2c:
+        out.push(0x7d, 0x04);
+        break;
+      case 0x2a:
+        out.push(0x7d, 0x05);
+        break;
+      default:
+        out.push(byte);
+    }
+  }
+  return Buffer.from(out);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
@@ -972,6 +1009,16 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleTracking(client: TcpClient, packet: ParsedPacket): void {
+    const payload = (packet.payload || "").trim();
+
+    // TK is used for both tracking and voice-message acknowledgements.
+    // A payload of "0" or "1" indicates a voice-message response:
+    //   1 = success receiving, 0 = failure.
+    if (payload === "0" || payload === "1") {
+      this.handleVoiceMessageResponse(client, packet);
+      return;
+    }
+
     Logging.info(
       `TK packet received from device ${packet.deviceId}: ` + packet.payload
     );
@@ -2422,15 +2469,21 @@ class TcpServer {
   // Send data to device
   // ───────────────────────────────────────────────────────────
 
-  private send(client: TcpClient, message: string): void {
+  private send(client: TcpClient, message: string | Buffer): void {
     if (client.socket.destroyed) {
       Logging.error(`Cannot send to disconnected device: ${client.id}`);
 
       return;
     }
 
-    // Add newline terminator - GPS devices expect \n to know command is complete
-    client.socket.write(message + "\n");
+    if (Buffer.isBuffer(message)) {
+      // Binary data (e.g. voice/AMR packets) — write raw bytes with
+      // newline terminator so the device knows the packet is complete.
+      client.socket.write(Buffer.concat([message, Buffer.from("\n")]));
+    } else {
+      // Add newline terminator - GPS devices expect \n to know command is complete
+      client.socket.write(message + "\n");
+    }
   }
 
   // ───────────────────────────────────────────────────────────
@@ -3357,6 +3410,116 @@ class TcpServer {
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from CALL: ${error.message}`
+      )
+    );
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Voice Message (TK) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a voice message (AMR audio) to the watch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*<id>*<LEN>*TK,<escaped AMR data>]
+   *
+   *   Device reply: [3G*<id>*<LEN>*TK,<status>]
+   *                 status: 1 = success receiving, 0 = failure
+   *
+   * Wire format:
+   *   - Use "3G" prefix (same as other action commands).
+   *   - LEN is the byte length of the content between the third and
+   *     fourth asterisks (i.e. everything from "TK," through to the
+   *     end of the escaped AMR data), padded to 4 hex chars.
+   *   - The raw AMR bytes are escaped using the protocol escape codec
+   *     before being placed on the wire (0x7D, 0x5B, 0x5D, 0x2C, 0x2A
+   *     are escaped as 0x7D 0x01..0x05).
+   *   - Voice raw data should be no more than 15 seconds.
+   *
+   * @param deviceId   The device ID (e.g. 8800000015)
+   * @param amrBuffer  Raw AMR audio data (binary Buffer)
+   * @returns true if the command was sent, false if the device is
+   *          not connected or the input was rejected.
+   */
+  public sendVoiceMessageCommand(deviceId: string, amrBuffer: Buffer): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send TK (voice) command.`
+      );
+      return false;
+    }
+
+    if (!Buffer.isBuffer(amrBuffer) || amrBuffer.length === 0) {
+      Logging.error(
+        `Refusing to send TK with empty AMR buffer to device ${deviceId}.`
+      );
+      return false;
+    }
+
+    // Validate max duration: AMR is typically 8kHz or 16kHz, ~12.2 kbps
+    // 15 seconds ≈ 23 KB at 12.2 kbps. We allow up to 64 KB as a safe
+    // upper bound to avoid flooding the TCP socket.
+    const MAX_AMR_BYTES = 64 * 1024;
+    if (amrBuffer.length > MAX_AMR_BYTES) {
+      Logging.error(
+        `Refusing to send TK to device ${deviceId}: AMR data is ${amrBuffer.length} bytes, max ${MAX_AMR_BYTES} allowed (≈15 seconds).`
+      );
+      return false;
+    }
+
+    // Escape the raw AMR bytes so special protocol bytes can travel
+    // through the [ … ] delimited packet format.
+    const escapedAmr = escape(amrBuffer);
+
+    // Build the content: "TK," + escaped AMR data
+    const header = Buffer.from("TK,", "ascii");
+    const content = Buffer.concat([header, escapedAmr]);
+
+    // LEN is the byte length of the content (after escaping), hex, 4 digits.
+    const length = content.length.toString(16).padStart(4, "0");
+
+    // Build the full packet: [3G*<id>*<LEN>*<content>]
+    const prefix = Buffer.from(`[3G*${deviceId}*${length}*`, "ascii");
+    const suffix = Buffer.from("]", "ascii");
+    const packet = Buffer.concat([prefix, content, suffix]);
+
+    Logging.info(
+      `Sending voice message (TK) to device ${deviceId} ` +
+        `(raw=${amrBuffer.length}B, escaped=${escapedAmr.length}B, total=${packet.length}B)`
+    );
+
+    this.send(client, packet);
+    return true;
+  }
+
+  /**
+   * Handle a TK (voice message) reply from the device.
+   *
+   * Reply shapes:
+   *   [3G*<id>*<LEN>*TK,1]   success receiving
+   *   [3G*<id>*<LEN>*TK,0]   failure
+   *
+   * We treat "1" as success and "0" as failure.
+   */
+  private handleVoiceMessageResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "1";
+    Logging.info(
+      `TK (voice) response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK - received" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from TK: ${error.message}`
       )
     );
     void client;

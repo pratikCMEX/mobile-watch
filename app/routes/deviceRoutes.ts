@@ -2,7 +2,7 @@ import express from "express";
 import { Schemas, ValidateJoi } from "../middleware/Joi";
 import Device_controller from "../controllers/admin/Device_controller";
 import { checkToken } from "../config/jwt";
-import { uploadProfile } from "../middleware/Multer";
+import { uploadProfile, uploadVoice } from "../middleware/Multer";
 
 const router = express.Router();
 
@@ -34,6 +34,15 @@ router.get(
   checkToken,
   ValidateJoi(Schemas.device.getSettings, "params"),
   Device_controller.getDeviceSettings
+);
+
+// Send voice message (AMR audio) to device via form-data
+router.post(
+  "/send_voice_message",
+  checkToken,
+  uploadVoice.single("voice_file"),
+  ValidateJoi(Schemas.device.sendVoiceMessage),
+  Device_controller.sendVoiceMessage
 );
 
 router.post(

@@ -1,8 +1,10 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
+import Logging from "../../library/Logging";
 import { deleteFile, unlinkUploadedFiles } from "../../helper/Helper";
 import { Op } from "sequelize";
+import { tcpServer } from "../../app";
 
 const createDevice = async function (
   req: Request,
@@ -235,6 +237,80 @@ const getDeviceSettings = async function (
     return errorMessage(res, "Error fetching device settings");
   }
 };
+
+const sendVoiceMessage = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number } = req.body;
+    const voiceFile = req.file;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (!voiceFile) {
+      return errorMessage(res, "voice_file (AMR audio) is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number as string },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const tcpClient = tcpServer.getDevice(serial_number as string);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Read the uploaded AMR file as a Buffer
+    const amrBuffer = require("fs").readFileSync(voiceFile.path);
+
+    const commandSent = tcpServer.sendVoiceMessageCommand(
+      serial_number as string,
+      amrBuffer
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send voice message. Device may be disconnected or AMR data is invalid."
+      );
+    }
+
+    Logging.info(
+      `Voice message (TK) sent to device ${serial_number} ` +
+        `(file=${voiceFile.originalname}, size=${amrBuffer.length} bytes)`
+    );
+
+    return successMessage(res, "Voice message sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      file_name: voiceFile.originalname,
+      file_size: amrBuffer.length,
+      command_sent: true,
+      command_message:
+        "TK command sent to device. The device will play the voice message.",
+      note: "Device will reply with [3G*<id>*<LEN>*TK,1] (success) or [3G*<id>*<LEN>*TK,0] (failure).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("sendVoiceMessage error:", err);
+    return errorMessage(res, "Error sending voice message");
+  }
+};
+
 const listUnlinkedDevices = async function (
   req: Request,
   res: Response,
@@ -353,6 +429,7 @@ export default {
   updateDevice,
   deleteDevice,
   getDeviceSettings,
+  sendVoiceMessage,
   listUnlinkedDevices,
   assignOwner,
   updateDeviceIdentity,

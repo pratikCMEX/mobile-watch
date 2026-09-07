@@ -119,6 +119,12 @@ export const Schemas = {
     getSettings: Joi.object({
       device_id: Joi.string().required(),
     }),
+    sendVoiceMessage: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+    }),
     listUnlinked: Joi.object({
       page: Joi.number().integer().min(1).optional().default(1),
       limit: Joi.number().integer().min(1).optional().default(20),

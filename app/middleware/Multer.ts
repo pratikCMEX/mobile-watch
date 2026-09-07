@@ -64,4 +64,40 @@ const uploadSnapshot = multer({
   // limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
-export { uploadProfile, uploadSnapshot };
+// ── Voice message upload (AMR audio) ──────────────────────────────
+const voice = multer.diskStorage({
+  destination: (req: Request, file: any, cb: any) => {
+    const dir = path.join(UPLOAD_BASE, "voice");
+    ensureDir(dir);
+    cb(null, dir);
+  },
+  filename: (req: Request, file: any, cb: any) => {
+    const ext = path.extname(file.originalname).toLowerCase() || ".amr";
+    const random = crypto.randomBytes(6).toString("hex");
+    cb(null, `${Date.now()}_${random}_voice${ext}`);
+  },
+});
+
+const audioOnlyFilter = (req: any, file: any, cb: any) => {
+  const allowed = [
+    "audio/amr",
+    "audio/mpeg",
+    "audio/mp3",
+    "application/octet-stream",
+  ];
+  if (
+    allowed.includes(file.mimetype) ||
+    file.originalname.toLowerCase().endsWith(".amr")
+  ) {
+    return cb(null, true);
+  }
+  return cb(new Error("Only AMR/audio files are allowed"));
+};
+
+const uploadVoice = multer({
+  storage: voice,
+  fileFilter: audioOnlyFilter,
+  limits: { fileSize: 64 * 1024 }, // 64 KB max (≈15 seconds of AMR)
+});
+
+export { uploadProfile, uploadSnapshot, uploadVoice };
