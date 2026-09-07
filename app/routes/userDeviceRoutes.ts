@@ -105,12 +105,12 @@ router.post(
 // Wire protocol:
 //   Server send : [3G*<id>*<LEN>*CALL,<phoneNumber>]
 //   Device reply: [3G*<id>*0004*CALL]   (bare ack = device is dialing)
-// router.post(
-//   "/make_outgoing_call",
-//   checkToken,
-//   ValidateJoi(Schemas.outgoingCall.set),
-//   Device_controller.makeOutgoingCall
-// );
+router.post(
+  "/make_outgoing_call",
+  checkToken,
+  ValidateJoi(Schemas.outgoingCall.set),
+  Device_controller.makeOutgoingCall
+);
 
 // SOS-SMS (SOSSMS) API — turn the watch's "send SMS to SOS numbers
 // after an SOS alarm" switch on/off.
