@@ -1332,7 +1332,30 @@ class TcpServer {
    * the caller logging packet.raw) rather than guessed at.
    */
   private handleConfig(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(`CONFIG packet received from device ${packet.deviceId}`);
+    Logging.info(
+      `CONFIG packet received from device ${packet.deviceId}: raw="${packet.raw}" payload="${packet.payload}"`
+    );
+
+    // Log medication reminder config (DD) for TAKEPILLS debugging
+    const ddMatch = packet.payload.match(/(?:^|,)DD:(\d+)/);
+    if (ddMatch) {
+      const ddValue = ddMatch[1];
+      if (ddValue !== "2") {
+        Logging.warn(
+          `Device ${packet.deviceId} CONFIG DD=${ddValue}. TAKEPILLS requires DD=2 (medication reminder enabled). ` +
+            `Reminders will NOT fire until DD is set to 2.`
+        );
+      } else {
+        Logging.info(
+          `Device ${packet.deviceId} CONFIG DD=2 (medication reminder enabled).`
+        );
+      }
+    } else {
+      Logging.warn(
+        `Device ${packet.deviceId} CONFIG does not contain DD parameter. ` +
+          `TAKEPILLS requires DD=2. Reminders may not fire.`
+      );
+    }
 
     const uploadSecondsMatch = packet.payload.match(/(?:^|,)UL:(\d+)/);
 
@@ -3214,10 +3237,18 @@ class TcpServer {
       command = `[3G*${deviceId}*${length}*${content}]`;
     }
 
+    const rawCommand = Buffer.isBuffer(command)
+      ? command.toString("ascii")
+      : command;
     Logging.info(
       `Sending TAKEPILLS (reminder) command to device ${deviceId} ` +
         `(settings=${reminderSettings}, number=${num}, text=${textPart}, ` +
-        `voice=${voiceData ? voiceData.length + "B" : "none"})`
+        `voice=${voiceData ? voiceData.length + "B" : "none"}, len=${length})`
+    );
+    Logging.debug(`TAKEPILLS raw packet: ${rawCommand}`);
+    Logging.warn(
+      `TAKEPILLS prerequisite: device CONFIG must have DD=2 (medication reminder enabled). ` +
+        `If reminder does not fire, verify DD config and device time sync.`
     );
 
     this.send(client, command);
@@ -3240,10 +3271,18 @@ class TcpServer {
     const status = (packet.payload || "").trim();
     const ok = status === "1";
     Logging.info(
-      `TAKEPILLS response from device ${packet.deviceId}: status="${
-        status || "(ack)"
-      }" (${ok ? "OK" : "FAILED"})`
+      `TAKEPILLS response from device ${packet.deviceId}: raw="${
+        packet.raw
+      }" payload="${packet.payload}" status="${status || "(ack)"}" (${
+        ok ? "OK" : "FAILED"
+      })`
     );
+    if (!ok) {
+      Logging.warn(
+        `TAKEPILLS command FAILED for device ${packet.deviceId}. ` +
+          `Possible causes: DD config != "2", invalid reminder_settings, or device time not synced.`
+      );
+    }
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from TAKEPILLS: ${error.message}`
