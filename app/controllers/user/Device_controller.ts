@@ -2037,7 +2037,7 @@ const requestBodyTemperature = async function (
   next: NextFunction
 ) {
   try {
-    const { serial_number } = req.params;
+    const { serial_number } = req.body;
 
     let device = null;
     if (serial_number) {
