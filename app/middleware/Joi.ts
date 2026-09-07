@@ -244,6 +244,18 @@ export const Schemas = {
       }),
     }),
   },
+  bodyTemperature: {
+    request: Joi.object({
+      serial_number: Joi.string().messages({
+        "string.empty": "serial_number must not be empty",
+      }),
+    })
+      .or("serial_number")
+      .messages({
+        "object.missing": "Provide Serial_number is required",
+        "object.and": "Provide serial_number is required",
+      }),
+  },
   sos: {
     /**
      * Set the SOS numbers on a device.

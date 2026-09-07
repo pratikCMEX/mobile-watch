@@ -644,6 +644,10 @@ class TcpServer {
         this.handleTemperature(client, parsed);
         break;
 
+      case "bodytemp2":
+        this.handleBodyTemp2(client, parsed);
+        break;
+
       case "calllog":
         this.handleCallLog(client, parsed);
         break;
@@ -1251,11 +1255,158 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
-  // btemp2 - Body temperature
+  // bodytemp2 - Real-time temperature request/response
   // ───────────────────────────────────────────────────────────
 
   /**
-   * Payload: btemp2,<unknown flag>,temperatureCelsius
+   * Payload: btemp2,type,temp
+   *
+   * type: measurement mode
+   *   0 = forehead mode
+   *   1 = wrist hand mode
+   *
+   * temp: temperature degree or abnormal flag
+   *   Normal: actual temperature in Celsius (e.g. 36.5)
+   *   Abnormal: 0 = low temperature abnormal, 1 = high temperature abnormal (≥37.20℃)
+   *
+   * Server reply: [3G*YYYYYYYYYY*0006*btemp2]
+   */
+  // ───────────────────────────────────────────────────────────
+  // bodytemp2 - Real-time temperature request/response
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Payload: bodytemp2,type,temp
+   *
+   * This is the device's response to a real-time temperature request.
+   * The server sends [3G*YYYYYYYYYY*0009*bodytemp2] to request a measurement,
+   * and the device replies with the temperature data.
+   *
+   * type: measurement mode
+   *   0 = forehead mode
+   *   1 = wrist hand mode
+   *
+   * temp: temperature degree or abnormal flag
+   *   Normal: actual temperature in Celsius (e.g. 36.5)
+   *   Abnormal: 0 = low temperature abnormal, 1 = high temperature abnormal (≥37.20℃)
+   *
+   * Server reply: [3G*YYYYYYYYYY*0009*bodytemp2]
+   */
+  private handleBodyTemp2(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `bodytemp2 packet received from device ${packet.deviceId}: ${packet.payload}`
+    );
+
+    const parts = packet.payload.split(",");
+
+    // parts[0] = type (0=forehead, 1=wrist)
+    // parts[1] = temp (temperature value OR 0/1 for abnormal)
+    const measurementType = parseInt(parts[0], 10);
+    const tempValue = parts[1] !== undefined ? parseFloat(parts[1]) : NaN;
+
+    if (isNaN(tempValue)) {
+      Logging.warn(
+        `Invalid temperature value from device ${packet.deviceId}: ${parts[1]}`
+      );
+      return;
+    }
+
+    let unit = "C";
+    let valuePrimary = tempValue;
+    let isAbnormal = false;
+    let abnormalType: "low" | "high" | null = null;
+
+    // Handle abnormal temperature flags
+    if (tempValue === 0) {
+      isAbnormal = true;
+      abnormalType = "low";
+      unit = "C (low abnormal)";
+      valuePrimary = 0;
+    } else if (tempValue === 1) {
+      isAbnormal = true;
+      abnormalType = "high";
+      unit = "C (high abnormal)";
+      valuePrimary = 1;
+    }
+
+    // Store measurement type as value_secondary (0=forehead, 1=wrist)
+    const valueSecondary = Number.isNaN(measurementType)
+      ? null
+      : measurementType;
+
+    this.saveHealthMetric(
+      packet.deviceId,
+      "temperature",
+      valuePrimary,
+      valueSecondary,
+      unit,
+      new Date()
+    ).catch((error: Error) =>
+      Logging.error(
+        `Failed to save body temperature for device ${packet.deviceId}: ${error.message}`
+      )
+    );
+
+    // Create notification for abnormal temperatures
+    if (isAbnormal && abnormalType) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+
+          const title =
+            abnormalType === "high"
+              ? "High temperature alert"
+              : "Low temperature alert";
+          const body =
+            abnormalType === "high"
+              ? `Device ${packet.deviceId} detected high temperature (≥37.20℃)`
+              : `Device ${packet.deviceId} detected low temperature`;
+
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "health_alert",
+            title,
+            body,
+            metadata: {
+              kind: "temperature_abnormal",
+              deviceId: packet.deviceId,
+              abnormalType,
+              measurementType: valueSecondary,
+              raw: packet.payload,
+            },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save temperature alert notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    // Server reply: [3G*YYYYYYYYYY*0009*bodytemp2]
+    const reply = `[3G*${packet.deviceId}*0009*bodytemp2]`;
+    this.send(client, reply);
+    Logging.info(`bodytemp2 reply sent to device ${packet.deviceId}: ${reply}`);
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // btemp2 - Body temperature (automatic upload)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Payload: btemp2,type,temp
+   *
+   * type: measurement mode
+   *   0 = forehead mode
+   *   1 = wrist hand mode
+   *
+   * temp: temperature degree or abnormal flag
+   *   Normal: actual temperature in Celsius (e.g. 36.5)
+   *   Abnormal: 0 = low temperature abnormal, 1 = high temperature abnormal (≥37.20℃)
+   *
+   * Server reply: [3G*YYYYYYYYYY*0006*btemp2]
    */
   private handleTemperature(client: TcpClient, packet: ParsedPacket): void {
     Logging.info(
@@ -1263,22 +1414,97 @@ class TcpServer {
     );
 
     const parts = packet.payload.split(",");
-    const temperature = parseFloat(parts[1]);
 
-    if (isNaN(temperature)) return;
+    // parts[0] = type (0=forehead, 1=wrist)
+    // parts[1] = temp (temperature value OR 0/1 for abnormal)
+    const measurementType = parseInt(parts[0], 10);
+    const tempValue = parts[1] !== undefined ? parseFloat(parts[1]) : NaN;
+
+    if (isNaN(tempValue)) {
+      Logging.warn(
+        `Invalid temperature value from device ${packet.deviceId}: ${parts[1]}`
+      );
+      return;
+    }
+
+    let unit = "C";
+    let valuePrimary = tempValue;
+    let isAbnormal = false;
+    let abnormalType: "low" | "high" | null = null;
+
+    // Handle abnormal temperature flags
+    if (tempValue === 0) {
+      isAbnormal = true;
+      abnormalType = "low";
+      unit = "C (low abnormal)";
+      valuePrimary = 0;
+    } else if (tempValue === 1) {
+      isAbnormal = true;
+      abnormalType = "high";
+      unit = "C (high abnormal)";
+      valuePrimary = 1;
+    }
+
+    // Store measurement type as value_secondary (0=forehead, 1=wrist)
+    const valueSecondary = Number.isNaN(measurementType)
+      ? null
+      : measurementType;
 
     this.saveHealthMetric(
       packet.deviceId,
       "temperature",
-      temperature,
-      null,
-      "C",
+      valuePrimary,
+      valueSecondary,
+      unit,
       new Date()
     ).catch((error: Error) =>
       Logging.error(
         `Failed to save temperature for device ${packet.deviceId}: ${error.message}`
       )
     );
+
+    // Create notification for abnormal temperatures
+    if (isAbnormal && abnormalType) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+
+          const title =
+            abnormalType === "high"
+              ? "High temperature alert"
+              : "Low temperature alert";
+          const body =
+            abnormalType === "high"
+              ? `Device ${packet.deviceId} detected high temperature (≥37.20℃)`
+              : `Device ${packet.deviceId} detected low temperature`;
+
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "health_alert",
+            title,
+            body,
+            metadata: {
+              kind: "temperature_abnormal",
+              deviceId: packet.deviceId,
+              abnormalType,
+              measurementType: valueSecondary,
+              raw: packet.payload,
+            },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save temperature alert notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    // Server reply: [3G*YYYYYYYYYY*0006*btemp2]
+    const reply = `[3G*${packet.deviceId}*0006*btemp2]`;
+    this.send(client, reply);
+    Logging.info(`btemp2 reply sent to device ${packet.deviceId}: ${reply}`);
   }
 
   // ───────────────────────────────────────────────────────────
@@ -2541,6 +2767,40 @@ class TcpServer {
 
   // ───────────────────────────────────────────────────────────
   // Send Scene Mode command to device
+  // ───────────────────────────────────────────────────────────
+  // Request real-time body temperature from device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send a bodytemp2 command to request a real-time temperature measurement.
+   *
+   * Protocol format: [3G*YYYYYYYYYY*0009*bodytemp2]
+   *
+   * The device will measure body temperature and reply with:
+   *   [3G*YYYYYYYYYY*LEN*bodytemp2,type,temp]
+   *
+   * @param deviceId - The device ID (e.g., 8800000015)
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public requestBodyTemperature(deviceId: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send bodytemp2 command.`
+      );
+      return false;
+    }
+
+    // "bodytemp2" is 9 characters, so LEN = 0009
+    const command = `[3G*${deviceId}*0009*bodytemp2]`;
+
+    Logging.info(`Sending bodytemp2 command to device ${deviceId}: ${command}`);
+
+    this.send(client, command);
+    return true;
+  }
+
   // ───────────────────────────────────────────────────────────
 
   /**

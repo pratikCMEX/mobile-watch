@@ -178,6 +178,15 @@ router.post(
   Device_controller.getDoNotDisturb
 );
 
+// Request real-time body temperature from device (sends bodytemp2 command)
+// The device will measure and reply with temperature data stored as HealthMetric
+router.post(
+  "/request_body_temperature",
+  checkToken,
+  ValidateJoi(Schemas.bodyTemperature.request),
+  Device_controller.requestBodyTemperature
+);
+
 router.post(
   "/add_family_member",
   checkToken,

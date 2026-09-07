@@ -685,12 +685,12 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
 
     const tcpClient = tcpServer.getDevice(serial_number);
 
-    // if (!tcpClient) {
-    //   return errorMessage(
-    //     res,
-    //     "Device is offline. Please ensure the device is connected."
-    //   );
-    // }
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
 
     const commandSent = tcpServer.sendFindCommand(serial_number);
 
@@ -2022,6 +2022,81 @@ const getDoNotDisturb = async (
   }
 };
 
+/**
+ * POST /user/device/request_body_temperature
+ *
+ * Sends a bodytemp2 command to the device to request a real-time
+ * body temperature measurement. The device will measure and reply
+ * with the temperature data, which is then stored as a HealthMetric.
+ *
+ * Body: { device_id } or { serial_number }
+ */
+const requestBodyTemperature = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number } = req.body;
+
+    let device = null;
+    if (serial_number) {
+      device = await db.Device.findOne({
+        where: { serial_number },
+      });
+    }
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const serialNumber = device.serial_number;
+
+    if (!serialNumber) {
+      return errorMessage(
+        res,
+        "Device has no serial_number. Cannot send bodytemp2 command."
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serialNumber);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot request body temperature."
+      );
+    }
+
+    // Send the bodytemp2 command to request real-time temperature measurement
+    const commandSent = tcpServer.requestBodyTemperature(serialNumber);
+
+    if (!commandSent) {
+      return errorMessage(res, "Failed to send bodytemp2 command to device");
+    }
+
+    return successMessage(
+      res,
+      "bodytemp2 command sent to device. The device will measure body temperature and respond with the reading.",
+      {
+        serial_number: serialNumber,
+        device_id: device.id,
+        device_name: device.device_name,
+        command_sent: true,
+        command_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
+        note:
+          "The device will reply with [3G*<id>*<LEN>*bodytemp2,type,temp]. " +
+          "Temperature data will be stored as a HealthMetric automatically.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("requestBodyTemperature error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error requesting body temperature: " + msg);
+  }
+};
+
 // SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
 // The `/set_sos_numbers` route now points directly at the
 // Emergency_contact controller there.
@@ -2045,4 +2120,5 @@ export default {
   setLanguageTimezone,
   setSilenceTime,
   getDoNotDisturb,
+  requestBodyTemperature,
 };
