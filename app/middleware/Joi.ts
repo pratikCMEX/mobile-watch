@@ -743,6 +743,30 @@ export const Schemas = {
   },
 
   /**
+   * Set the night power saving mode (APPLOCK command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*LEN*APPLOCK,YJ-1]
+   *                 YJ-1 = Night power saving mode ON
+   *                 YJ-0 = Night power saving mode OFF
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*APPLOCK]
+   *                 (bare ack = success)
+   */
+  nightPowerSaving: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be true or false",
+        "any.required": "enabled is required",
+      }),
+    }),
+  },
+
+  /**
    * Set the watch's language and/or time zone (LZ command).
    *
    * Per the protocol spec:

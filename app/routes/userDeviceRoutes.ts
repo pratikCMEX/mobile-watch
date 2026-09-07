@@ -196,6 +196,14 @@ router.post(
   Device_controller.setRejectStranger
 );
 
+// Set night power saving mode (APPLOCK command)
+router.post(
+  "/night_power_saving",
+  checkToken,
+  ValidateJoi(Schemas.nightPowerSaving.set),
+  Device_controller.setNightPowerSaving
+);
+
 router.post(
   "/add_family_member",
   checkToken,

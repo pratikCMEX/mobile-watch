@@ -2199,6 +2199,97 @@ const setRejectStranger = async function (
   }
 };
 
+/**
+ * POST /user/device/night_power_saving
+ *
+ * Set the night power saving mode on the device.
+ *
+ * Per the protocol spec:
+ *   Server send : [3G*YYYYYYYYYY*LEN*APPLOCK,YJ-1]
+ *                 YJ-1 = Night power saving mode ON
+ *                 YJ-0 = Night power saving mode OFF
+ *
+ *   Device reply: [3G*YYYYYYYYYY*LEN*APPLOCK]
+ *                 (bare ack = success)
+ *
+ * Body: { serial_number, enabled: true/false }
+ */
+const setNightPowerSaving = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, enabled } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (typeof enabled !== "boolean") {
+      return errorMessage(res, "enabled must be true or false");
+    }
+
+    // Find the device
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // Verify the watch is currently connected via TCP
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot send APPLOCK command."
+      );
+    }
+
+    // Send the APPLOCK command
+    const commandSent = tcpServer.sendAppLockCommand(serial_number, enabled);
+
+    if (!commandSent) {
+      return errorMessage(res, "Failed to send APPLOCK command to device");
+    }
+
+    // Update the device settings in the database
+    const deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (deviceSetting) {
+      await deviceSetting.update({
+        night_power_saving: enabled ? "1" : "0",
+      });
+    }
+
+    return successMessage(
+      res,
+      enabled
+        ? "Night power saving mode enabled."
+        : "Night power saving mode disabled.",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        enabled,
+        command_sent: true,
+        command_protocol: `[3G*${serial_number}*LEN*APPLOCK,${
+          enabled ? "YJ-1" : "YJ-0"
+        }]`,
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("setNightPowerSaving error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error setting night power saving: " + msg);
+  }
+};
+
 // SOS-number logic has moved to `controllers/user/Emergency_contact.ts`.
 // The `/set_sos_numbers` route now points directly at the
 // Emergency_contact controller there.
@@ -2224,4 +2315,5 @@ export default {
   getDoNotDisturb,
   requestBodyTemperature,
   setRejectStranger,
+  setNightPowerSaving,
 };

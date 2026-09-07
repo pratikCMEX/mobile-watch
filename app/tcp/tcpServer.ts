@@ -708,6 +708,10 @@ class TcpServer {
         this.handleDevRefusePhoneSwitchResponse(client, parsed);
         break;
 
+      case "APPLOCK":
+        this.handleAppLockResponse(client, parsed);
+        break;
+
       case "FALLDOWN":
         this.handleFallDownResponse(client, parsed);
         break;
@@ -3828,6 +3832,85 @@ class TcpServer {
 
     Logging.info(
       `Sending DEVREFUSEPHONESWITCH command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // APPLOCK - Night Power Saving Mode (APPLOCK command)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle an APPLOCK response from the device.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*APPLOCK,YJ-1]
+   *                 YJ-1 = Night power saving mode ON
+   *                 YJ-0 = Night power saving mode OFF
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*APPLOCK]
+   *                 (bare ack = success)
+   */
+  private handleAppLockResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `APPLOCK response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from APPLOCK: ${error.message}`
+      )
+    );
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Night Power Saving Mode (APPLOCK) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send an APPLOCK command to enable/disable Night Power Saving Mode.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*APPLOCK,YJ-1]
+   *                 YJ-1 = Night power saving mode ON
+   *                 YJ-0 = Night power saving mode OFF
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*APPLOCK]
+   *                 (bare ack = success)
+   *
+   * @param deviceId - The device ID (e.g., 8800000015)
+   * @param enabled - true to enable night power saving, false to disable
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendAppLockCommand(deviceId: string, enabled: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send APPLOCK command.`
+      );
+      return false;
+    }
+
+    const switchState = enabled ? "YJ-1" : "YJ-0";
+    const content = `APPLOCK,${switchState}`;
+    // LEN is the UTF-8 byte length of `content` padded to 4 hex chars.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending APPLOCK command to device ${deviceId} ` +
         `(enabled=${enabled}): ${command}`
     );
 
