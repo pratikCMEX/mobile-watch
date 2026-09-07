@@ -242,10 +242,12 @@ const sendVoiceMessage = async function (
   req: Request,
   res: Response,
   next: NextFunction
-) => {
+) {
   try {
     const { serial_number } = req.body;
-    const voiceFile = req.file;
+    const files = (req as any).files as { [fieldname: string]: any[] };
+
+    const voiceFile = files?.voice_file?.[0]?.filename ?? null;
 
     if (!serial_number) {
       return errorMessage(res, "serial_number is required");
