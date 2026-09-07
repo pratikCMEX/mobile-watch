@@ -141,11 +141,16 @@ export const Schemas = {
         "string.empty": "reminder_settings is required",
         "any.required": "reminder_settings is required",
       }),
-      number: Joi.number().integer().min(1).max(3).required().messages({
-        "number.min": "number must be >= 1",
-        "number.max": "number must be <= 3 (max 3 reminders)",
-        "any.required": "number is required",
-      }),
+      number: Joi.number()
+        .integer()
+        .min(1)
+        .max(3)
+        .optional()
+        .default(1)
+        .messages({
+          "number.min": "number must be >= 1",
+          "number.max": "number must be <= 3 (max 3 reminders)",
+        }),
       reminder_text: Joi.string().optional().allow(""),
     }),
     listUnlinked: Joi.object({
