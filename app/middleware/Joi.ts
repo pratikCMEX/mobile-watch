@@ -152,6 +152,7 @@ export const Schemas = {
           "number.max": "number must be <= 3 (max 3 reminders)",
         }),
       reminder_text: Joi.string().optional().allow(""),
+      voice_file: Joi.any().optional(),
     }),
     listUnlinked: Joi.object({
       page: Joi.number().integer().min(1).optional().default(1),
