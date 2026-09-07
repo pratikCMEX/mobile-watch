@@ -17,6 +17,9 @@ export interface DeviceSettingAttributes {
   scene_mode: number;
   reject_stranger_enabled: string;
   upload_interval_seconds: number | null;
+  walk_time_enabled: string;
+  walk_time_sections: string[] | null;
+  walk_time_step_target: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +46,9 @@ class DeviceSetting
   public scene_mode!: number;
   public reject_stranger_enabled!: string;
   public upload_interval_seconds!: number | null;
+  public walk_time_enabled!: string;
+  public walk_time_sections!: string[] | null;
+  public walk_time_step_target!: number | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -150,6 +156,24 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         validate: {
           min: 60,
           max: 65535,
+        },
+      },
+      walk_time_enabled: {
+        type: DataTypes.ENUM("1", "0"),
+        allowNull: true,
+        defaultValue: "0",
+      },
+      walk_time_sections: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        defaultValue: null,
+      },
+      walk_time_step_target: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+        validate: {
+          min: 0,
         },
       },
 

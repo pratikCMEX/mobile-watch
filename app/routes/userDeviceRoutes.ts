@@ -227,6 +227,26 @@ router.post(
   Device_controller.setUploadInterval
 );
 
+// Configure the pedometer's walk-time (WALKTIME command).
+// Pass 1–3 HH:MM-HH:MM windows to switch the pedometer ON;
+// pass an empty array to switch it OFF. Devices ship with WALKTIME
+// OFF, so sending at least one window turns the feature on.
+router.post(
+  "/walk_time",
+  checkToken,
+  ValidateJoi(Schemas.walkTime.set),
+  Device_controller.setWalkTime
+);
+
+// Read back the persisted walk-time schedule + step target, plus
+// the latest cumulative / daily step counts as reported by the watch.
+router.post(
+  "/get_walk_time",
+  checkToken,
+  ValidateJoi(Schemas.walkTime.get),
+  Device_controller.getWalkTime
+);
+
 router.post(
   "/add_family_member",
   checkToken,

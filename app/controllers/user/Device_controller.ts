@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from "express";
+import { Op } from "sequelize";
 import db from "../../models";
 import {
   errorMessage,
@@ -120,6 +121,9 @@ const updateDeviceSettings = async function (
         scene_mode: scene_mode ?? 1,
         reject_stranger_enabled: "0",
         upload_interval_seconds: null,
+        walk_time_enabled: "0",
+        walk_time_sections: [],
+        walk_time_step_target: null,
       });
     } else {
       if (sms_alert_enabled !== undefined)
@@ -370,6 +374,11 @@ const getDeviceSettings = async (
         // Dynamic-state upload time interval (UPLOAD command).
         // Stored in seconds to match the wire protocol exactly.
         upload_interval_seconds: deviceSetting.upload_interval_seconds ?? null,
+        // Pedometer / walk-time (WALKTIME command). Devices ship
+        // with this feature OFF.
+        walk_time_enabled: deviceSetting.walk_time_enabled === "1",
+        walk_time_sections: deviceSetting.walk_time_sections ?? [],
+        walk_time_step_target: deviceSetting.walk_time_step_target ?? null,
         // Locale (last-known values sent to the device via LZ command)
         language: device.language,
         timezone: device.timezone,
@@ -2494,6 +2503,9 @@ const setUploadInterval = async function (
         scene_mode: 1,
         reject_stranger_enabled: "0",
         upload_interval_seconds: interval_seconds,
+        walk_time_enabled: "0",
+        walk_time_sections: [],
+        walk_time_step_target: null,
       });
     } else {
       deviceSetting.upload_interval_seconds = interval_seconds;
@@ -2531,6 +2543,321 @@ const setUploadInterval = async function (
   }
 };
 
+/**
+ * POST /user/device/walk_time
+ *
+ * Configure the pedometer's "walk time" (WALKTIME command) on the
+ * device.
+ *
+ * Per the protocol spec:
+ *   Server send : [3G*YYYYYYYYYY*LEN*WALKTIME,t1,t2,t3]
+ *                 Example: [3G*5678901234*002A*WALKTIME,8:10-9:30,10:10-11:30,12:10-13:30]
+ *
+ *   Device reply: [3G*YYYYYYYYYY*LEN*WALKTIME]
+ *                 (bare ack = device accepted the new schedule)
+ *
+ * Notes:
+ *   - All devices ship with WALKTIME OFF. Pass 1–3 HH:MM-HH:MM
+ *     windows to switch the pedometer ON; pass an empty array to
+ *     switch it back OFF.
+ *   - The device tracks BOTH a daily step count (resets at midnight)
+ *     AND a cumulative total (never resets). The firmware only
+ *     reports the cumulative total; the server derives the daily
+ *     count from that stream. `step_target` is server-side only and
+ *     lets the app display progress against the user's personal
+ *     physical-activity goal.
+ *
+ * Body:
+ *   {
+ *     serial_number: "5678901234",
+ *     sections:      ["08:10-09:30", "10:10-11:30", "12:10-13:30"],
+ *     step_target:   8000          // optional, server-side only
+ *   }
+ */
+const setWalkTime = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number } = req.body;
+    const sections: string[] = Array.isArray(req.body.sections)
+      ? req.body.sections
+      : [];
+    const stepTargetRaw = req.body.step_target;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (sections.length > 3) {
+      return errorMessage(
+        res,
+        "sections must contain at most 3 entries (max 3 walk-time windows)"
+      );
+    }
+
+    // Find the device
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // Verify the watch is currently connected via TCP
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot send WALKTIME command."
+      );
+    }
+
+    // Send the WALKTIME command. tcpServer does additional validation
+    // (HH:MM-HH:MM format, start<end) and returns false on rejection.
+    const commandSent = tcpServer.sendWalkTimeCommand(serial_number, sections);
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send WALKTIME command. Each section must be HH:MM-HH:MM (24h, start<end, max 3 sections)."
+      );
+    }
+
+    // Mirror to the server-side DeviceSetting row so the app can
+    // always show the current schedule + step target.
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
+        fall_down_level: 5,
+        scene_mode: 1,
+        reject_stranger_enabled: "0",
+        upload_interval_seconds: null,
+        walk_time_enabled: sections.length > 0 ? "1" : "0",
+        walk_time_sections: sections,
+        walk_time_step_target:
+          stepTargetRaw === undefined || stepTargetRaw === null
+            ? null
+            : Math.max(0, Math.floor(Number(stepTargetRaw))),
+      });
+    } else {
+      deviceSetting.walk_time_enabled = sections.length > 0 ? "1" : "0";
+      deviceSetting.walk_time_sections = sections;
+      if (stepTargetRaw !== undefined && stepTargetRaw !== null) {
+        deviceSetting.walk_time_step_target = Math.max(
+          0,
+          Math.floor(Number(stepTargetRaw))
+        );
+      }
+      await deviceSetting.save();
+    }
+
+    const commandProtocol =
+      sections.length === 0
+        ? `[3G*${serial_number}*0008*WALKTIME]`
+        : `[3G*${serial_number}*LEN*WALKTIME,${sections.join(",")}]`;
+
+    return successMessage(
+      res,
+      sections.length === 0
+        ? "Walk-time disabled. Pedometer switched OFF."
+        : "Walk-time updated. Pedometer enabled for the configured windows.",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        walk_time_enabled: sections.length > 0,
+        walk_time_sections: sections,
+        walk_time_step_target: deviceSetting.walk_time_step_target ?? null,
+        device_setting_id: deviceSetting.id,
+        command_sent: true,
+        command_protocol: commandProtocol,
+        note:
+          "The device tracks BOTH a daily step count (reset at midnight) " +
+          "AND a cumulative total (never reset). The firmware reports the " +
+          "cumulative total; the server derives the daily count from " +
+          "that stream and can compare it against walk_time_step_target " +
+          "for in-app progress.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("setWalkTime error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error setting walk-time: " + msg);
+  }
+};
+
+/**
+ * POST /user/device/get_walk_time
+ *
+ * Read back the persisted walk-time schedule + step target, AND
+ * the latest cumulative / daily step counts as reported by the
+ * device's HealthMetric stream.
+ *
+ * Body: { serial_number }
+ */
+const getWalkTime = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Pull the persisted schedule (creates a default OFF row if missing)
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
+        fall_down_level: 5,
+        scene_mode: 1,
+        reject_stranger_enabled: "0",
+        upload_interval_seconds: null,
+        walk_time_enabled: "0",
+        walk_time_sections: [],
+        walk_time_step_target: null,
+      });
+    }
+
+    // ── Latest cumulative / daily step counts from HealthMetric ──
+    // The device reports the CUMULATIVE total (metric_type =
+    // 'steps_cumulative'); we ALSO compute the daily count from
+    // any 'steps_daily' rows that have been uploaded.
+    const latestCumulative: any = await db.HealthMetric.findOne({
+      where: {
+        device_id: device.id,
+        metric_type: "steps_cumulative",
+      },
+      order: [["recorded_at", "DESC"]],
+    });
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todaysDaily: any = await db.HealthMetric.findAll({
+      where: {
+        device_id: device.id,
+        metric_type: "steps_daily",
+        recorded_at: { [Op.gte]: todayStart },
+      },
+      order: [["recorded_at", "DESC"]],
+    });
+
+    // The simplest server-side "steps today" derivation: subtract
+    // the earliest cumulative value today from the latest one today.
+    // If the user is brand-new there may be no rows at all today; we
+    // fall back to the latest daily value or 0.
+    const earliestCumToday: any = await db.HealthMetric.findOne({
+      where: {
+        device_id: device.id,
+        metric_type: "steps_cumulative",
+        recorded_at: { [Op.gte]: todayStart },
+      },
+      order: [["recorded_at", "ASC"]],
+    });
+
+    let stepsToday = 0;
+    if (
+      latestCumulative &&
+      earliestCumToday &&
+      Number(earliestCumToday.value_primary) > 0
+    ) {
+      stepsToday = Math.max(
+        0,
+        Number(latestCumulative.value_primary) -
+          Number(earliestCumToday.value_primary)
+      );
+    } else if (todaysDaily.length > 0) {
+      // Fallback: take the most recent daily row that the firmware
+      // explicitly reported.
+      stepsToday = Number(todaysDaily[0].value_primary);
+    }
+
+    const stepTarget = deviceSetting.walk_time_step_target ?? 0;
+    const progressPercent =
+      stepTarget > 0
+        ? Math.min(100, Math.round((stepsToday / stepTarget) * 100))
+        : null;
+
+    return successMessage(
+      res,
+      "Walk-time settings and step stats fetched successfully",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        walk_time: {
+          enabled: deviceSetting.walk_time_enabled === "1",
+          sections: deviceSetting.walk_time_sections ?? [],
+          step_target: stepTarget,
+        },
+        steps: {
+          cumulative_total: latestCumulative
+            ? Number(latestCumulative.value_primary)
+            : null,
+          cumulative_last_reported_at: latestCumulative
+            ? latestCumulative.recorded_at
+            : null,
+          today: stepsToday,
+          target: stepTarget,
+          progress_percent: progressPercent,
+          note:
+            "The device only reports the cumulative total. `today` is " +
+            "derived server-side as (latest_cumulative - earliest_cumulative " +
+            "since 00:00 local). Compare against `target` to show " +
+            "progress bars in your app.",
+        },
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("getWalkTime error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error fetching walk-time: " + msg);
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -2555,4 +2882,6 @@ export default {
   setNightPowerSaving,
   voiceMonitor,
   setUploadInterval,
+  setWalkTime,
+  getWalkTime,
 };

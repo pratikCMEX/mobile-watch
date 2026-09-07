@@ -712,6 +712,10 @@ class TcpServer {
         this.handleUploadResponse(client, parsed);
         break;
 
+      case "WALKTIME":
+        this.handleWalkTimeResponse(client, parsed);
+        break;
+
       case "DEVREFUSEPHONESWITCH":
         this.handleDevRefusePhoneSwitchResponse(client, parsed);
         break;
@@ -3977,6 +3981,166 @@ class TcpServer {
     Logging.info(
       `Sending UPLOAD command to device ${deviceId} ` +
         `(interval=${n}s): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // WALKTIME - Pedometer / step-counting time sections
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle a WALKTIME response from the device.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*WALKTIME,t1,t2,t3]
+   *                 Example: [3G*5678901234*002A*WALKTIME,8:10-9:30,10:10-11:30,12:10-13:30]
+   *                 (comma-separated HH:MM-HH:MM ranges, 1–3 sections)
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*WALKTIME]
+   *                 Example: [3G*5678901234*0008*WALKTIME]
+   *                 (bare ack = device accepted the new schedule)
+   *
+   * Note: By default all devices ship with WALKTIME OFF. You must
+   * send this command to switch the pedometer ON for any desired
+   * time window. Pass an empty array (or omit sections) to switch
+   * the pedometer OFF again.
+   *
+   * Semantics:
+   *   The device records two step counters:
+   *     - steps per day (resets every day)
+   *     - cumulative total steps (never resets)
+   *   The watch reports the CUMULATIVE total only; the server must
+   *   derive the daily count by subtracting the value at the start
+   *   of the day.
+   */
+  private handleWalkTimeResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `WALKTIME response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from WALKTIME: ${error.message}`
+      )
+    );
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send WALKTIME command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Validate a single time-section string in HH:MM-HH:MM format.
+   * Returns the normalised string (e.g. "08:10-09:30") on success,
+   * null on failure.
+   */
+  private normaliseWalkTimeSection(input: string): string | null {
+    const trimmed = (input || "").trim();
+    if (!trimmed) return null;
+    const m = trimmed.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const sh = Number(m[1]);
+    const sm = Number(m[2]);
+    const eh = Number(m[3]);
+    const em = Number(m[4]);
+    if (
+      !Number.isFinite(sh) ||
+      !Number.isFinite(sm) ||
+      !Number.isFinite(eh) ||
+      !Number.isFinite(em)
+    ) {
+      return null;
+    }
+    if (sh < 0 || sh > 23 || eh < 0 || eh > 23) return null;
+    if (sm < 0 || sm > 59 || em < 0 || em > 59) return null;
+    // Allow equal times (zero-length window) only if both endpoints
+    // match exactly, otherwise enforce start < end.
+    if (sh * 60 + sm >= eh * 60 + em) return null;
+    const fmt = (h: number, mn: number) =>
+      `${String(h).padStart(2, "0")}:${String(mn).padStart(2, "0")}`;
+    return `${fmt(sh, sm)}-${fmt(eh, em)}`;
+  }
+
+  /**
+   * Send a WALKTIME command to the device.
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*<id>*LEN*WALKTIME,t1,t2,t3]
+   *                 Example: [3G*5678901234*002A*WALKTIME,8:10-9:30,10:10-11:30,12:10-13:30]
+   *
+   *   Device reply: [3G*<id>*LEN*WALKTIME]
+   *                 (bare ack = success)
+   *
+   * Pass 0–3 sections. 0 sections = pedometer switched OFF.
+   * 1–3 sections = pedometer switched ON, only counting steps
+   * during those time windows.
+   *
+   * Each section must be in HH:MM-HH:MM format (24h), with
+   * 00:00 ≤ start < end ≤ 23:59.
+   *
+   * @param deviceId  The device ID
+   * @param sections  0–3 strings in HH:MM-HH:MM format
+   * @returns true if the command was sent; false on validation
+   *          failure or if the device is not connected.
+   */
+  public sendWalkTimeCommand(deviceId: string, sections: string[]): boolean {
+    const client = this.devices.get(deviceId);
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send WALKTIME command.`
+      );
+      return false;
+    }
+
+    if (!Array.isArray(sections)) {
+      Logging.error(
+        `Refusing to send WALKTIME to device ${deviceId}: sections must be an array.`
+      );
+      return false;
+    }
+
+    if (sections.length > 3) {
+      Logging.error(
+        `Refusing to send WALKTIME to device ${deviceId}: ` +
+          `got ${sections.length} sections, max 3 allowed.`
+      );
+      return false;
+    }
+
+    const normalised: string[] = [];
+    for (const s of sections) {
+      const n = this.normaliseWalkTimeSection(s);
+      if (!n) {
+        Logging.error(
+          `Refusing to send WALKTIME to device ${deviceId}: ` +
+            `invalid section "${s}". Expected HH:MM-HH:MM (24h, start<end).`
+        );
+        return false;
+      }
+      normalised.push(n);
+    }
+
+    const content =
+      normalised.length === 0 ? `WALKTIME` : `WALKTIME,${normalised.join(",")}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending WALKTIME command to device ${deviceId} ` +
+        `(sections=${JSON.stringify(normalised)}): ${command}`
     );
 
     this.send(client, command);

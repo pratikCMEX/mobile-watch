@@ -843,6 +843,72 @@ export const Schemas = {
   },
 
   /**
+   * Walk-time / Pedometer (WALKTIME command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*LEN*WALKTIME,t1,t2,t3]
+   *                 Example: [3G*5678901234*002A*WALKTIME,8:10-9:30,10:10-11:30,12:10-13:30]
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*WALKTIME]
+   *                 (bare ack = success)
+   *
+   * Pass an empty `sections` array to switch the pedometer OFF.
+   * Pass 1–3 HH:MM-HH:MM strings to switch it ON for those windows.
+   *
+   * Devices ship with this feature OFF — send this command to enable it.
+   *
+   * The `step_target` field is server-side only (the firmware does
+   * not use it); it lets the app display progress against the user's
+   * personal daily physical-activity goal.
+   */
+  walkTime: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      sections: Joi.array()
+        .items(
+          Joi.string()
+            .pattern(
+              /^([01]?\d|2[0-3]):[0-5]\d\s*-\s*([01]?\d|2[0-3]):[0-5]\d$/
+            )
+            .messages({
+              "string.pattern.base":
+                'Each section must be in HH:MM-HH:MM format (24h, e.g. "08:10-09:30")',
+            })
+        )
+        .max(3)
+        .default([])
+        .messages({
+          "array.max": "At most 3 walk-time sections are allowed",
+        }),
+      step_target: Joi.number()
+        .integer()
+        .min(0)
+        .max(1_000_000)
+        .optional()
+        .messages({
+          "number.base": "step_target must be an integer (no decimals)",
+          "number.integer": "step_target must be an integer",
+          "number.min": "step_target must be 0 or positive",
+          "number.max": "step_target is unreasonably large",
+        }),
+    }),
+
+    /**
+     * GET /user/device/walk_time — read the persisted walk-time
+     * schedule and the latest server-side step stats for the device.
+     */
+    get: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+    }),
+  },
+
+  /**
    * Set the watch's language and/or time zone (LZ command).
    *
    * Per the protocol spec:
