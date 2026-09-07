@@ -685,12 +685,12 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
 
     const tcpClient = tcpServer.getDevice(serial_number);
 
-    if (!tcpClient) {
-      return errorMessage(
-        res,
-        "Device is offline. Please ensure the device is connected."
-      );
-    }
+    // if (!tcpClient) {
+    //   return errorMessage(
+    //     res,
+    //     "Device is offline. Please ensure the device is connected."
+    //   );
+    // }
 
     const commandSent = tcpServer.sendFindCommand(serial_number);
 
