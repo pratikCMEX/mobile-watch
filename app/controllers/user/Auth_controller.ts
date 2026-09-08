@@ -6,7 +6,7 @@ import { Op } from "sequelize";
 import { generateAuthToken, deleteFile } from "../../helper/Helper";
 const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, fcm_token } = req.body;
 
     if (!email || !password) {
       return errorMessage(res, "Email and password are required", 400);
@@ -29,6 +29,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     const token = await generateAuthToken(user);
 
     user.session_token = token;
+    user.fcm_token = fcm_token;
     await user.save();
 
     const userData = user.toJSON();

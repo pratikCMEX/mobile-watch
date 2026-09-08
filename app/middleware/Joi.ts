@@ -39,6 +39,7 @@ export const Schemas = {
   login: Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().required(),
+    fcm_token: Joi.string().optional().allow(""),
   }),
   user: {
     create: Joi.object({
