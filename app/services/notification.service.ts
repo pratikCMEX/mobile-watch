@@ -1,7 +1,8 @@
-import admin from "../config/firebase";
 import db from "../models";
 import Logging from "../library/Logging";
+import { messaging } from "../config/firebase";
 
+// firebase-admin v14 is ESM-only; require() directly to avoid CJS interop issues.
 /**
  * Notification types supported by the watch / server.
  */
@@ -70,6 +71,25 @@ export const createNotification = async (
 };
 
 /**
+ * Convert all values in a metadata object to strings.
+ *
+ * Firebase Cloud Messaging requires every value in the `data` payload to be
+ * a string. Non-string values (booleans, numbers, objects) will cause the
+ * send request to fail with a validation error.
+ */
+const stringifyMetadata = (
+  metadata: Record<string, any> | undefined
+): Record<string, string> => {
+  if (!metadata) return {};
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value === null || value === undefined) continue;
+    result[key] = typeof value === "string" ? value : JSON.stringify(value);
+  }
+  return result;
+};
+
+/**
  * Push a notification to a specific user's FCM tokens.
  */
 export const pushToUser = async (
@@ -92,17 +112,17 @@ export const pushToUser = async (
 
   const tokens = [user.fcm_token];
 
-  const response = await (admin as any).messaging().sendEachForMulticast({
+  const response = await messaging().sendEachForMulticast({
     tokens,
-    notification: { title: data.title, body: data.body },
+    // notification: { title: data.title, body: data.body },
     android: {
       priority: "high",
-      notification: {
-        sound: "default",
-        channelId: "default_channel",
-        icon: "@drawable/ic_notification",
-        color: "#FF0000",
-      },
+      // notification: {
+      //   sound: "default",
+      //   channelId: "default_channel",
+      //   icon: "@drawable/ic_notification",
+      //   color: "#FF0000",
+      // },
     },
     apns: {
       payload: {
@@ -120,11 +140,12 @@ export const pushToUser = async (
       },
     },
     data: {
-      type: "body_temp",
+      type: data.type,
       title: data.title,
       body: data.body,
       channelId: "default_channel",
-      ...data.metadata,
+
+      ...stringifyMetadata(data.metadata),
     },
   });
 

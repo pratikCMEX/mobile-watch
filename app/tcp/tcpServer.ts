@@ -345,12 +345,59 @@ class TcpServer {
      * Therefore we keep a persistent buffer.
      */
     let buffer = "";
+    let lastProgressAt = Date.now();
+    let warnedBufferCap = false;
+
+    /**
+     * Defensive guard: if a single connection's incomplete-packet
+     * buffer grows without bound (malformed firmware, a protocol
+     * variant that never closes its brackets, or binary noise), the
+     * old code silently swallowed it forever and produced NO log at
+     * all — indistinguishable from "the device isn't sending".
+     *
+     * Two cheap safeguards make this visible instead:
+     *   1. A hard cap on the buffer; once exceeded we log a warning
+     *      (once per connection) and drop the oldest excess bytes so
+     *      the buffer cannot grow to OOM the process.
+     *   2. A "no progress" timer: if a connection sends data but
+     *      never completes a single packet for a window, warn.
+     */
+    const MAX_INCOMPLETE_BUFFER = 4 * 1024 * 1024; // 4 MiB
+    const NO_PROGRESS_MS = 30_000; // 30 s
+    const noProgressTimer = setInterval(() => {
+      if (buffer.length > 0 && Date.now() - lastProgressAt > NO_PROGRESS_MS) {
+        Logging.warn(
+          `[TCP] No progress on ${connectionId} for ${
+            NO_PROGRESS_MS / 1000
+          }s ` +
+            `with ${buffer.length} buffered byte(s) awaiting a closing ']'. ` +
+            `Device may be sending malformed/non-protocol data.`
+        );
+      }
+    }, 5_000);
 
     socket.on("data", (data: Buffer) => {
       try {
         // Use latin1 encoding to preserve binary data (JPEG images)
         // utf8 would corrupt bytes that are not valid UTF-8 sequences
         buffer += data.toString("latin1");
+        lastProgressAt = Date.now();
+
+        // Cap the buffer so a misbehaving connection cannot grow it
+        // without bound. We keep the tail (most recent data) since a
+        // complete packet always ends with "]".
+        if (buffer.length > MAX_INCOMPLETE_BUFFER) {
+          if (!warnedBufferCap) {
+            warnedBufferCap = true;
+            Logging.warn(
+              `[TCP] Incomplete-packet buffer cap exceeded on ` +
+                `${connectionId}: ${buffer.length} bytes (cap ${MAX_INCOMPLETE_BUFFER}). ` +
+                `Dropping oldest excess bytes; device may be sending ` +
+                `malformed/non-protocol data.`
+            );
+          }
+          buffer = buffer.slice(buffer.length - MAX_INCOMPLETE_BUFFER);
+        }
 
         const packets = this.extractPackets(buffer);
 
@@ -387,6 +434,8 @@ class TcpServer {
     });
 
     socket.on("close", () => {
+      clearInterval(noProgressTimer);
+
       this.removeClient(client);
 
       if (client.deviceId) {
