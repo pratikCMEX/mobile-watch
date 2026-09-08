@@ -1,4 +1,4 @@
-import admin from "firebase-admin";
+import * as admin from "firebase-admin";
 import path from "path";
 
 const serviceAccount = require(path.join(
@@ -6,8 +6,10 @@ const serviceAccount = require(path.join(
   "../../firebase_credentials.json"
 ));
 
-admin.initializeApp({
-  credential: admin.cert(serviceAccount),
-});
+if (!admin.getApps().length) {
+  admin.initializeApp({
+    credential: admin.cert(serviceAccount),
+  });
+}
 
 export default admin;

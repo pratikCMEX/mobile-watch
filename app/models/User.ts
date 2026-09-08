@@ -12,6 +12,7 @@ export interface UserAttributes {
   country_code: string;
   session_token: string;
   profile_image?: string | null;
+  fcm_token?: string | null;
   deletedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -32,6 +33,7 @@ class User
   public country_code!: string;
   public session_token!: string;
   public profile_image?: string | null;
+  public fcm_token?: string | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public readonly deletedAt!: Date;
@@ -113,6 +115,12 @@ export default (sequelize: Sequelize, DataTypes: any) => {
           const BASE_URL = process.env.BASE_URL || "http://localhost:3001";
           return `${BASE_URL}/uploads/profile/${img}`;
         },
+      },
+      fcm_token: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: null,
+        comment: "Firebase Cloud Messaging token for push notifications",
       },
       deletedAt: {
         type: DataTypes.DATE,

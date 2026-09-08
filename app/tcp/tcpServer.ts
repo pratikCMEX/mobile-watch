@@ -3,6 +3,10 @@ import path from "path";
 import fs from "fs";
 import Logging from "../library/Logging";
 import db from "../models";
+import {
+  createNotification,
+  buildSosNotification,
+} from "../services/notification.service";
 
 // ─────────────────────────────────────────────────────────────
 // Snapshot storage (absolute path so it works regardless of CWD
@@ -704,6 +708,12 @@ class TcpServer {
         this.handleSosSmsResponse(client, parsed);
         break;
 
+      case "SOS1":
+      case "SOS2":
+      case "SOS3":
+        this.handleSosTrigger(client, parsed);
+        break;
+
       case "MONITOR":
         this.handleMonitorResponse(client, parsed);
         break;
@@ -726,6 +736,12 @@ class TcpServer {
 
       case "APPLOCK":
         this.handleAppLockResponse(client, parsed);
+        break;
+
+      case "SOS1":
+      case "SOS2":
+      case "SOS3":
+        this.handleSosTrigger(client, parsed);
         break;
 
       case "FALLDOWN":
@@ -4772,6 +4788,70 @@ class TcpServer {
         `Failed to mark device ${packet.deviceId} online from SOSSMS: ${error.message}`
       )
     );
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // SOS Trigger (SOS1 / SOS2 / SOS3)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle an SOS trigger from the device.
+   *
+   * The device sends SOS1, SOS2, or SOS3 when the user presses the
+   * SOS button.  We persist a notification and push it to the device
+   * owner via FCM.
+   *
+   * Device reply: none (fire-and-forget from the device side).
+   */
+  private handleSosTrigger(client: TcpClient, packet: ParsedPacket): void {
+    const sosSlot = packet.command; // "SOS1" | "SOS2" | "SOS3"
+    Logging.info(
+      `SOS trigger received from device ${packet.deviceId}: slot=${sosSlot} raw="${packet.raw}"`
+    );
+
+    this.findDevice(packet.deviceId)
+      .then((device) => {
+        if (!device) {
+          Logging.warn(`SOS trigger from unknown device ${packet.deviceId}`);
+          return;
+        }
+
+        const ownerId = device.owner_id;
+        if (!ownerId) {
+          Logging.warn(
+            `SOS trigger from device ${packet.deviceId} but no owner_id set`
+          );
+          return;
+        }
+
+        // Build and persist the notification.
+        const notificationPayload = buildSosNotification(device.id, sosSlot);
+
+        return createNotification({
+          ...notificationPayload,
+          user_id: ownerId,
+        });
+      })
+      .then((notification) => {
+        if (notification) {
+          Logging.info(
+            `SOS notification created for device ${packet.deviceId}: id=${notification.id}`
+          );
+        }
+      })
+      .catch((error: Error) =>
+        Logging.error(
+          `Failed to process SOS trigger for device ${packet.deviceId}: ${error.message}`
+        )
+      );
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from SOS: ${error.message}`
+      )
+    );
+
     void client;
   }
 
