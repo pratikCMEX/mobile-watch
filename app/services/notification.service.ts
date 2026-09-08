@@ -120,7 +120,7 @@ export const pushToUser = async (
       },
     },
     data: {
-      type: data.type,
+      type: "body_temp",
       title: data.title,
       body: data.body,
       channelId: "default_channel",
