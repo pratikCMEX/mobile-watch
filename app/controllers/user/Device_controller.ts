@@ -644,6 +644,86 @@ const sendDeviceCommand = async (
         commandMessage =
           "FACTORY command sent to device. The device will perform a factory reset.";
         commandProtocol = `[CS*${serial_number}*0007*FACTORY]`;
+
+        // ── Remove all device data from the database ──────────
+        // A factory reset wipes the watch clean; mirror that on the
+        // server so stale data does not linger.
+        try {
+          Logging.info(
+            `Factory reset: removing all data for device ${serial_number} (device_id: ${device.id})`
+          );
+
+          await db.DeviceSetting.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.DeviceMember.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Location.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Geofence.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.EmergencyContact.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.HealthMetric.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Snapshot.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Notification.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.DeviceSilenceTime.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.DevicePhonebook.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.DeviceAutoAnswer.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Reminder.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.FamilyMember.destroy({
+            where: { device_id: device.id },
+          });
+
+          // Finally remove the device row itself.
+          await db.Device.destroy({
+            where: { id: device.id },
+          });
+
+          Logging.info(
+            `Factory reset: all data removed for device ${serial_number}`
+          );
+        } catch (cleanupErr) {
+          console.error(
+            `Factory reset cleanup error for device ${serial_number}:`,
+            cleanupErr
+          );
+          Logging.error(
+            `Failed to cleanup device data for ${serial_number}: ${
+              (cleanupErr as Error).message
+            }`
+          );
+        }
         break;
     }
 
