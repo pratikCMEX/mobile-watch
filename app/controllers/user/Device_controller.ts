@@ -2242,6 +2242,23 @@ const setRejectStranger = async function (
       );
     }
 
+    // ── Reject stranger is only valid after SOS numbers and phone
+    //    book contacts have been preset.  Guard against enabling it
+    //    on a fresh device that has no contacts at all.
+    if (enabled) {
+      const [emergencyCount, phonebookCount] = await Promise.all([
+        db.EmergencyContact.count({ where: { device_id: device.id } }),
+        db.DevicePhonebook.count({ where: { device_id: device.id } }),
+      ]);
+
+      if (emergencyCount === 0 && phonebookCount === 0) {
+        return errorMessage(
+          res,
+          "Cannot enable reject stranger calling. Please preset SOS numbers and/or phone book contacts first."
+        );
+      }
+    }
+
     // Send the DEVREFUSEPHONESWITCH command
     const commandSent = tcpServer.sendDevRefusePhoneSwitchCommand(
       serial_number,
