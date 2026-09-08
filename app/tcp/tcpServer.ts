@@ -366,12 +366,26 @@ class TcpServer {
     const NO_PROGRESS_MS = 30_000; // 30 s
     const noProgressTimer = setInterval(() => {
       if (buffer.length > 0 && Date.now() - lastProgressAt > NO_PROGRESS_MS) {
+        // Dump the buffered bytes (hex + printable ASCII) so we can
+        // see the exact wire format the device is sending and adjust
+        // the packet parser accordingly.
+        const hex = Buffer.from(buffer, "latin1")
+          .toString("hex")
+          .match(/.{1,2}/g)!
+          .join(" ");
+        const ascii = buffer.replace(
+          /[^\x20-\x7e]/g,
+          (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, "0")}`
+        );
+
         Logging.warn(
           `[TCP] No progress on ${connectionId} for ${
             NO_PROGRESS_MS / 1000
           }s ` +
             `with ${buffer.length} buffered byte(s) awaiting a closing ']'. ` +
-            `Device may be sending malformed/non-protocol data.`
+            `Device may be sending malformed/non-protocol data.\n` +
+            `  hex:    ${hex}\n` +
+            `  ascii:  ${ascii}`
         );
       }
     }, 5_000);
