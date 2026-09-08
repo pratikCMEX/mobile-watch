@@ -1350,4 +1350,12 @@ export const Schemas = {
       is_active: Joi.boolean().required(),
     }),
   },
+  testNotification: {
+    send: Joi.object({
+      user_id: Joi.string().required().messages({
+        "string.empty": "user_id is required",
+        "any.required": "user_id is required",
+      }),
+    }),
+  },
 };
