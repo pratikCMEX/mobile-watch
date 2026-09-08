@@ -2305,6 +2305,100 @@ const setNightPowerSaving = async function (
 };
 
 /**
+ * POST /user/device/dial_lock
+ *
+ * Lock or unlock the watch dial plate.
+ *
+ * Per the protocol spec:
+ *   Server send : [3G*YYYYYYYYYY*LEN*APPLOCK,PH-1]
+ *                 PH-1 = Dial plate lock ON (user cannot dial any number)
+ *                 PH-0 = Dial plate lock OFF (user can dial numbers)
+ *
+ *   Device reply: [3G*YYYYYYYYYY*LEN*APPLOCK]
+ *                 (bare ack = success)
+ *
+ * Body: { serial_number, locked: true/false }
+ */
+const setDialLock = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, locked } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (typeof locked !== "boolean") {
+      return errorMessage(res, "locked must be true or false");
+    }
+
+    // Find the device
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // Verify the watch is currently connected via TCP
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot send APPLOCK (dial lock) command."
+      );
+    }
+
+    // Send the APPLOCK command
+    const commandSent = tcpServer.sendDialLockCommand(serial_number, locked);
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send APPLOCK (dial lock) command to device"
+      );
+    }
+
+    // Update the device settings in the database
+    const deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (deviceSetting) {
+      await deviceSetting.update({
+        dial_lock_enabled: locked ? "1" : "0",
+      });
+    }
+
+    return successMessage(
+      res,
+      locked
+        ? "Dial plate locked. User cannot dial any number."
+        : "Dial plate unlocked. User can dial numbers.",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        locked,
+        command_sent: true,
+        command_protocol: `[3G*${serial_number}*LEN*APPLOCK,${
+          locked ? "PH-1" : "PH-0"
+        }]`,
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("setDialLock error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error setting dial lock: " + msg);
+  }
+};
+
+/**
  * POST /user/device/voice_monitor
  *
  * Send a MONITOR command to request the device to call a monitor number
@@ -3083,6 +3177,7 @@ export default {
   requestBodyTemperature,
   setRejectStranger,
   setNightPowerSaving,
+  setDialLock,
   voiceMonitor,
   setUploadInterval,
   setWalkTime,

@@ -767,6 +767,30 @@ export const Schemas = {
   },
 
   /**
+   * Lock or unlock the watch dial plate (APPLOCK command).
+   *
+   * Per the protocol spec:
+   *   Server send : [3G*YYYYYYYYYY*LEN*APPLOCK,PH-1]
+   *                 PH-1 = Dial plate lock ON (user cannot dial any number)
+   *                 PH-0 = Dial plate lock OFF (user can dial numbers)
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*APPLOCK]
+   *                 (bare ack = success)
+   */
+  dialLock: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      locked: Joi.boolean().required().messages({
+        "boolean.base": "locked must be true or false",
+        "any.required": "locked is required",
+      }),
+    }),
+  },
+
+  /**
    * Voice Monitor / Listen In (MONITOR command).
    *
    * Per the protocol spec:

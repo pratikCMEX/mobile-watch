@@ -204,6 +204,14 @@ router.post(
   Device_controller.setNightPowerSaving
 );
 
+// Lock/unlock watch dial plate (APPLOCK command)
+router.post(
+  "/dial_lock",
+  checkToken,
+  ValidateJoi(Schemas.dialLock.set),
+  Device_controller.setDialLock
+);
+
 // Voice Monitor / Listen In (MONITOR command) - OPTIONAL FEATURE
 // The device will auto-dial a monitor number for voice monitoring
 // Note: Remove this feature if it is illegal in your region

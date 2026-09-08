@@ -20,6 +20,7 @@ export interface DeviceSettingAttributes {
   walk_time_enabled: string;
   walk_time_sections: string[] | null;
   walk_time_step_target: number | null;
+  dial_lock_enabled: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -49,6 +50,7 @@ class DeviceSetting
   public walk_time_enabled!: string;
   public walk_time_sections!: string[] | null;
   public walk_time_step_target!: number | null;
+  public dial_lock_enabled!: string;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -175,6 +177,12 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         validate: {
           min: 0,
         },
+      },
+      dial_lock_enabled: {
+        type: DataTypes.ENUM("1", "0"),
+        allowNull: true,
+        defaultValue: "0",
+        comment: "Watch dial plate lock (APPLOCK,PH-1=ON, PH-0=OFF)",
       },
 
       createdAt: {

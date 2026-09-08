@@ -4450,6 +4450,51 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // APPLOCK - Watch Dial Plate Lock (APPLOCK command)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send an APPLOCK command to lock/unlock the watch dial plate.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [3G*YYYYYYYYYY*LEN*APPLOCK,PH-1]
+   *                 PH-1 = Dial plate lock ON (user cannot dial any number)
+   *                 PH-0 = Dial plate lock OFF (user can dial numbers)
+   *
+   *   Device reply: [3G*YYYYYYYYYY*LEN*APPLOCK]
+   *                 (bare ack = success)
+   *
+   * @param deviceId - The device ID (e.g., 8800000015)
+   * @param locked - true to lock dial plate, false to unlock
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendDialLockCommand(deviceId: string, locked: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send APPLOCK (dial lock) command.`
+      );
+      return false;
+    }
+
+    const switchState = locked ? "PH-1" : "PH-0";
+    const content = `APPLOCK,${switchState}`;
+    // LEN is the UTF-8 byte length of `content` padded to 4 hex chars.
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending APPLOCK (dial lock) command to device ${deviceId} ` +
+        `(locked=${locked}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Send Outgoing Call (CALL) command to device
   // ───────────────────────────────────────────────────────────
 
