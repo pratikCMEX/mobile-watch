@@ -1541,6 +1541,99 @@ const setFallDownAlert = async (
 };
 
 // ────────────────────────────────────────────────────────────
+// Center Number (CENTER) — set the watch's center phone number
+// for SMS alarm alerts.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*<LEN>*CENTER,<phoneNumber>]
+//   Device reply: [CS*<id>*<LEN>*CENTER]  (bare ack = success)
+//
+// Server-side mirror: Device.center_number
+// ────────────────────────────────────────────────────────────
+
+const setCenterNumber = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, center_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (!center_number) {
+      return errorMessage(res, "center_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendCenterCommand(
+      serial_number,
+      center_number
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send CENTER command. Device may be disconnected or invalid center number."
+      );
+    }
+
+    // Mirror to the server-side Device table.
+    await device.update({
+      center_number: center_number.replace(/[^0-9]/g, ""),
+    });
+
+    const digits = center_number.replace(/[^0-9]/g, "");
+    const content = `CENTER,${digits}`;
+    const lenHex = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[CS*${serial_number}*${lenHex}*${content}]`;
+
+    Logging.info(
+      `Center number (CENTER) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, center=${digits})`
+    );
+
+    return successMessage(res, "Center number command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      center_number: digits,
+      command_sent: true,
+      command_message:
+        "CENTER command sent. Device will use this number for SMS alarm alerts.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*<LEN>*CENTER] (bare ack = success).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setCenterNumber error:", err);
+    return errorMessage(res, "Error sending center number command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
 // Low-Battery Alarm Alert (LOWBAT) — toggle the watch's
 // low-battery alarm SMS alert switch.
 //
@@ -3409,6 +3502,7 @@ export default {
   setSosSms,
   setFallDownAlert,
   setLowBatteryAlert,
+  setCenterNumber,
   setFallDownSensitivity,
   setLanguageTimezone,
   setSilenceTime,

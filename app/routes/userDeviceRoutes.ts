@@ -150,6 +150,19 @@ router.post(
   Device_controller.setLowBatteryAlert
 );
 
+// Center Number (CENTER) API — set the watch's center phone number
+// for SMS alarm alerts.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*<LEN>*CENTER,<phoneNumber>]
+//   Device reply: [CS*<id>*<LEN>*CENTER]  (bare ack = success)
+router.post(
+  "/center_number",
+  checkToken,
+  ValidateJoi(Schemas.centerNumber.set),
+  Device_controller.setCenterNumber
+);
+
 // Fall-Down Sensitivity (LSSET) API — set the watch's fall-down
 // detection sensitivity level.
 //

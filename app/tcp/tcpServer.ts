@@ -815,6 +815,10 @@ class TcpServer {
         this.handleLowBatteryResponse(client, parsed);
         break;
 
+      case "CENTER":
+        this.handleCenterResponse(client, parsed);
+        break;
+
       case "LSSET":
         this.handleLssetResponse(client, parsed);
         break;
@@ -5115,6 +5119,108 @@ class TcpServer {
         .catch((error: Error) =>
           Logging.error(
             `Failed to save low battery notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Center Number (CENTER) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Set the watch's center phone number for SMS alarm alerts.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [CS*<id>*<LEN>*CENTER,<phoneNumber>]
+   *
+   *   Device reply: [CS*<id>*<LEN>*CENTER]   (bare ack = success)
+   *
+   * The center number is the phone number that receives all SMS alarm
+   * alerts from the device (e.g., low battery, SOS, fall-down, etc.).
+   *
+   * @param deviceId   The device ID (e.g. 8800000015)
+   * @param centerNumber  Digits-only phone number (country code included)
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendCenterCommand(deviceId: string, centerNumber: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send CENTER command.`
+      );
+      return false;
+    }
+
+    // Strip any non-digit characters from the phone number.
+    const digits = centerNumber.replace(/[^0-9]/g, "");
+
+    if (digits.length < 5 || digits.length > 20) {
+      Logging.error(
+        `Invalid center number "${centerNumber}" for device ${deviceId} — must be 5–20 digits`
+      );
+      return false;
+    }
+
+    const content = `CENTER,${digits}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[CS*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending center number (CENTER) command to device ${deviceId} ` +
+        `(center=${digits}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a CENTER reply from the device.
+   *
+   * Reply shape:
+   *   [CS*<id>*<LEN>*CENTER]   bare ack → success
+   */
+  private handleCenterResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `CENTER response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+
+    // The device sends a bare ack ([CS*<id>*<LEN>*CENTER]) on
+    // success.  There is no payload to parse, but we mark the device
+    // online and create a notification so the user knows the command
+    // was acknowledged.
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from CENTER: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Center number updated",
+            body: `Device ${packet.deviceId} acknowledged center number command.`,
+            metadata: { kind: "center_number", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save center number notification for device ${packet.deviceId}: ${error.message}`
           )
         );
     }

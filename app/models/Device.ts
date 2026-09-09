@@ -42,6 +42,7 @@ export interface DeviceAttributes {
   latest_lng?: number | null;
   latest_location_at?: Date | null;
   latest_location_is_valid?: boolean | null;
+  center_number?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -88,6 +89,7 @@ class Device
   public latest_lng?: number | null;
   public latest_location_at?: Date | null;
   public latest_location_is_valid?: boolean | null;
+  public center_number?: string | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -297,6 +299,12 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.BOOLEAN,
         allowNull: true,
         defaultValue: null,
+      },
+      center_number: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        defaultValue: null,
+        comment: "Center phone number for SMS alarm alerts (CENTER command)",
       },
 
       createdAt: {

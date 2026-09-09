@@ -642,6 +642,36 @@ export const Schemas = {
   },
 
   /**
+   * Set the watch's center phone number for SMS alarm alerts (CENTER command).
+   *
+   * Per the protocol spec:
+   *   Server send : [CS*<id>*<LEN>*CENTER,<phoneNumber>]
+   *   Device reply: [CS*<id>*<LEN>*CENTER]  (bare ack = success)
+   *
+   * The center number is the phone number that receives all SMS alarm
+   * alerts from the device (e.g., low battery, SOS, fall-down, etc.).
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "center_number": "00000000000"
+   *   }
+   */
+  centerNumber: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      center_number: Joi.string().required().messages({
+        "string.empty": "center_number is required",
+        "any.required":
+          "center_number is required (digits-only phone number, 5–20 digits)",
+      }),
+    }),
+  },
+
+  /**
    * Set the watch's low-battery alarm SMS alert switch (LOWBAT command).
    *
    * Per the protocol spec:
