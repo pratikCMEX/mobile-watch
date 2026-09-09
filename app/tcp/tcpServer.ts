@@ -811,6 +811,10 @@ class TcpServer {
         this.handleFallDownResponse(client, parsed);
         break;
 
+      case "LOWBAT":
+        this.handleLowBatteryResponse(client, parsed);
+        break;
+
       case "LSSET":
         this.handleLssetResponse(client, parsed);
         break;
@@ -2440,6 +2444,7 @@ class TcpServer {
               fall_down_reminder_call: "0",
               fall_down_level: 5,
               scene_mode: profile,
+              low_battery_alert: "0",
             });
           }
         } catch (settingErr) {
@@ -5025,6 +5030,99 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Send Low-Battery Alarm (LOWBAT) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Toggle the watch's "low battery alarm SMS alert" switch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [CS*<id>*0008*LOWBAT,0]  (off, do NOT send SMS on low battery)
+   *                 [CS*<id>*0008*LOWBAT,1]  (on, send SMS on low battery)
+   *
+   *   Device reply: [CS*<id>*0006*LOWBAT]    (bare ack = success)
+   *
+   * When ON, the watch will send an SMS alert when the battery level
+   * drops below a threshold. When OFF, no SMS is sent.
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param enabled   true = send SMS on low battery, false = do NOT send
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendLowBatteryCommand(deviceId: string, enabled: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send LOWBAT command.`
+      );
+      return false;
+    }
+
+    // Content is exactly "LOWBAT,0" or "LOWBAT,1" — 8 chars.
+    const flag = enabled ? "1" : "0";
+    const command = `[CS*${deviceId}*0008*LOWBAT,${flag}]`;
+
+    Logging.info(
+      `Sending low-battery alarm (LOWBAT) command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a LOWBAT reply from the device.
+   *
+   * Reply shapes:
+   *   [CS*<id>*0006*LOWBAT]            bare ack → success
+   *   [CS*<id>*0008*LOWBAT,0]          failure (some firmwares)
+   *   [CS*<id>*0008*LOWBAT,1]          explicit success (some firmwares)
+   */
+  private handleLowBatteryResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `LOWBAT response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from LOWBAT: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Low battery alert updated",
+            body: `Device ${packet.deviceId} acknowledged low battery alert command.`,
+            metadata: { kind: "low_battery", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save low battery notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Send Fall-Down Sensitivity (LSSET) command to device
   // ───────────────────────────────────────────────────────────
 
@@ -5133,6 +5231,7 @@ class TcpServer {
                   fall_down_reminder_call: "0",
                   fall_down_level: levelNum,
                   scene_mode: 1,
+                  low_battery_alert: "0",
                 });
               }
               setting.fall_down_level = levelNum;

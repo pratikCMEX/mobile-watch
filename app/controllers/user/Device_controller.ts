@@ -54,6 +54,7 @@ const updateDeviceSettings = async function (
       fall_down_reminder_call,
       fall_down_level,
       scene_mode,
+      low_battery_alert,
     } = req.body;
 
     if (!device_id) {
@@ -124,6 +125,7 @@ const updateDeviceSettings = async function (
         walk_time_enabled: "0",
         walk_time_sections: [],
         walk_time_step_target: null,
+        low_battery_alert: low_battery_alert ?? "0",
       });
     } else {
       if (sms_alert_enabled !== undefined)
@@ -148,11 +150,13 @@ const updateDeviceSettings = async function (
       if (fall_down_level !== undefined)
         deviceSetting.fall_down_level = Number(fall_down_level);
       if (scene_mode !== undefined) deviceSetting.scene_mode = scene_mode;
+      if (low_battery_alert !== undefined)
+        deviceSetting.low_battery_alert = low_battery_alert;
 
       await deviceSetting.save();
     }
 
-    // ── Push fall-down settings to the device via TCP ───────
+    // ── Push settings to the device via TCP ──────────────────
     // Only attempt if the device has a serial_number and is
     // currently connected via TCP.
     const tcpCommands: string[] = [];
@@ -211,6 +215,21 @@ const updateDeviceSettings = async function (
             );
           }
         }
+
+        // Send LOWBAT command if low battery alert switch changed
+        if (low_battery_alert !== undefined) {
+          const lowBatEnabled = low_battery_alert === "1";
+          const sent = tcpServer.sendLowBatteryCommand(
+            device.serial_number,
+            lowBatEnabled
+          );
+          if (sent) {
+            const flag = lowBatEnabled ? "1" : "0";
+            tcpCommands.push(
+              `[CS*${device.serial_number}*0008*LOWBAT,${flag}]`
+            );
+          }
+        }
       }
     }
 
@@ -222,13 +241,14 @@ const updateDeviceSettings = async function (
         ...deviceSetting.toJSON(),
         fall_down_alert_enabled: deviceSetting.fall_down_alert_enabled === "1",
         fall_down_reminder_call: deviceSetting.fall_down_reminder_call === "1",
+        low_battery_alert: deviceSetting.low_battery_alert === "1",
       },
     };
 
     if (tcpCommands.length > 0) {
       response.tcp_commands_sent = tcpCommands;
       response.command_message =
-        "Fall-down settings pushed to device via TCP. Device will acknowledge.";
+        "Settings pushed to device via TCP. Device will acknowledge.";
     } else if (device.serial_number) {
       response.command_message =
         "Device is not connected via TCP. Settings saved to database only. They will be applied when the device reconnects.";
@@ -342,6 +362,7 @@ const getDeviceSettings = async (
         fall_down_reminder_call: "0",
         fall_down_level: 5,
         scene_mode: 1,
+        low_battery_alert: "0",
       });
     }
 
@@ -379,6 +400,8 @@ const getDeviceSettings = async (
         walk_time_enabled: deviceSetting.walk_time_enabled === "1",
         walk_time_sections: deviceSetting.walk_time_sections ?? [],
         walk_time_step_target: deviceSetting.walk_time_step_target ?? null,
+        // Low battery alarm SMS alert (LOWBAT command)
+        low_battery_alert: deviceSetting.low_battery_alert === "1",
         // Locale (last-known values sent to the device via LZ command)
         language: device.language,
         timezone: device.timezone,
@@ -1476,6 +1499,7 @@ const setFallDownAlert = async (
         fall_down_reminder_call: callCenter ? "1" : "0",
         fall_down_level: 5,
         scene_mode: 1,
+        low_battery_alert: "0",
       });
     } else {
       deviceSetting.fall_down_alert_enabled = alertEnabled ? "1" : "0";
@@ -1513,6 +1537,120 @@ const setFallDownAlert = async (
   } catch (err) {
     console.error("setFallDownAlert error:", err);
     return errorMessage(res, "Error sending fall-down alarm command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// Low-Battery Alarm Alert (LOWBAT) — toggle the watch's
+// low-battery alarm SMS alert switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*LOWBAT,0]  (off, do NOT send SMS on low battery)
+//                 [CS*<id>*0008*LOWBAT,1]  (on, send SMS on low battery)
+//   Device reply: [CS*<id>*0006*LOWBAT]    (bare ack = success)
+//
+// Server-side mirror: DeviceSetting.low_battery_alert
+// ────────────────────────────────────────────────────────────
+
+const setLowBatteryAlert = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, enabled } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const alertEnabled = Boolean(enabled);
+
+    const commandSent = tcpServer.sendLowBatteryCommand(
+      serial_number,
+      alertEnabled
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send LOWBAT command. Device may be disconnected."
+      );
+    }
+
+    // Mirror to the server-side DeviceSetting table.
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
+        fall_down_level: 5,
+        scene_mode: 1,
+        low_battery_alert: alertEnabled ? "1" : "0",
+      });
+    } else {
+      deviceSetting.low_battery_alert = alertEnabled ? "1" : "0";
+      await deviceSetting.save();
+    }
+
+    const flag = alertEnabled ? "1" : "0";
+    const content = `LOWBAT,${flag}`;
+    const lenHex = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[CS*${serial_number}*${lenHex}*${content}]`;
+
+    Logging.info(
+      `Low-battery alarm (LOWBAT) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, enabled=${alertEnabled})`
+    );
+
+    return successMessage(res, "Low-battery alarm command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      enabled: alertEnabled,
+      command_sent: true,
+      command_message: alertEnabled
+        ? "LOWBAT ON command sent. Device will send an SMS alert when battery is low."
+        : "LOWBAT OFF command sent. Device will NOT send an SMS alert on low battery.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*0006*LOWBAT] (bare ack = success).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setLowBatteryAlert error:", err);
+    return errorMessage(res, "Error sending low-battery alarm command");
   }
 };
 
@@ -1616,6 +1754,7 @@ const setFallDownSensitivity = async (
         fall_down_reminder_call: "0",
         fall_down_level: levelNum,
         scene_mode: 1,
+        low_battery_alert: "0",
       });
     } else {
       deviceSetting.fall_down_level = levelNum;
@@ -2697,6 +2836,7 @@ const setUploadInterval = async function (
         walk_time_enabled: "0",
         walk_time_sections: [],
         walk_time_step_target: null,
+        low_battery_alert: "0",
       });
     } else {
       deviceSetting.upload_interval_seconds = interval_seconds;
@@ -2948,6 +3088,7 @@ const getWalkTime = async function (
         walk_time_enabled: "0",
         walk_time_sections: [],
         walk_time_step_target: null,
+        low_battery_alert: "0",
       });
     }
 
@@ -3267,6 +3408,7 @@ export default {
   makeOutgoingCall,
   setSosSms,
   setFallDownAlert,
+  setLowBatteryAlert,
   setFallDownSensitivity,
   setLanguageTimezone,
   setSilenceTime,

@@ -642,6 +642,37 @@ export const Schemas = {
   },
 
   /**
+   * Set the watch's low-battery alarm SMS alert switch (LOWBAT command).
+   *
+   * Per the protocol spec:
+   *   Server send : [CS*<id>*0008*LOWBAT,0]  (off, do NOT send SMS on low battery)
+   *                 [CS*<id>*0008*LOWBAT,1]  (on, send SMS on low battery)
+   *   Device reply: [CS*<id>*0006*LOWBAT]    (bare ack = success)
+   *
+   * When ON, the watch sends an SMS alert when the battery level
+   * drops below a threshold. When OFF, no SMS is sent.
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "enabled":       true
+   *   }
+   */
+  lowBatteryAlert: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be a boolean (true or false)",
+        "any.required":
+          "enabled is required (true = send SMS on low battery, false = do not send SMS)",
+      }),
+    }),
+  },
+
+  /**
    * Set the watch's fall-down alarm alert switch and the
    * "call center number after fall" switch (FALLDOWN command).
    *

@@ -136,6 +136,20 @@ router.post(
   Device_controller.setFallDownAlert
 );
 
+// Low-Battery Alarm Alert (LOWBAT) API — toggle the watch's
+// low-battery alarm SMS alert switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*LOWBAT,0]  (off, do NOT send SMS on low battery)
+//                 [CS*<id>*0008*LOWBAT,1]  (on, send SMS on low battery)
+//   Device reply: [CS*<id>*0006*LOWBAT]    (bare ack = success)
+router.post(
+  "/low_battery_alert",
+  checkToken,
+  ValidateJoi(Schemas.lowBatteryAlert.set),
+  Device_controller.setLowBatteryAlert
+);
+
 // Fall-Down Sensitivity (LSSET) API — set the watch's fall-down
 // detection sensitivity level.
 //
