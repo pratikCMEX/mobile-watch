@@ -1,22 +1,22 @@
 "use strict";
 
+const bcrypt = require("bcrypt");
+const { v4: uuidv4 } = require("uuid");
+
 module.exports = {
   async up(queryInterface, Sequelize) {
-    // Note: Password should be properly hashed before insertion
-    // This is a placeholder that should be updated with actual hashed password
+    // Hash the password for admin user
+    const hashedPassword = await bcrypt.hash("123456", 10);
+
     await queryInterface.bulkInsert(
-      "Users",
+      "Admins",
       [
         {
-          id: Sequelize.UUIDV4,
-          role: "admin",
-          full_name: "Admin User",
-          email: "admin@rezzerv.com",
-          mobile_no: "1234567890",
-          password: "$2b$10$placeholder_hashed_password", // Replace with actual bcrypt hash
-          country_code: "+1",
-          status: "1",
-          is_exists: true,
+          id: uuidv4(),
+          username: "VAG",
+          password: hashedPassword,
+          email: "admin@mobile-watch.com",
+          status: "active",
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -26,6 +26,6 @@ module.exports = {
   },
 
   async down(queryInterface, Sequelize) {
-    await queryInterface.bulkDelete("Users", { email: "admin@rezzerv.com" }, {});
+    await queryInterface.bulkDelete("Admins", { username: "VAG" }, {});
   },
 };
