@@ -1191,7 +1191,11 @@ class TcpServer {
    * 0 date (DDMMYY), 1 time (HHMMSS), 2 GPS status, 3 latitude (decimal
    * degrees - NOT ddmm.mm like plain UD), 4 lat direction, 5 longitude
    * (decimal degrees), 6 lon direction, 7 speed, 8 course, 9 altitude,
-   * 10 satellites, 11 battery %, 12 GSM signal.
+   * 10 satellites, 11 GSM signal, 12 battery %.
+   *
+   * NOTE: Some firmwares swap battery and signal at indices 11/12.
+   * We log both values and let the device status handler (TS packet)
+   * provide the authoritative battery/signal values.
    *
    * Fields after index 12 (status flags, cell tower MCC/MNC/LAC/CID,
    * nearby WiFi AP MAC/RSSI list) are present but not confidently
@@ -1221,8 +1225,11 @@ class TcpServer {
       altitude: parts[9],
 
       satellites: parts[10],
-      battery: parts[11],
-      gsmSignal: parts[12],
+      // Some firmwares send signal at index 11 and battery at index 12.
+      // We store both and let the TS device-status handler provide
+      // the authoritative values.
+      gsmSignal: parts[11],
+      battery: parts[12],
 
       rawFields: parts,
     };
