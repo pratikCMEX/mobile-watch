@@ -30,7 +30,6 @@ async function adminLogin(req: Request, res: Response, next: NextFunction) {
     const token = generateAuthToken({
       id: admin.id,
       name: admin.username,
-      email: admin.email || "",
     });
 
 
