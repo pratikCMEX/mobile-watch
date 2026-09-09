@@ -54,6 +54,14 @@ router.post(
   Device_controller.sendReminder
 );
 
+// List all reminders for a device
+router.post(
+  "/list_reminders",
+  checkToken,
+  ValidateJoi(Schemas.device.listReminders),
+  Device_controller.listReminders
+);
+
 router.post(
   "/list_unlinked_devices",
 

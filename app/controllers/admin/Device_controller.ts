@@ -558,6 +558,70 @@ const updateDeviceIdentity = async function (
   }
 };
 
+// ─────────────────────────────────────────────────────────────
+// List all reminders for a device
+// ─────────────────────────────────────────────────────────────
+const listReminders = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, type } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number as string },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Build filter
+    const whereClause: any = { device_id: device.id };
+    if (type) {
+      whereClause.type = type as string;
+    }
+
+    // Fetch reminders ordered by number (slot) then creation date
+    const reminders = await db.Reminder.findAll({
+      where: whereClause,
+      order: [
+        ["number", "ASC"],
+        ["createdAt", "ASC"],
+      ],
+    });
+
+    // Map to safe JSON (exclude voice_data binary from default response)
+    const safeReminders = reminders.map((r: any) => {
+      const plain: any = r.get({ plain: true });
+      // Only include voice_data if explicitly requested or if it's small
+      if (plain.voice_data && plain.voice_data.length > 0) {
+        plain.voice_data = `[BINARY DATA: ${plain.voice_data.length} bytes]`;
+      }
+      return plain;
+    });
+
+    return successMessage(res, "Reminders fetched successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      filter_type: type || "all",
+      total: safeReminders.length,
+      reminders: safeReminders,
+    });
+  } catch (err) {
+    console.error("listReminders error:", err);
+    return errorMessage(res, "Error fetching reminders");
+  }
+};
+
 export default {
   createDevice,
   updateDevice,
@@ -565,6 +629,7 @@ export default {
   getDeviceSettings,
   sendVoiceMessage,
   sendReminder,
+  listReminders,
   listUnlinkedDevices,
   assignOwner,
   updateDeviceIdentity,

@@ -239,6 +239,24 @@ router.post(
   Device_controller.setDialLock
 );
 
+// Take-Off Watch Alarm (REMOVE) API — toggle the watch's take-off
+// alarm switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*REMOVE,0]  (off, do NOT send alarm on take-off)
+//                 [CS*<id>*0008*REMOVE,1]  (on, send alarm on take-off)
+//   Device reply: [CS*<id>*0006*REMOVE]    (bare ack = success)
+//
+// NOTE: This feature depends on the device firmware having a light
+// sensor. If the watch does not have a light sensor, this command
+// is unnecessary and may not be supported.
+router.post(
+  "/take_off_alert",
+  checkToken,
+  ValidateJoi(Schemas.takeOffAlert.set),
+  Device_controller.setTakeOffAlert
+);
+
 // Voice Monitor / Listen In (MONITOR command) - OPTIONAL FEATURE
 // The device will auto-dial a monitor number for voice monitoring
 // Note: Remove this feature if it is illegal in your region

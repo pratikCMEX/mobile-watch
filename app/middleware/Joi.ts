@@ -155,6 +155,18 @@ export const Schemas = {
       reminder_text: Joi.string().optional().allow(""),
       voice_file: Joi.any().optional(),
     }),
+    listReminders: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      type: Joi.string()
+        .valid("pill", "water", "general", "sedentary")
+        .optional()
+        .messages({
+          "any.only": "type must be one of: pill, water, general, sedentary",
+        }),
+    }),
     listUnlinked: Joi.object({
       page: Joi.number().integer().min(1).optional().default(1),
       limit: Joi.number().integer().min(1).optional().default(20),
@@ -637,6 +649,38 @@ export const Schemas = {
         "boolean.base": "enabled must be a boolean (true or false)",
         "any.required":
           "enabled is required (true = send SMS to SOS numbers on SOS alarm, false = do not send SMS)",
+      }),
+    }),
+  },
+
+  /**
+   * Set the watch's take-off alarm switch (REMOVE command).
+   *
+   * Per the protocol spec:
+   *   Server send : [CS*<id>*0008*REMOVE,0]  (off, do NOT send alarm on take-off)
+   *                 [CS*<id>*0008*REMOVE,1]  (on, send alarm on take-off)
+   *   Device reply: [CS*<id>*0006*REMOVE]    (bare ack = success)
+   *
+   * NOTE: This feature depends on the device firmware having a light
+   * sensor. If the watch does not have a light sensor, this command
+   * is unnecessary and may not be supported.
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "enabled":       true
+   *   }
+   */
+  takeOffAlert: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be a boolean (true or false)",
+        "any.required":
+          "enabled is required (true = send alarm on take-off, false = do not send alarm)",
       }),
     }),
   },

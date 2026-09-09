@@ -801,6 +801,10 @@ class TcpServer {
         this.handleAppLockResponse(client, parsed);
         break;
 
+      case "REMOVE":
+        this.handleRemoveResponse(client, parsed);
+        break;
+
       case "SOS1":
       case "SOS2":
       case "SOS3":
@@ -3647,10 +3651,37 @@ class TcpServer {
     // Validate number (1-3)
     const num = Math.max(1, Math.min(3, Math.floor(Number(number) || 1)));
 
+    // ── Process voice data ──────────────────────────────────────
+    // 1. Strip AMR file header if present (#!AMR\n = 6 bytes)
+    // 2. Enforce max size (64 KB raw ≈ 15 seconds at 12.2 kbps)
+    let processedVoice: Buffer | null = null;
+    if (voiceData && voiceData.length > 0) {
+      const AMR_HEADER = Buffer.from("#!AMR\n");
+      let raw = voiceData;
+      if (
+        raw.length >= AMR_HEADER.length &&
+        raw.subarray(0, AMR_HEADER.length).equals(AMR_HEADER)
+      ) {
+        Logging.info(
+          `Stripping AMR file header (6 bytes) from reminder voice data for device ${deviceId}.`
+        );
+        raw = raw.subarray(AMR_HEADER.length);
+      }
+
+      const MAX_AMR_BYTES = 64 * 1024;
+      if (raw.length > MAX_AMR_BYTES) {
+        Logging.error(
+          `Refusing to send TAKEPILLS to device ${deviceId}: AMR data is ${raw.length} bytes, max ${MAX_AMR_BYTES} allowed (≈15 seconds).`
+        );
+        return false;
+      }
+
+      processedVoice = escape(raw);
+    }
+
     // Build the content parts
     const textPart = reminderText || "";
-    const voicePart =
-      voiceData && voiceData.length > 0 ? escape(voiceData) : null;
+    const voicePart = processedVoice;
 
     // Build content: TAKEPILLS,settings,number,text,voice
     // Voice data is always included as a comma separator even if empty
@@ -3688,12 +3719,17 @@ class TcpServer {
     Logging.info(
       `Sending TAKEPILLS (reminder) command to device ${deviceId} ` +
         `(settings=${reminderSettings}, number=${num}, text=${textPart}, ` +
-        `voice=${voiceData ? voiceData.length + "B" : "none"}, len=${length})`
+        `voice_raw=${voiceData ? voiceData.length + "B" : "none"}, ` +
+        `voice_escaped=${
+          processedVoice ? processedVoice.length + "B" : "none"
+        }, ` +
+        `len=${length})`
     );
     Logging.debug(`TAKEPILLS raw packet: ${rawCommand}`);
     Logging.warn(
       `TAKEPILLS prerequisite: device CONFIG must have DD=2 (medication reminder enabled). ` +
-        `If reminder does not fire, verify DD config and device time sync.`
+        `If reminder does not fire, verify DD config and device time sync. ` +
+        `AMR must be raw frames (no #!AMR header), AMR-NB format, max 64KB.`
     );
 
     this.send(client, command);
@@ -5237,6 +5273,97 @@ class TcpServer {
         .catch((error: Error) =>
           Logging.error(
             `Failed to save center number notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Take-Off Watch Alarm (REMOVE) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Toggle the watch's "take-off alarm" switch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [CS*<id>*0008*REMOVE,0]  (off, do NOT send alarm on take-off)
+   *                 [CS*<id>*0008*REMOVE,1]  (on, send alarm on take-off)
+   *
+   *   Device reply: [CS*<id>*0006*REMOVE]    (bare ack = success)
+   *
+   * NOTE: This feature depends on the device firmware having a light
+   * sensor. If the watch does not have a light sensor, this command
+   * is unnecessary and may not be supported.
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param enabled   true = send alarm on take-off, false = do NOT send
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendRemoveCommand(deviceId: string, enabled: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send REMOVE command.`
+      );
+      return false;
+    }
+
+    // Content is exactly "REMOVE,0" or "REMOVE,1" — 8 chars.
+    const flag = enabled ? "1" : "0";
+    const command = `[CS*${deviceId}*0008*REMOVE,${flag}]`;
+
+    Logging.info(
+      `Sending take-off alarm (REMOVE) command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a REMOVE reply from the device.
+   *
+   * Reply shapes:
+   *   [CS*<id>*0006*REMOVE]            bare ack → success
+   *   [CS*<id>*0008*REMOVE,0]          failure (some firmwares)
+   *   [CS*<id>*0008*REMOVE,1]          explicit success (some firmwares)
+   */
+  private handleRemoveResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `REMOVE response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from REMOVE: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Take-off alarm updated",
+            body: `Device ${packet.deviceId} acknowledged take-off alarm command.`,
+            metadata: { kind: "take_off", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save take-off notification for device ${packet.deviceId}: ${error.message}`
           )
         );
     }
