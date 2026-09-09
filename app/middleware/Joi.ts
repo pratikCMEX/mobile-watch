@@ -33,7 +33,7 @@ export const Schemas = {
     email: Joi.string().email().optional().allow(""),
   }).or("mobile_no", "email"),
   adminLogin: Joi.object({
-    email: Joi.string().email().required(),
+    username: Joi.string().required(),
     password: Joi.string().required(),
   }),
   login: Joi.object({
