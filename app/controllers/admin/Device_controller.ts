@@ -293,7 +293,7 @@ const sendVoiceMessage = async function (
 
     Logging.info(
       `Voice message (TK) sent to device ${serial_number} ` +
-        `(file=${voiceFile.originalname}, size=${amrBuffer.length} bytes)`
+      `(file=${voiceFile.originalname}, size=${amrBuffer.length} bytes)`
     );
 
     return successMessage(res, "Voice message sent successfully", {
@@ -419,7 +419,7 @@ const sendReminder = async function (
 
     Logging.info(
       `TAKEPILLS (reminder) command sent to device ${serial_number} ` +
-        `(type=${type}, settings=${reminder_settings}, number=${num})`
+      `(type=${type}, settings=${reminder_settings}, number=${num})`
     );
 
     return successMessage(res, "Reminder sent successfully", {
@@ -558,6 +558,43 @@ const updateDeviceIdentity = async function (
   }
 };
 
+const listDevices = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { search = "", page = 1, limit = 20 } = req.body;
+
+    const offset = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (search) {
+      where.serial_number = { [Op.like]: `%${search}%` };
+    }
+
+    const { rows, count } = await db.Device.findAndCountAll({
+      where,
+      limit: Number(limit),
+      offset: Number(offset),
+      order: [["createdAt", "DESC"]],
+    }); // order: [["createdAt", "DESC"]],
+
+    return successMessage(res, "Devices fetched successfully", {
+      devices: rows,
+      total: count,
+      page: Number(page),
+      limit: Number(limit),
+      totalPages: Math.ceil(count / Number(limit)),
+    });
+  } catch (err) {
+    console.error("listDevices error:", err);
+    return errorMessage(res, "Error fetching devices");
+  }
+};
+
+
 export default {
   createDevice,
   updateDevice,
@@ -568,4 +605,5 @@ export default {
   listUnlinkedDevices,
   assignOwner,
   updateDeviceIdentity,
+  listDevices,
 };
