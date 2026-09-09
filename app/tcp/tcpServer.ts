@@ -1846,7 +1846,7 @@ class TcpServer {
     Logging.info(
       `DEVICE STATUS | Device: ${packet.deviceId} | ` +
         `Firmware: ${status.ver} | ` +
-        `Battery: ${status.batlevel} | ` +
+        `Battery: ${status.batlevel || status["bat level"]} | ` +
         `GPS: ${status.gps} | ` +
         `NET: ${status.net}`
     );
@@ -2339,9 +2339,11 @@ class TcpServer {
 
     /**
      * Battery level (percentage)
+     * Some firmwares send "batlevel:87" and others send "bat level:3".
      */
-    if (status.batlevel) {
-      const battery = parseInt(status.batlevel, 10);
+    const batteryRaw = status.batlevel || status["bat level"];
+    if (batteryRaw) {
+      const battery = parseInt(batteryRaw, 10);
 
       if (!isNaN(battery) && battery >= 0 && battery <= 100) {
         updates.battery_percentage = battery;
@@ -2393,10 +2395,17 @@ class TcpServer {
 
     /**
      * Network status — e.g. "OK(100)"
+     * Extract the numeric signal strength from parentheses if present.
      */
     if (status.NET) {
       updates.network_status = status.NET;
-      updates.signal_status = status.NET;
+      // Extract numeric signal from "OK(48)" → 48
+      const netMatch = status.NET.match(/\((\d+)\)/);
+      if (netMatch && netMatch[1]) {
+        updates.signal_status = parseInt(netMatch[1], 10);
+      } else {
+        updates.signal_status = status.NET;
+      }
     }
 
     /**
@@ -5822,6 +5831,7 @@ interface DeviceStatus {
   upload?: string;
   lk?: string;
   batlevel?: string;
+  "bat level"?: string;
   language?: string;
   zone?: string;
   profile?: string;
