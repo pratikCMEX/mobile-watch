@@ -7,7 +7,6 @@ module.exports = {
       type: Sequelize.STRING(20),
       allowNull: true,
       defaultValue: null,
-      comment: "Center phone number for SMS alarm alerts (CENTER command)",
     });
   },
 
