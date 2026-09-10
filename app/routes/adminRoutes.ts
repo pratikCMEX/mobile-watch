@@ -3,7 +3,7 @@ import { checkToken, checkAdmin } from "../config/jwt";
 import { Schemas, ValidateJoi } from "../middleware/Joi";
 import Device_controller from "../controllers/admin/Device_controller";
 import Geofence_controller from "../controllers/admin/Geofence_controller";
-
+import Snapshot_controller from "../controllers/admin/Snapshot_controller";
 const router = express.Router();
 
 
@@ -32,4 +32,5 @@ router.delete(
     Geofence_controller.deleteGeofence
 );
 router.post("/deviceList", checkAdmin, Device_controller.listDevices);
+router.post("/get_all_snapshots", checkAdmin, Snapshot_controller.getAllSnapshots);
 module.exports = router;
