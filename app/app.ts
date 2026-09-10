@@ -16,6 +16,7 @@ const server = http.createServer(app);
 const userRoutes = require("./routes/userRoutes");
 const authRoutes = require("./routes/authRoutes");
 const adminAuthRoutes = require("./routes/adminAuthRoutes");
+const adminSnapshotRoutes = require("./routes/adminSnapshotRoutes");
 const healthRoutes = require("./routes/healthmetricsRoutes");
 const deviceRoutes = require("./routes/deviceRoutes");
 const logRoutes = require("./routes/logRoutes");
