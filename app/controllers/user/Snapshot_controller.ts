@@ -164,6 +164,38 @@ const ListSnapshots = async (
   }
 };
 
+const listAllSnapshots = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const snapshots = await db.Snapshot.findAll({
+      attributes: ["id", "device_id", "image_url", "createdAt", "updatedAt"],
+      order: [["createdAt", "DESC"]],
+    });
+
+    // Resolve every image_url to a FULL absolute URL. Tolerates
+    // rows that were stored as a bare filename (legacy) or as a
+    // /uploads/... path.
+    const snapshotsWithUrl = snapshots.map((snapshot: any) => {
+      const data = snapshot.toJSON();
+      return {
+        ...data,
+        image_url: buildImageUrl(req, data.image_url),
+      };
+    });
+
+    return successMessage(
+      res,
+      "Snapshots fetched successfully",
+      snapshotsWithUrl
+    );
+  } catch (err) {
+    console.error("listAllSnapshots error:", err);
+    return errorMessage(res, "Error fetching snapshots");
+  }
+};
 const GetSnapshotsBySerialNumber = async (
   req: Request,
   res: Response,
@@ -236,4 +268,5 @@ export default {
   ListSnapshots,
   GetSnapshotsBySerialNumber,
   deleteSnapshot,
+  listAllSnapshots,
 };

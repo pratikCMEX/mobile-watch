@@ -20,6 +20,12 @@ router.post(
   ValidateJoi(Schemas.snapshot.list),
   Snapshot_controller.ListSnapshots
 );
+router.post(
+  "/list_all_snapshots",
+  checkToken,
+  // ValidateJoi(Schemas.snapshot.list),
+  Snapshot_controller.listAllSnapshots
+);
 
 router.post(
   "/get_snapshots_by_serial",
