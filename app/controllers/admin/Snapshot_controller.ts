@@ -67,6 +67,12 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
 // Also supports search by id or imei in body
 async function getAllSnapshots(req: Request, res: Response, next: NextFunction) {
   try {
+
+
+    const alldata = await db.Snapshot.findAll();
+    console.log("alldata:", alldata);
+
+
     const body = req.body || {};
     const { page = 1, limit = 10, id, imei } = body;
 
