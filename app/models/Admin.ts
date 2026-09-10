@@ -7,6 +7,7 @@ export interface AdminAttributes {
   password: string;
   email?: string | null;
   status: "active" | "inactive";
+  session_token: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -22,6 +23,7 @@ class Admin
   public password!: string;
   public email?: string | null;
   public status!: "active" | "inactive";
+  public session_token!: string;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
 
@@ -59,6 +61,11 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.ENUM("active", "inactive"),
         allowNull: false,
         defaultValue: "active",
+      },
+      session_token: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: "",
       },
       createdAt: {
         type: DataTypes.DATE,
