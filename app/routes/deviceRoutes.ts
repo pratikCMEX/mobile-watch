@@ -1,7 +1,7 @@
 import express from "express";
 import { Schemas, ValidateJoi } from "../middleware/Joi";
 import Device_controller from "../controllers/admin/Device_controller";
-import { checkToken } from "../config/jwt";
+import { checkToken, checkAdmin } from "../config/jwt";
 import { uploadProfile, uploadVoice } from "../middleware/Multer";
 
 const router = express.Router();
@@ -76,4 +76,6 @@ router.post(
   Device_controller.updateDeviceIdentity
 );
 
+
+router.get("/deviceList", checkAdmin, Device_controller.listDevices);
 module.exports = router;
