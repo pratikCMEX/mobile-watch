@@ -77,5 +77,5 @@ router.post(
 );
 
 
-router.get("/deviceList", checkAdmin, Device_controller.listDevices);
+
 module.exports = router;
