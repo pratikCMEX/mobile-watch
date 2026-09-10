@@ -24,7 +24,7 @@ router.post(
   "/list_all_snapshots",
   checkToken,
   // ValidateJoi(Schemas.snapshot.list),
-  Snapshot_controller.listAllSnapshots
+  Snapshot_controller.getAllSnapshots
 );
 
 router.post(
