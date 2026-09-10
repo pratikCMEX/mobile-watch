@@ -25,6 +25,7 @@ const snapshotRoutes = require("./routes/snapshotRoutes");
 const emergencyContactRoutes = require("./routes/emergencyContactRoutes");
 const geofenceRoutes = require("./routes/geofenceRoutes");
 const sceneModeRoutes = require("./routes/sceneModeRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 const testNotificationRoutes = require("./routes/testNotificationRoutes");
 
 // ─── Security Middleware ────────────────────────────────────────
@@ -100,6 +101,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─── Routes ────────────────────────────────────────────────────
 app.use("/admin", userRoutes);
 app.use("/admin", adminAuthRoutes);
+app.use("/admin", adminRoutes);
 app.use("/auth", authRoutes);
 app.use("/device", deviceRoutes);
 app.use("/user/device", userDeviceRoutes);
