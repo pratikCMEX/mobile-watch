@@ -2946,10 +2946,6 @@ class TcpServer {
 
       await device.update({ geofence_status: newStatus });
 
-      // Don't notify on the very first evaluation for this device —
-      // there's no real transition, just an initial baseline.
-      if (!previousStatus) return;
-
       const geofenceName = matchedGeofence?.name || "the safe zone";
 
       const notificationPayload = buildGeoFenceNotification(
