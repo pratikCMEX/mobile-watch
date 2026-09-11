@@ -3662,9 +3662,13 @@ const registerDeviceByImei = async function (
     });
     if (existingBySerial) {
       if (!existingBySerial.imei) {
-        // Serial exists but has no IMEI yet — update it in place
-        // (link the owner + imei + any provided fields) instead of
-        // inserting a duplicate row.
+        /**
+         * Serial exists but has no IMEI (and usually no owner) yet —
+         * this is an unclaimed placeholder. Link the owner + imei +
+         * any provided fields in place instead of inserting a
+         * duplicate row, and report it as "added" since the device
+         * is now being registered for the first time.
+         */
         existingBySerial.owner_id = userId;
         existingBySerial.imei = imei ?? null;
         if (device_name) existingBySerial.device_name = device_name;
@@ -3687,7 +3691,7 @@ const registerDeviceByImei = async function (
         await existingBySerial.save();
         return successMessage(
           res,
-          "Device updated successfully",
+          "Device added successfully",
           existingBySerial
         );
       }
@@ -3705,6 +3709,36 @@ const registerDeviceByImei = async function (
           return successMessage(
             res,
             "Device already registered",
+            existingByImei
+          );
+        }
+        if (!existingByImei.owner_id) {
+          /**
+           * IMEI exists on an unclaimed placeholder — link the owner
+           * in place instead of refusing (no other account owns it).
+           */
+          existingByImei.owner_id = userId;
+          if (device_name) existingByImei.device_name = device_name;
+          if (email !== undefined) existingByImei.email = email;
+          if (phone_number !== undefined)
+            existingByImei.phone_number = phone_number;
+          if (country_code !== undefined)
+            existingByImei.country_code = country_code;
+          if (network_carrier !== undefined)
+            existingByImei.network_carrier = network_carrier;
+          if (network_type !== undefined)
+            existingByImei.network_type = network_type;
+          if (location_interval_minutes !== undefined)
+            existingByImei.location_interval_minutes =
+              location_interval_minutes;
+          if (height_cm !== undefined) existingByImei.height_cm = height_cm;
+          if (gender !== undefined) existingByImei.gender = gender;
+          if (age !== undefined) existingByImei.age = age;
+          if (weight_kg !== undefined) existingByImei.weight_kg = weight_kg;
+          await existingByImei.save();
+          return successMessage(
+            res,
+            "Device added successfully",
             existingByImei
           );
         }
@@ -3765,6 +3799,7 @@ const registerDeviceByImei = async function (
          * A concurrent request inserted the row between our checks.
          * Link the owner if it isn't already linked to this user.
          */
+        const hadNoOwner = !device.owner_id;
         if (device.owner_id !== userId) {
           device.owner_id = userId;
           if (device_name) device.device_name = device_name;
@@ -3782,7 +3817,13 @@ const registerDeviceByImei = async function (
           if (weight_kg !== undefined) device.weight_kg = weight_kg;
           await device.save();
         }
-        return successMessage(res, "Device already registered", device);
+        return successMessage(
+          res,
+          hadNoOwner
+            ? "Device added successfully"
+            : "Device already registered",
+          device
+        );
       }
     } catch (error: any) {
       const isUniqueViolation =
@@ -3799,11 +3840,18 @@ const registerDeviceByImei = async function (
         if (!device) {
           return errorMessage(res, "Error registering device: race detected");
         }
+        const hadNoOwner = !device.owner_id;
         if (device.owner_id !== userId) {
           device.owner_id = userId;
           await device.save();
         }
-        return successMessage(res, "Device already registered", device);
+        return successMessage(
+          res,
+          hadNoOwner
+            ? "Device added successfully"
+            : "Device already registered",
+          device
+        );
       }
       throw error;
     }
