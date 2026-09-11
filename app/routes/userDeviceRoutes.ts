@@ -350,4 +350,15 @@ router.post(
   Notification_controller.listNotifications
 );
 
+// Register / update a device for the logged-in user.
+// The user_id is taken from the auth token, not the request body,
+// so a caller cannot register a device for another account.
+// Body: imei (SN auto-derived) OR serial_number (update-or-insert).
+router.post(
+  "/register_device",
+  checkToken,
+  ValidateJoi(Schemas.deviceRegister.byImei),
+  Device_controller.registerDeviceByImei
+);
+
 module.exports = router;

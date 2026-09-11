@@ -1425,6 +1425,7 @@ export const Schemas = {
     createUser: Joi.object({
       email: Joi.string().email().required(),
       password: Joi.string().min(6).required(),
+      name: Joi.string().optional().allow(""),
     }),
     updateProfile: Joi.object({
       name: Joi.string().optional().allow(""),
@@ -1466,5 +1467,41 @@ export const Schemas = {
         "any.required": "user_id is required",
       }),
     }),
+  },
+  deviceRegister: {
+    // Register a device for the currently authenticated user.
+    // user_id comes from the auth token, NOT from the request body —
+    // prevents privilege escalation.
+    //
+    // Two identity modes are supported:
+    //   1. IMEI only  → serial_number is auto-derived from the IMEI
+    //                    (TAC|SN|CD layout, e.g. 868017032159118 → SN 1703215911)
+    //   2. serial_number only → no IMEI; used to update an existing
+    //                    device row or insert one carrying only the SN.
+    // At least one of imei / serial_number must be supplied.
+    byImei: Joi.object({
+      imei: Joi.string()
+        .optional()
+        .pattern(/^[0-9]{6,20}$/)
+        .messages({
+          "string.pattern.base": "imei must be 6-20 digits",
+        }),
+      serial_number: Joi.string().optional().allow(null, ""),
+      device_name: Joi.string().optional().allow(null, ""),
+      email: Joi.string().email().optional().allow(null, ""),
+      phone_number: Joi.string().optional().allow(null, ""),
+      country_code: Joi.string().optional().allow(null, ""),
+      network_carrier: Joi.string().optional().allow(null, ""),
+      network_type: Joi.string().optional().allow(null, ""),
+      location_interval_minutes: Joi.number()
+        .integer()
+        .min(1)
+        .optional()
+        .default(1),
+      height_cm: Joi.number().integer().optional().allow(null),
+      gender: Joi.string().optional().allow(null),
+      age: Joi.number().integer().optional().allow(null),
+      weight_kg: Joi.number().integer().optional().allow(null),
+    }).or("imei", "serial_number"),
   },
 };

@@ -187,7 +187,7 @@ const getProfile = async (req: Request, res: Response, next: NextFunction) => {
 };
 const createUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password } = req.body;
+    const { name, email, password } = req.body;
 
     if (!email || !password) {
       return errorMessage(res, "Email and password are required", 400);
@@ -204,6 +204,7 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
 
     // Create the user
     const user = await db.User.create({
+      name,
       email,
       password: hashedPassword,
     });

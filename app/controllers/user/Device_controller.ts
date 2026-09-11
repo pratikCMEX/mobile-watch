@@ -3596,6 +3596,162 @@ const getDeviceLocation = async function (
   }
 };
 
+// ── Register / update a device for the logged-in user ──────────
+// The user_id is derived from the auth token (req.userinfo.payload.id),
+// never from the request body, so a caller cannot register a device for
+// someone else.
+//
+// Two identity modes:
+//   1. IMEI only  → serial_number is auto-derived (TAC|SN|CD layout)
+//   2. serial_number only → no IMEI; update an existing row by SN
+//      or insert a new row carrying only serial_number + imei.
+const registerDeviceByImei = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const userId = (req as any)?.userinfo?.payload?.id;
+    if (!userId) {
+      return errorMessage(res, "Invalid token payload", 401);
+    }
+
+    const user = await db.User.findByPk(userId);
+    if (!user) {
+      return errorMessage(res, "User not found", 404);
+    }
+
+    const {
+      imei,
+      serial_number,
+      device_name,
+      email,
+      phone_number,
+      country_code,
+      network_carrier,
+      network_type,
+      location_interval_minutes,
+      height_cm,
+      gender,
+      age,
+      weight_kg,
+    } = req.body;
+
+    // ── Derive serial number from the IMEI ─────────────────────
+    // IMEI layout used by this device family:
+    //   TAC (4) | Serial Number (10) | Check Digit (1)  = 15 digits
+    // e.g. 868017032159118  →  SN = "1703215911", CD = "8"
+    // The SN is everything between the 4-digit TAC and the final
+    // check digit. Fall back to the caller-supplied value when the
+    // IMEI shape is unexpected.
+    const derivedSerialNumber =
+      imei && /^\d{15}$/.test(imei) ? imei.slice(4, -1) : serial_number ?? null;
+
+    if (!imei && !serial_number) {
+      return errorMessage(res, "imei or serial_number is required");
+    }
+
+    // ── IMEI path ──────────────────────────────────────────────
+    if (imei) {
+      // Idempotent: if this IMEI already belongs to the same user,
+      // return the existing device instead of erroring.
+      const existing = await db.Device.findOne({ where: { imei } });
+      if (existing) {
+        if (existing.owner_id === userId) {
+          return successMessage(res, "Device already registered", existing);
+        }
+        // IMEI is owned by a different user — refuse to hijack it.
+        return customMessage(
+          res,
+          409,
+          "This IMEI is already registered to another account"
+        );
+      }
+
+      const device = await db.Device.create({
+        owner_id: userId,
+        imei,
+        serial_number: derivedSerialNumber,
+        device_name: device_name ?? "Device",
+        email: email ?? null,
+        phone_number: phone_number ?? null,
+        country_code: country_code ?? null,
+        network_carrier: network_carrier ?? null,
+        network_type: network_type ?? null,
+        location_interval_minutes: location_interval_minutes ?? 1,
+        height_cm: height_cm ?? null,
+        gender: gender ?? null,
+        age: age ?? null,
+        weight_kg: weight_kg ?? null,
+        connection_status: "offline",
+        signal_status: null,
+        battery_percentage: null,
+        is_online: false,
+        last_updated_at: null,
+      });
+
+      return successMessage(res, "Device registered successfully", device);
+    }
+
+    // ── Serial-number-only path ────────────────────────────────
+    // No IMEI was supplied — use the serial_number as the identity.
+    // If a device with this serial_number already exists, update its
+    // serial_number + imei fields (and link the owner); otherwise
+    // insert a brand-new row carrying only serial_number + imei.
+    const existing = await db.Device.findOne({
+      where: { serial_number: derivedSerialNumber },
+    });
+    if (existing) {
+      existing.owner_id = userId;
+      existing.serial_number = derivedSerialNumber;
+      existing.imei = imei ?? null;
+      if (device_name) existing.device_name = device_name;
+      if (email !== undefined) existing.email = email;
+      if (phone_number !== undefined) existing.phone_number = phone_number;
+      if (country_code !== undefined) existing.country_code = country_code;
+      if (network_carrier !== undefined)
+        existing.network_carrier = network_carrier;
+      if (network_type !== undefined) existing.network_type = network_type;
+      if (location_interval_minutes !== undefined)
+        existing.location_interval_minutes = location_interval_minutes;
+      if (height_cm !== undefined) existing.height_cm = height_cm;
+      if (gender !== undefined) existing.gender = gender;
+      if (age !== undefined) existing.age = age;
+      if (weight_kg !== undefined) existing.weight_kg = weight_kg;
+      await existing.save();
+      return successMessage(res, "Device updated successfully", existing);
+    }
+
+    const device = await db.Device.create({
+      owner_id: userId,
+      imei: imei ?? null,
+      serial_number: derivedSerialNumber,
+      device_name: device_name ?? "Device",
+      email: email ?? null,
+      phone_number: phone_number ?? null,
+      country_code: country_code ?? null,
+      network_carrier: network_carrier ?? null,
+      network_type: network_type ?? null,
+      location_interval_minutes: location_interval_minutes ?? 1,
+      height_cm: height_cm ?? null,
+      gender: gender ?? null,
+      age: age ?? null,
+      weight_kg: weight_kg ?? null,
+      connection_status: "offline",
+      signal_status: null,
+      battery_percentage: null,
+      is_online: false,
+      last_updated_at: null,
+    });
+
+    return successMessage(res, "Device registered successfully", device);
+  } catch (err: any) {
+    console.error("registerDeviceByImei error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error registering device: " + msg);
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -3628,4 +3784,5 @@ export default {
   getWalkTime,
   locateDevice,
   getDeviceLocation,
+  registerDeviceByImei,
 };
