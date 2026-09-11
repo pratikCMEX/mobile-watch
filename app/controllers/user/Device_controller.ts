@@ -3746,7 +3746,7 @@ const registerDeviceByImei = async function (
 
     return successMessage(res, "Device registered successfully", device);
   } catch (err: any) {
-    console.error("registerDeviceByImei error:", err);
+    console.error("registerDeviceByImei error :", err);
     const msg = (err && err.message) || String(err);
     return errorMessage(res, "Error registering device: " + msg);
   }
