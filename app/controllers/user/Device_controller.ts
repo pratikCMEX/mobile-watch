@@ -3661,16 +3661,16 @@ const registerDeviceByImei = async function (
       where: { serial_number: derivedSerialNumber },
     });
     if (existingBySerial) {
-      if (!existingBySerial.imei) {
+      if (!existingBySerial.owner_id) {
         /**
-         * Serial exists but has no IMEI (and usually no owner) yet —
-         * this is an unclaimed placeholder. Link the owner + imei +
-         * any provided fields in place instead of inserting a
-         * duplicate row, and report it as "added" since the device
-         * is now being registered for the first time.
+         * Serial exists but has no owner yet — this is an
+         * unclaimed placeholder (with or without an IMEI). Link the
+         * owner + imei + any provided fields in place instead of
+         * inserting a duplicate row, and report it as "added" since
+         * the device is now being registered for the first time.
          */
         existingBySerial.owner_id = userId;
-        existingBySerial.imei = imei ?? null;
+        existingBySerial.imei = imei ?? existingBySerial.imei ?? null;
         if (device_name) existingBySerial.device_name = device_name;
         if (email !== undefined) existingBySerial.email = email;
         if (phone_number !== undefined)
@@ -3695,9 +3695,19 @@ const registerDeviceByImei = async function (
           existingBySerial
         );
       }
-      // Serial is already bound to a device that has an IMEI —
-      // do not insert a duplicate row.
-      return successMessage(res, "Device already registered", existingBySerial);
+      if (existingBySerial.owner_id === userId) {
+        return successMessage(
+          res,
+          "Device already registered",
+          existingBySerial
+        );
+      }
+      // Serial is owned by a different user — do not hijack it.
+      return customMessage(
+        res,
+        409,
+        "This serial number is already registered to another account"
+      );
     }
 
     // ── 2) No row with this serial_number. If an IMEI was supplied,
