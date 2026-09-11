@@ -814,11 +814,11 @@ export const Schemas = {
         "any.required": "level is required (1 = most sensitive)",
       }),
       device_type: Joi.string()
-        .valid("android", "rtos", "rt_os")
+        .valid("android", "rtos", "rt_os", "ios")
         .optional()
         .default("android")
         .messages({
-          "any.only": "device_type must be 'android' or 'rtos'",
+          "any.only": "device_type must be 'android', 'rtos','ios'",
         }),
     }),
   },
