@@ -241,7 +241,7 @@ const deleteAccount = async (
     if (!user) {
       return errorMessage(res, "User not found");
     }
-    await db.Device.destroy({ where: { user_id: userId } });
+    await db.Device.destroy({ where: { owner_id: userId } });
     await user.destroy();
 
     return successMessage(res, "Account deleted successfully");
