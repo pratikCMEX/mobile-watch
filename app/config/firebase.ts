@@ -20,7 +20,16 @@ if (!firebase.getApps().length) {
   firebase.initializeApp({
     credential: firebase.cert(serviceAccount),
   });
-  Logging.info("Firebase Admin SDK initialized successfully");
+  /**
+   * Surface the credential's project_id in the logs at startup.
+   * A "mismatched-credential / SenderId mismatch" error means the
+   * app's sender ID does not belong to THIS project, so having the
+   * project_id next to the error makes the mismatch obvious.
+   */
+  Logging.info(
+    `Firebase Admin SDK initialized successfully` +
+      ` (project_id=${serviceAccount.project_id ?? "unknown"})`
+  );
 }
 
 /**

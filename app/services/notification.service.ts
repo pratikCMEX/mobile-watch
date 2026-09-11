@@ -153,6 +153,26 @@ export const pushToUser = async (
     `FCM push to user ${userId}: success=${response.successCount}, failed=${response.failureCount}`
   );
 
+  /**
+   * Log every failed token individually so the exact token, error
+   * code and message are visible in the logs (e.g. a
+   * "mismatched-credential / SenderId mismatch" points straight at
+   * a credential/project pairing problem instead of being buried
+   * in a count).
+   */
+  if (response.failureCount > 0) {
+    response.responses.forEach((res: any, index: any) => {
+      if (!res.success) {
+        Logging.error(
+          `FCM push failed for token[${index}] ` +
+            `token=${tokens[index]} code=${res.error?.code ?? "unknown"} ` +
+            `message=${res.error?.message ?? "no message"} ` +
+            `detail=${res.error?.detail ?? ""}`
+        );
+      }
+    });
+  }
+
   await handleInvalidTokens(tokens, response);
 
   return response;
