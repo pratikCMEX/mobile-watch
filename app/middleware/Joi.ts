@@ -127,6 +127,7 @@ export const Schemas = {
       }),
     }),
     sendReminder: Joi.object({
+      id: Joi.string().optional().allow(null, ""),
       serial_number: Joi.string().required().messages({
         "string.empty": "serial_number is required",
         "any.required": "serial_number is required",

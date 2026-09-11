@@ -320,8 +320,14 @@ const sendReminder = async function (
   next: NextFunction
 ) {
   try {
-    const { serial_number, type, reminder_settings, number, reminder_text } =
-      req.body;
+    const {
+      id,
+      serial_number,
+      type,
+      reminder_settings,
+      number,
+      reminder_text,
+    } = req.body;
     const voiceFile = (req as any).file as
       | { path: string; originalname: string; size: number }
       | undefined;
@@ -393,18 +399,8 @@ const sendReminder = async function (
       );
     }
 
-    // Persist to database
-    const reminder = await db.Reminder.create({
-      device_id: device.id,
-      type: type as string,
-      reminder_settings: reminder_settings as string,
-      number: Number(number),
-      reminder_text: hexText,
-      voice_data: voiceBuffer,
-      is_active: true,
-    });
-
-    // Build command protocol string for response
+    // Build command protocol string (used both for the response and
+    // for persisting the last command on the reminder row).
     const num = Math.max(1, Math.min(3, Math.floor(Number(number) || 1)));
     let contentStr: string;
     if (hexText) {
@@ -417,6 +413,41 @@ const sendReminder = async function (
       .padStart(4, "0");
     const commandProtocol = `[3G*${serial_number}*${length}*${contentStr}]`;
 
+    // Persist to database — update the existing record when an `id` is
+    // supplied, otherwise create a brand-new one.
+    const reminderPayload = {
+      device_id: device.id,
+      type: type as string,
+      reminder_settings: reminder_settings as string,
+      number: num,
+      reminder_text: hexText,
+      voice_data: voiceBuffer,
+      is_active: true,
+      last_command_protocol: commandProtocol,
+    };
+
+    let reminder: any;
+    let action: "updated" | "created";
+    if (id) {
+      const existing = await db.Reminder.findByPk(id);
+      if (!existing) {
+        return errorMessage(res, `Reminder with id '${id}' not found`);
+      }
+      // Safety: refuse to reassign a reminder to a different device.
+      if (existing.device_id !== device.id) {
+        return errorMessage(
+          res,
+          `Reminder '${id}' does not belong to device '${serial_number}'`
+        );
+      }
+      await existing.update(reminderPayload);
+      reminder = existing;
+      action = "updated";
+    } else {
+      reminder = await db.Reminder.create(reminderPayload);
+      action = "created";
+    }
+
     Logging.info(
       `TAKEPILLS (reminder) command sent to device ${serial_number} ` +
         `(type=${type}, settings=${reminder_settings}, number=${num})`
@@ -427,6 +458,7 @@ const sendReminder = async function (
       device_id: device.id,
       device_name: device.device_name,
       reminder_id: reminder.id,
+      action,
       type,
       reminder_settings,
       number: num,

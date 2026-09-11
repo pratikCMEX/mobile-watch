@@ -243,7 +243,7 @@ const deleteAccount = async (
     }
     await db.Device.destroy({ where: { owner_id: userId } });
 
-    await user.destroy();
+    await user.destroy({ force: true });
 
     return successMessage(res, "Account deleted successfully");
   } catch (error: any) {
