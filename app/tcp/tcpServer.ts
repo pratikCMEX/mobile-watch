@@ -2887,12 +2887,13 @@ class TcpServer {
       );
     }
 
-    // Geofencing only makes sense for a real GPS fix — an invalid
-    // fix's coordinates are unreliable and would cause spurious
-    // in/out flapping.
-    if (isValidFix) {
-      await this.checkGeofence(device, latitude, longitude);
-    }
+    // Run geofencing on every reported location, not just GPS-grade
+    // fixes. Many LTE/RTOS watches report gpsStatus "V" (no satellite
+    // fix) on essentially every packet — they rely on WiFi/cell (LBS)
+    // positioning instead, especially indoors — yet still send a
+    // usable lat/lng. Gating this on isValidFix meant geofencing
+    // silently never ran at all for those devices.
+    await this.checkGeofence(device, latitude, longitude);
   }
 
   // ───────────────────────────────────────────────────────────
