@@ -6,6 +6,7 @@ import db from "../models";
 import {
   createNotification,
   buildSosNotification,
+  buildGeoFenceNotification,
 } from "../services/notification.service";
 
 // ─────────────────────────────────────────────────────────────
@@ -2885,6 +2886,117 @@ class TcpServer {
         }: ` + (err?.message || String(err))
       );
     }
+
+    // Geofencing only makes sense for a real GPS fix — an invalid
+    // fix's coordinates are unreliable and would cause spurious
+    // in/out flapping.
+    if (isValidFix) {
+      await this.checkGeofence(device, latitude, longitude);
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Geofencing
+  //
+  // A device may have several active Geofence rows (e.g. "Home",
+  // "School"). It's considered inside the allowed area if it's
+  // within the radius of ANY active geofence, and outside only when
+  // it's outside ALL of them. We only alert on a genuine IN<->OUT
+  // transition (tracked via Device.geofence_status), never on every
+  // location update, and never on the very first check for a device
+  // (there's no prior state to compare against yet).
+  // ───────────────────────────────────────────────────────────
+
+  private async checkGeofence(
+    device: any,
+    latitude: number,
+    longitude: number
+  ): Promise<void> {
+    try {
+      const geofences = await db.Geofence.findAll({
+        where: { device_id: device.id, is_active: true },
+      });
+
+      if (geofences.length === 0) return;
+
+      let matchedGeofence: any = null;
+      for (const geofence of geofences) {
+        const distance = this.haversineDistanceMeters(
+          latitude,
+          longitude,
+          parseFloat(geofence.latitude as any),
+          parseFloat(geofence.longitude as any)
+        );
+
+        if (distance <= parseFloat(geofence.radius_meters as any)) {
+          matchedGeofence = geofence;
+          break;
+        }
+      }
+
+      const newStatus: "in" | "out" = matchedGeofence ? "in" : "out";
+      const previousStatus = device.geofence_status as
+        | "in"
+        | "out"
+        | null
+        | undefined;
+
+      if (previousStatus === newStatus) return;
+
+      await device.update({ geofence_status: newStatus });
+
+      // Don't notify on the very first evaluation for this device —
+      // there's no real transition, just an initial baseline.
+      if (!previousStatus) return;
+
+      const geofenceName = matchedGeofence?.name || "the safe zone";
+
+      const notificationPayload = buildGeoFenceNotification(
+        device.id,
+        geofenceName,
+        newStatus
+      );
+
+      await createNotification({
+        ...notificationPayload,
+        user_id: device.owner_id || null,
+      });
+
+      Logging.info(
+        `Geofence ${newStatus === "in" ? "ENTER" : "EXIT"} | Device: ${
+          device.serial_number || device.id
+        } | ${geofenceName}`
+      );
+    } catch (err: any) {
+      Logging.error(
+        `Geofence check failed for device ${
+          device.serial_number || device.id
+        }: ` + (err?.message || String(err))
+      );
+    }
+  }
+
+  /**
+   * Great-circle distance between two lat/lng points, in meters.
+   */
+  private haversineDistanceMeters(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): number {
+    const EARTH_RADIUS_METERS = 6371000;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return EARTH_RADIUS_METERS * c;
   }
 
   private async saveLocation(

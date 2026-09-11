@@ -43,6 +43,7 @@ export interface DeviceAttributes {
   latest_location_at?: Date | null;
   latest_location_is_valid?: boolean | null;
   center_number?: string | null;
+  geofence_status?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -90,6 +91,7 @@ class Device
   public latest_location_at?: Date | null;
   public latest_location_is_valid?: boolean | null;
   public center_number?: string | null;
+  public geofence_status?: string | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -305,6 +307,14 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         allowNull: true,
         defaultValue: null,
         comment: "Center phone number for SMS alarm alerts (CENTER command)",
+      },
+      geofence_status: {
+        type: DataTypes.STRING(10),
+        allowNull: true,
+        defaultValue: null,
+        comment:
+          "Last known geofence state ('in' / 'out') used to detect " +
+          "IN<->OUT transitions so alerts fire once per transition.",
       },
 
       createdAt: {
