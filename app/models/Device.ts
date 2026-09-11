@@ -8,24 +8,24 @@ export interface DeviceAttributes {
   owner_id?: string | null;
   imei?: string | null;
   serial_number?: string | null;
-  device_name: string;
-  email: string;
-  phone_number: string;
-  country_code: string;
-  network_carrier: string;
-  network_type: string;
-  profile_image: string;
-  connection_status: string;
-  signal_status: string;
-  battery_percentage: number;
-  gps_strength: string;
-  is_online: boolean;
-  last_updated_at: Date;
-  location_interval_minutes: number;
-  height_cm: number;
-  gender: string;
-  age: number;
-  weight_kg: number;
+  device_name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  country_code?: string | null;
+  network_carrier?: string | null;
+  network_type?: string | null;
+  profile_image?: string | null;
+  connection_status?: string | null;
+  signal_status?: string | null;
+  battery_percentage?: number | null;
+  gps_strength?: string | null;
+  is_online?: boolean | null;
+  last_updated_at?: Date | null;
+  location_interval_minutes?: number | null;
+  height_cm?: number | null;
+  gender?: string | null;
+  age?: number | null;
+  weight_kg?: number | null;
   firmware_version?: string | null;
   language?: string | null;
   timezone?: string | null;
@@ -58,24 +58,24 @@ class Device
   public owner_id?: string | null;
   public imei?: string | null;
   public serial_number?: string | null;
-  public device_name!: string;
-  public network_type!: string;
-  public email!: string;
-  public phone_number!: string;
-  public country_code!: string;
-  public network_carrier!: string;
-  public profile_image!: string;
-  public connection_status!: string;
-  public signal_status!: string;
-  public battery_percentage!: number;
-  public gps_strength!: string;
-  public is_online!: boolean;
-  public last_updated_at!: Date;
-  public location_interval_minutes!: number;
-  public height_cm!: number;
-  public gender!: string;
-  public age!: number;
-  public weight_kg!: number;
+  public device_name?: string | null;
+  public network_type?: string | null;
+  public email?: string | null;
+  public phone_number?: string | null;
+  public country_code?: string | null;
+  public network_carrier?: string | null;
+  public profile_image?: string | null;
+  public connection_status?: string | null;
+  public signal_status?: string | null;
+  public battery_percentage?: number | null;
+  public gps_strength?: string | null;
+  public is_online?: boolean | null;
+  public last_updated_at?: Date | null;
+  public location_interval_minutes?: number | null;
+  public height_cm?: number | null;
+  public gender?: string | null;
+  public age?: number | null;
+  public weight_kg?: number | null;
   public firmware_version?: string | null;
   public language?: string | null;
   public timezone?: string | null;
@@ -157,10 +157,10 @@ export default (sequelize: Sequelize, DataTypes: any) => {
       serial_number: { type: DataTypes.STRING, allowNull: true },
       device_name: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
         defaultValue: "Device",
       },
-      email: { type: DataTypes.STRING, allowNull: false },
+      email: { type: DataTypes.STRING, allowNull: true },
       phone_number: { type: DataTypes.STRING, allowNull: true },
       country_code: { type: DataTypes.STRING, allowNull: true },
       network_carrier: { type: DataTypes.STRING, allowNull: true },
@@ -178,7 +178,7 @@ export default (sequelize: Sequelize, DataTypes: any) => {
       },
       connection_status: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
         defaultValue: "offline",
       },
       signal_status: {
@@ -198,7 +198,7 @@ export default (sequelize: Sequelize, DataTypes: any) => {
       },
       is_online: {
         type: DataTypes.BOOLEAN,
-        allowNull: false,
+        allowNull: true,
         defaultValue: false,
       },
       last_updated_at: {
