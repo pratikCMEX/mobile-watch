@@ -940,31 +940,32 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleLocation(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(`UD location packet received from device ${packet.deviceId}`);
+    const tag = `[UD:${packet.deviceId}]`;
+    Logging.info(`${tag} step 1: UD location packet received`);
 
     const location = this.parseLocation(packet.payload);
 
     if (!location) {
       Logging.error(
-        `Unable to parse UD location packet from ` + `device ${packet.deviceId}`
+        `${tag} step 1 FAILED: could not parse payload="${packet.payload}"`
       );
 
       return;
     }
 
     Logging.info(
-      `GPS LOCATION | Device: ${packet.deviceId} | ` +
-        `Lat: ${location.latitude} ${location.latitudeDirection} | ` +
+      `${tag} step 2: parsed OK | Lat: ${location.latitude} ${location.latitudeDirection} | ` +
         `Lng: ${location.longitude} ${location.longitudeDirection} | ` +
-        `GPS: ${location.gpsStatus}`
+        `GPS: ${location.gpsStatus} -> calling saveLocation()`
     );
 
-    this.saveLocation(packet.deviceId, location, packet.command).catch(
-      (error: Error) =>
+    this.saveLocation(packet.deviceId, location, packet.command)
+      .then(() => Logging.info(`${tag} step 3: saveLocation() completed`))
+      .catch((error: Error) =>
         Logging.error(
-          `Failed to save location for device ${packet.deviceId}: ${error.message}`
+          `${tag} step 3 FAILED: saveLocation() threw: ${error.message}\n${error.stack}`
         )
-    );
+      );
   }
 
   // ───────────────────────────────────────────────────────────
@@ -1160,34 +1161,33 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleLteLocation(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(
-      `UD_LTE location packet received from device ${packet.deviceId}`
-    );
+    const tag = `[UD_LTE:${packet.deviceId}]`;
+    Logging.info(`${tag} step 1: UD_LTE location packet received`);
 
     const location = this.parseLteLocation(packet.payload);
 
     if (!location) {
       Logging.error(
-        `Unable to parse UD_LTE location packet from device ${packet.deviceId}`
+        `${tag} step 1 FAILED: could not parse payload="${packet.payload}"`
       );
 
       return;
     }
 
     Logging.info(
-      `LTE LOCATION | Device: ${packet.deviceId} | ` +
-        `Lat: ${location.latitude} ${location.latitudeDirection} | ` +
+      `${tag} step 2: parsed OK | Lat: ${location.latitude} ${location.latitudeDirection} | ` +
         `Lng: ${location.longitude} ${location.longitudeDirection} | ` +
-        `Battery: ${location.battery} | Signal: ${location.gsmSignal}`
+        `GPS: ${location.gpsStatus} | Battery: ${location.battery} | ` +
+        `Signal: ${location.gsmSignal} | networkType(command): ${packet.command} -> calling saveLteLocation()`
     );
-    Logging.info(`packet.command: ${packet.command}`);
 
-    this.saveLteLocation(packet.deviceId, location, packet.command).catch(
-      (error: Error) =>
+    this.saveLteLocation(packet.deviceId, location, packet.command)
+      .then(() => Logging.info(`${tag} step 3: saveLteLocation() completed`))
+      .catch((error: Error) =>
         Logging.error(
-          `Failed to save LTE location for device ${packet.deviceId}: ${error.message}`
+          `${tag} step 3 FAILED: saveLteLocation() threw: ${error.message}\n${error.stack}`
         )
-    );
+      );
   }
 
   /**
@@ -1245,9 +1245,16 @@ class TcpServer {
     location: GpsLocation,
     networkType: string
   ): Promise<void> {
+    const tag = `[saveLteLocation:${deviceId}]`;
+    Logging.info(`${tag} step 1: looking up device (networkType=${networkType})`);
+
     const device = await this.findDevice(deviceId);
-    Logging.info(`saveLteLocation networkType: ${networkType}`);
-    if (!device) return;
+
+    if (!device) {
+      Logging.error(`${tag} step 1 FAILED: findDevice() returned null`);
+      return;
+    }
+    Logging.info(`${tag} step 1 OK: device.id=${device.id}`);
 
     const latitude = this.convertDecimalCoordinate(
       location.latitude,
@@ -1260,16 +1267,20 @@ class TcpServer {
 
     if (latitude === null || longitude === null) {
       Logging.error(
-        `Could not convert LTE coordinates for device ${deviceId}: ` +
+        `${tag} step 2 FAILED: could not convert coordinates ` +
           `${location.latitude}${location.latitudeDirection}, ` +
           `${location.longitude}${location.longitudeDirection}`
       );
 
       return;
     }
+    Logging.info(`${tag} step 2 OK: latitude=${latitude} longitude=${longitude}`);
 
     const recordedAt = this.parseRecordedAt(location.date, location.time);
     const isValidFix = location.gpsStatus === "A";
+    Logging.info(
+      `${tag} step 3: recordedAt=${recordedAt.toISOString()} isValidFix=${isValidFix} (gpsStatus="${location.gpsStatus}")`
+    );
 
     await db.Location.create({
       device_id: device.id,
@@ -1280,6 +1291,7 @@ class TcpServer {
       is_valid_fix: isValidFix,
       recorded_at: recordedAt,
     });
+    Logging.info(`${tag} step 4 OK: Location row created`);
 
     const battery = parseInt(location.battery || "", 10);
 
@@ -1294,10 +1306,12 @@ class TcpServer {
         ? { battery_percentage: battery }
         : {}),
     });
+    Logging.info(`${tag} step 5 OK: Device row updated (battery=${battery})`);
 
     // Refresh the cached "latest position" columns on the Device row
     // so dashboards can render the current pin immediately without
     // scanning the Locations history.
+    Logging.info(`${tag} step 6: calling cacheLatestLocationOnDevice()`);
     await this.cacheLatestLocationOnDevice(
       device,
       latitude,
@@ -1305,6 +1319,7 @@ class TcpServer {
       recordedAt,
       isValidFix
     );
+    Logging.info(`${tag} step 6 OK: cacheLatestLocationOnDevice() completed`);
   }
 
   // ───────────────────────────────────────────────────────────
@@ -2669,12 +2684,21 @@ class TcpServer {
    *   - owner_id = null (assigned later via admin API)
    */
   private async findDevice(deviceId: string): Promise<any | null> {
+    const tag = `[findDevice:${deviceId}]`;
+
     let device = await db.Device.findOne({
       where: { serial_number: deviceId },
     });
 
+    if (device) {
+      Logging.info(`${tag} found by serial_number -> device.id=${device.id}`);
+    }
+
     if (!device) {
       device = await db.Device.findOne({ where: { imei: deviceId } });
+      if (device) {
+        Logging.info(`${tag} found by imei -> device.id=${device.id}`);
+      }
     }
 
     if (!device) {
@@ -2766,6 +2790,10 @@ class TcpServer {
           return null;
         }
       }
+    }
+
+    if (!device) {
+      Logging.error(`${tag} returning null — no device found or created`);
     }
 
     return device;
@@ -2872,6 +2900,12 @@ class TcpServer {
     recordedAt: Date,
     isValidFix: boolean
   ): Promise<void> {
+    const tag = `[cacheLatestLocationOnDevice:${device.serial_number || device.id}]`;
+    Logging.info(
+      `${tag} step 1: caching latest_lat=${latitude} latest_lng=${longitude} ` +
+        `isValidFix=${isValidFix}`
+    );
+
     try {
       await device.update({
         latest_lat: latitude,
@@ -2879,12 +2913,9 @@ class TcpServer {
         latest_location_at: recordedAt,
         latest_location_is_valid: isValidFix,
       });
+      Logging.info(`${tag} step 1 OK`);
     } catch (err: any) {
-      Logging.warn(
-        `Failed to cache latest location on device ${
-          device.serial_number || device.id
-        }: ` + (err?.message || String(err))
-      );
+      Logging.warn(`${tag} step 1 FAILED: ` + (err?.message || String(err)));
     }
 
     // Run geofencing on every reported location, not just GPS-grade
@@ -2893,7 +2924,9 @@ class TcpServer {
     // positioning instead, especially indoors — yet still send a
     // usable lat/lng. Gating this on isValidFix meant geofencing
     // silently never ran at all for those devices.
+    Logging.info(`${tag} step 2: calling checkGeofence()`);
     await this.checkGeofence(device, latitude, longitude);
+    Logging.info(`${tag} step 2 OK: checkGeofence() completed`);
   }
 
   // ───────────────────────────────────────────────────────────
@@ -2902,10 +2935,11 @@ class TcpServer {
   // A device may have several active Geofence rows (e.g. "Home",
   // "School"). It's considered inside the allowed area if it's
   // within the radius of ANY active geofence, and outside only when
-  // it's outside ALL of them. We only alert on a genuine IN<->OUT
-  // transition (tracked via Device.geofence_status), never on every
-  // location update, and never on the very first check for a device
-  // (there's no prior state to compare against yet).
+  // it's outside ALL of them. We alert every time the computed
+  // in/out status differs from Device.geofence_status (this
+  // includes the very first-ever check for a device — if it's
+  // already outside the fence the first time we look, that's still
+  // something the owner should be told about).
   // ───────────────────────────────────────────────────────────
 
   private async checkGeofence(
@@ -2913,12 +2947,27 @@ class TcpServer {
     latitude: number,
     longitude: number
   ): Promise<void> {
+    const deviceLabel = device.serial_number || device.id;
+    const tag = `[GEOFENCE:${deviceLabel}]`;
+
     try {
+      Logging.info(
+        `${tag} step 1: looking up active geofences for device.id=${device.id} ` +
+          `at lat=${latitude} lng=${longitude}`
+      );
+
       const geofences = await db.Geofence.findAll({
         where: { device_id: device.id, is_active: true },
       });
 
-      if (geofences.length === 0) return;
+      Logging.info(`${tag} step 1 OK: found ${geofences.length} active geofence(s)`);
+
+      if (geofences.length === 0) {
+        Logging.info(
+          `${tag} step 2 SKIPPED: no active geofences configured for this device — nothing to check`
+        );
+        return;
+      }
 
       let matchedGeofence: any = null;
       for (const geofence of geofences) {
@@ -2927,6 +2976,13 @@ class TcpServer {
           longitude,
           parseFloat(geofence.latitude as any),
           parseFloat(geofence.longitude as any)
+        );
+
+        Logging.info(
+          `${tag} step 2: geofence "${geofence.name || geofence.id}" ` +
+            `center=(${geofence.latitude},${geofence.longitude}) radius=${geofence.radius_meters}m ` +
+            `-> distance=${distance.toFixed(1)}m ` +
+            `(${distance <= parseFloat(geofence.radius_meters as any) ? "INSIDE" : "outside"})`
         );
 
         if (distance <= parseFloat(geofence.radius_meters as any)) {
@@ -2942,9 +2998,17 @@ class TcpServer {
         | null
         | undefined;
 
-      if (previousStatus === newStatus) return;
+      Logging.info(
+        `${tag} step 3: previousStatus=${previousStatus ?? "null"} newStatus=${newStatus}`
+      );
+
+      if (previousStatus === newStatus) {
+        Logging.info(`${tag} step 3 SKIPPED: no status change, not notifying`);
+        return;
+      }
 
       await device.update({ geofence_status: newStatus });
+      Logging.info(`${tag} step 4 OK: Device.geofence_status updated to "${newStatus}"`);
 
       const geofenceName = matchedGeofence?.name || "the safe zone";
 
@@ -2954,21 +3018,22 @@ class TcpServer {
         newStatus
       );
 
-      await createNotification({
+      Logging.info(
+        `${tag} step 5: device.owner_id=${device.owner_id ?? "null"} -> calling createNotification()`
+      );
+
+      const notification = await createNotification({
         ...notificationPayload,
         user_id: device.owner_id || null,
       });
 
       Logging.info(
-        `Geofence ${newStatus === "in" ? "ENTER" : "EXIT"} | Device: ${
-          device.serial_number || device.id
-        } | ${geofenceName}`
+        `${tag} step 5 OK: Notification row id=${notification?.id} type=${newStatus === "in" ? "geo_fence_in" : "geo_fence_out"} ` +
+          `| ${newStatus === "in" ? "ENTER" : "EXIT"} "${geofenceName}"`
       );
     } catch (err: any) {
       Logging.error(
-        `Geofence check failed for device ${
-          device.serial_number || device.id
-        }: ` + (err?.message || String(err))
+        `${tag} UNCAUGHT: ${err?.message || String(err)}\n${err?.stack || ""}`
       );
     }
   }
@@ -3001,9 +3066,16 @@ class TcpServer {
     location: GpsLocation,
     networkType: string
   ): Promise<void> {
+    const tag = `[saveLocation:${deviceId}]`;
+    Logging.info(`${tag} step 1: looking up device (networkType=${networkType})`);
+
     const device = await this.findDevice(deviceId);
 
-    if (!device) return;
+    if (!device) {
+      Logging.error(`${tag} step 1 FAILED: findDevice() returned null`);
+      return;
+    }
+    Logging.info(`${tag} step 1 OK: device.id=${device.id}`);
 
     const latitude = this.convertCoordinate(
       location.latitude,
@@ -3016,16 +3088,20 @@ class TcpServer {
 
     if (latitude === null || longitude === null) {
       Logging.error(
-        `Could not convert coordinates for device ${deviceId}: ` +
+        `${tag} step 2 FAILED: could not convert coordinates ` +
           `${location.latitude}${location.latitudeDirection}, ` +
           `${location.longitude}${location.longitudeDirection}`
       );
 
       return;
     }
+    Logging.info(`${tag} step 2 OK: latitude=${latitude} longitude=${longitude}`);
 
     const recordedAt = this.parseRecordedAt(location.date, location.time);
     const isValidFix = location.gpsStatus === "A";
+    Logging.info(
+      `${tag} step 3: recordedAt=${recordedAt.toISOString()} isValidFix=${isValidFix} (gpsStatus="${location.gpsStatus}")`
+    );
 
     await db.Location.create({
       device_id: device.id,
@@ -3036,16 +3112,19 @@ class TcpServer {
       is_valid_fix: isValidFix,
       recorded_at: recordedAt,
     });
+    Logging.info(`${tag} step 4 OK: Location row created`);
 
     await device.update({
       last_updated_at: new Date(),
       gps_strength: parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
       network_type: networkType,
     });
+    Logging.info(`${tag} step 5 OK: Device row updated`);
 
     // Refresh the cached "latest position" columns on the Device
     // row so dashboards can render the current pin immediately
     // without scanning the Locations history.
+    Logging.info(`${tag} step 6: calling cacheLatestLocationOnDevice()`);
     await this.cacheLatestLocationOnDevice(
       device,
       latitude,
@@ -3053,6 +3132,7 @@ class TcpServer {
       recordedAt,
       isValidFix
     );
+    Logging.info(`${tag} step 6 OK: cacheLatestLocationOnDevice() completed`);
   }
 
   private async saveHeartRate(
