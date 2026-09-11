@@ -3783,7 +3783,7 @@ const registerDeviceByImei = async function (
           owner_id: userId,
           imei: imei ?? null,
           serial_number: derivedSerialNumber,
-          device_name: device_name ?? "Device",
+          device_name: device_name ?? "Device".concat(derivedSerialNumber),
           email: email ?? null,
           phone_number: phone_number ?? null,
           country_code: country_code ?? null,
