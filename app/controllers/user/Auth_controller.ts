@@ -9,17 +9,17 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     const { email, password, fcm_token } = req.body;
 
     if (!email || !password) {
-      return errorMessage(res, "Email and password are required", 400);
+      return errorMessage(res, "Email and password are required", 200);
     }
 
     const user = await db.User.findOne({ where: { email } });
     if (!user) {
-      return errorMessage(res, "Invalid email or password", 401);
+      return errorMessage(res, "Invalid email or password", 200);
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return errorMessage(res, "Invalid email or password", 401);
+      return errorMessage(res, "Invalid email or password", 200);
     }
 
     // if (user.status && user.status !== "active") {
