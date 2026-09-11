@@ -185,9 +185,50 @@ const getProfile = async (req: Request, res: Response, next: NextFunction) => {
     return errorMessage(res, "Error fetching profile");
   }
 };
+const createUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return errorMessage(res, "Email and password are required", 400);
+    }
+
+    // Check if user already exists
+    const existingUser = await db.User.findOne({ where: { email } });
+    if (existingUser) {
+      return errorMessage(res, "User with this email already exists", 409);
+    }
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create the user
+    const user = await db.User.create({
+      email,
+      password: hashedPassword,
+    });
+
+    // Generate auth token
+    // const token = await generateAuthToken(user);
+
+    // Clear password from response
+    const userData = user.toJSON();
+    delete userData.password;
+
+    return successMessage(res, "User created successfully", {
+      // token,
+      user: userData,
+    });
+  } catch (error) {
+    console.error("createUser error:", error);
+    return errorMessage(res, "Error creating user");
+  }
+};
+
 export default {
   login,
   logout,
   updateProfile,
   getProfile,
+  createUser,
 };

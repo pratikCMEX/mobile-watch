@@ -1422,6 +1422,10 @@ export const Schemas = {
     }),
   },
   auth: {
+    createUser: Joi.object({
+      email: Joi.string().email().required(),
+      password: Joi.string().min(6).required(),
+    }),
     updateProfile: Joi.object({
       name: Joi.string().optional().allow(""),
       email: Joi.string().email().optional().allow(""),

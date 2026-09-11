@@ -8,6 +8,13 @@ const router = express.Router();
 
 router.post("/user_login", ValidateJoi(Schemas.login), Auth_controller.login);
 
+// Register a new user — requires email and password
+router.post(
+  "/user_register",
+  ValidateJoi(Schemas.auth.createUser),
+  Auth_controller.createUser
+);
+
 // Logout — invalidates the current session by clearing the stored token
 router.post("/logout", checkToken, Auth_controller.logout);
 
