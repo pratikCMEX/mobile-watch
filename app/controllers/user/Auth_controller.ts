@@ -233,7 +233,7 @@ const deleteAccount = async (
 ) => {
   const lang = (req as any).lang;
   try {
-    const userId = req.body.userinfo.payload.id;
+    const userId = (req as any)?.userinfo?.payload?.id;
     const user = await db.User.findOne({
       where: { id: userId },
     });
