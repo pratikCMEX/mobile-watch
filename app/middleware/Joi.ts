@@ -187,11 +187,11 @@ export const Schemas = {
     update: Joi.object({
       device_id: Joi.string().required(),
       device_type: Joi.string()
-        .valid("android", "rtos", "rt_os")
+        .valid("android", "rtos", "rt_os", "ios")
         .optional()
         .default("android")
         .messages({
-          "any.only": "device_type must be 'android' or 'rtos'",
+          "any.only": "device_type must be 'android' , 'rt_os' or 'ios'",
         }),
       sms_alert_enabled: Joi.string().valid("1", "0").optional(),
       take_off_device_alert: Joi.string().valid("1", "0").optional(),
