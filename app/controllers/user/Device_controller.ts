@@ -3601,10 +3601,15 @@ const getDeviceLocation = async function (
 // never from the request body, so a caller cannot register a device for
 // someone else.
 //
-// Two identity modes:
-//   1. IMEI only  → serial_number is auto-derived (TAC|SN|CD layout)
-//   2. serial_number only → no IMEI; update an existing row by SN
-//      or insert a new row carrying only serial_number + imei.
+// Logic (serial_number is auto-derived from a 15-digit IMEI when only
+// the IMEI is supplied):
+//   1. A row already exists with this serial_number:
+//        - if its imei is null → UPDATE in place (link owner + imei
+//          + any provided fields), do NOT insert a duplicate.
+//        - if its imei is set   → return the existing row as-is.
+//   2. No row with this serial_number:
+//        - if imei supplied and already registered to another user → 409
+//        - otherwise INSERT a new device row.
 const registerDeviceByImei = async function (
   req: Request,
   res: Response,
@@ -3651,14 +3656,57 @@ const registerDeviceByImei = async function (
       return errorMessage(res, "imei or serial_number is required");
     }
 
-    // ── IMEI path ──────────────────────────────────────────────
+    // ── 1) A device row already exists with this serial_number ──
+    const existingBySerial = await db.Device.findOne({
+      where: { serial_number: derivedSerialNumber },
+    });
+    if (existingBySerial) {
+      if (!existingBySerial.imei) {
+        // Serial exists but has no IMEI yet — update it in place
+        // (link the owner + imei + any provided fields) instead of
+        // inserting a duplicate row.
+        existingBySerial.owner_id = userId;
+        existingBySerial.imei = imei ?? null;
+        if (device_name) existingBySerial.device_name = device_name;
+        if (email !== undefined) existingBySerial.email = email;
+        if (phone_number !== undefined)
+          existingBySerial.phone_number = phone_number;
+        if (country_code !== undefined)
+          existingBySerial.country_code = country_code;
+        if (network_carrier !== undefined)
+          existingBySerial.network_carrier = network_carrier;
+        if (network_type !== undefined)
+          existingBySerial.network_type = network_type;
+        if (location_interval_minutes !== undefined)
+          existingBySerial.location_interval_minutes =
+            location_interval_minutes;
+        if (height_cm !== undefined) existingBySerial.height_cm = height_cm;
+        if (gender !== undefined) existingBySerial.gender = gender;
+        if (age !== undefined) existingBySerial.age = age;
+        if (weight_kg !== undefined) existingBySerial.weight_kg = weight_kg;
+        await existingBySerial.save();
+        return successMessage(
+          res,
+          "Device updated successfully",
+          existingBySerial
+        );
+      }
+      // Serial is already bound to a device that has an IMEI —
+      // do not insert a duplicate row.
+      return successMessage(res, "Device already registered", existingBySerial);
+    }
+
+    // ── 2) No row with this serial_number. If an IMEI was supplied,
+    //        make sure it isn't already registered under a different row.
     if (imei) {
-      // Idempotent: if this IMEI already belongs to the same user,
-      // return the existing device instead of erroring.
-      const existing = await db.Device.findOne({ where: { imei } });
-      if (existing) {
-        if (existing.owner_id === userId) {
-          return successMessage(res, "Device already registered", existing);
+      const existingByImei = await db.Device.findOne({ where: { imei } });
+      if (existingByImei) {
+        if (existingByImei.owner_id === userId) {
+          return successMessage(
+            res,
+            "Device already registered",
+            existingByImei
+          );
         }
         // IMEI is owned by a different user — refuse to hijack it.
         return customMessage(
@@ -3667,82 +3715,98 @@ const registerDeviceByImei = async function (
           "This IMEI is already registered to another account"
         );
       }
+    }
 
-      const device = await db.Device.create({
-        owner_id: userId,
-        imei,
-        serial_number: derivedSerialNumber,
-        device_name: device_name ?? "Device",
-        email: email ?? null,
-        phone_number: phone_number ?? null,
-        country_code: country_code ?? null,
-        network_carrier: network_carrier ?? null,
-        network_type: network_type ?? null,
-        location_interval_minutes: location_interval_minutes ?? 1,
-        height_cm: height_cm ?? null,
-        gender: gender ?? null,
-        age: age ?? null,
-        weight_kg: weight_kg ?? null,
-        connection_status: "offline",
-        signal_status: null,
-        battery_percentage: null,
-        is_online: false,
-        last_updated_at: null,
+    // ── 3) Neither serial nor imei exists — insert a new record ─
+    /**
+     * Guarded insert: serial_number is intentionally NOT unique and
+     * imei is only unique when non-null, so a check-then-create race
+     * (two concurrent requests for the same identity) could otherwise
+     * insert two rows — or, for the imei path, throw a
+     * SequelizeUniqueConstraintError that escapes as an unhandled
+     * rejection. findOrCreate() keeps the create atomic; the catch
+     * below re-fetches the winner if we lost the race.
+     */
+    const whereClause = imei
+      ? { imei }
+      : { serial_number: derivedSerialNumber, imei: null };
+
+    let device: any;
+    try {
+      const [createdDevice, created] = await db.Device.findOrCreate({
+        where: whereClause,
+        defaults: {
+          owner_id: userId,
+          imei: imei ?? null,
+          serial_number: derivedSerialNumber,
+          device_name: device_name ?? "Device",
+          email: email ?? null,
+          phone_number: phone_number ?? null,
+          country_code: country_code ?? null,
+          network_carrier: network_carrier ?? null,
+          network_type: network_type ?? null,
+          location_interval_minutes: location_interval_minutes ?? 1,
+          height_cm: height_cm ?? null,
+          gender: gender ?? null,
+          age: age ?? null,
+          weight_kg: weight_kg ?? null,
+          connection_status: "offline",
+          signal_status: null,
+          battery_percentage: null,
+          is_online: false,
+          last_updated_at: null,
+        },
       });
 
-      return successMessage(res, "Device registered successfully", device);
-    }
+      device = createdDevice;
 
-    // ── Serial-number-only path ────────────────────────────────
-    // No IMEI was supplied — use the serial_number as the identity.
-    // If a device with this serial_number already exists, update its
-    // serial_number + imei fields (and link the owner); otherwise
-    // insert a brand-new row carrying only serial_number + imei.
-    const existing = await db.Device.findOne({
-      where: { serial_number: derivedSerialNumber },
-    });
-    if (existing) {
-      existing.owner_id = userId;
-      existing.serial_number = derivedSerialNumber;
-      existing.imei = imei ?? null;
-      if (device_name) existing.device_name = device_name;
-      if (email !== undefined) existing.email = email;
-      if (phone_number !== undefined) existing.phone_number = phone_number;
-      if (country_code !== undefined) existing.country_code = country_code;
-      if (network_carrier !== undefined)
-        existing.network_carrier = network_carrier;
-      if (network_type !== undefined) existing.network_type = network_type;
-      if (location_interval_minutes !== undefined)
-        existing.location_interval_minutes = location_interval_minutes;
-      if (height_cm !== undefined) existing.height_cm = height_cm;
-      if (gender !== undefined) existing.gender = gender;
-      if (age !== undefined) existing.age = age;
-      if (weight_kg !== undefined) existing.weight_kg = weight_kg;
-      await existing.save();
-      return successMessage(res, "Device updated successfully", existing);
-    }
+      if (!created) {
+        /**
+         * A concurrent request inserted the row between our checks.
+         * Link the owner if it isn't already linked to this user.
+         */
+        if (device.owner_id !== userId) {
+          device.owner_id = userId;
+          if (device_name) device.device_name = device_name;
+          if (email !== undefined) device.email = email;
+          if (phone_number !== undefined) device.phone_number = phone_number;
+          if (country_code !== undefined) device.country_code = country_code;
+          if (network_carrier !== undefined)
+            device.network_carrier = network_carrier;
+          if (network_type !== undefined) device.network_type = network_type;
+          if (location_interval_minutes !== undefined)
+            device.location_interval_minutes = location_interval_minutes;
+          if (height_cm !== undefined) device.height_cm = height_cm;
+          if (gender !== undefined) device.gender = gender;
+          if (age !== undefined) device.age = age;
+          if (weight_kg !== undefined) device.weight_kg = weight_kg;
+          await device.save();
+        }
+        return successMessage(res, "Device already registered", device);
+      }
+    } catch (error: any) {
+      const isUniqueViolation =
+        error.name === "SequelizeUniqueConstraintError" ||
+        error.parent?.code === "23505" ||
+        error.original?.code === "23505";
 
-    const device = await db.Device.create({
-      owner_id: userId,
-      imei: imei ?? null,
-      serial_number: derivedSerialNumber,
-      device_name: device_name ?? "Device",
-      email: email ?? null,
-      phone_number: phone_number ?? null,
-      country_code: country_code ?? null,
-      network_carrier: network_carrier ?? null,
-      network_type: network_type ?? null,
-      location_interval_minutes: location_interval_minutes ?? 1,
-      height_cm: height_cm ?? null,
-      gender: gender ?? null,
-      age: age ?? null,
-      weight_kg: weight_kg ?? null,
-      connection_status: "offline",
-      signal_status: null,
-      battery_percentage: null,
-      is_online: false,
-      last_updated_at: null,
-    });
+      if (isUniqueViolation) {
+        device =
+          (await db.Device.findOne({ where: { imei } })) ||
+          (await db.Device.findOne({
+            where: { serial_number: derivedSerialNumber },
+          }));
+        if (!device) {
+          return errorMessage(res, "Error registering device: race detected");
+        }
+        if (device.owner_id !== userId) {
+          device.owner_id = userId;
+          await device.save();
+        }
+        return successMessage(res, "Device already registered", device);
+      }
+      throw error;
+    }
 
     return successMessage(res, "Device registered successfully", device);
   } catch (err: any) {

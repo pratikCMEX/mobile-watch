@@ -226,10 +226,35 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+const deleteAccount = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const lang = (req as any).lang;
+  try {
+    const userId = req.body.userinfo.payload.id;
+    const user = await db.User.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      return errorMessage(res, "User not found");
+    }
+    await db.Device.destroy({ where: { user_id: userId } });
+    await user.destroy();
+
+    return successMessage(res, "Account deleted successfully");
+  } catch (error: any) {
+    console.error("Delete account error:", error);
+    return res.status(500).json({ message: error.message });
+  }
+};
 export default {
   login,
   logout,
   updateProfile,
   getProfile,
   createUser,
+  deleteAccount,
 };

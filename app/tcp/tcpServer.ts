@@ -2497,15 +2497,38 @@ class TcpServer {
     deviceId: string,
     imei: string
   ): Promise<void> {
+    /**
+     * Race-safe device linking.
+     *
+     * A brand-new device can easily end up with TWO Device rows:
+     *   1. findDevice() (invoked for every packet) auto-creates a
+     *      placeholder with serial_number=deviceId, imei=null.
+     *   2. linkDeviceIdentity() (invoked on ICCID/RYIMEI) then tries
+     *      to create a second placeholder with serial_number=deviceId,
+     *      imei=<real>.
+     *
+     * serial_number is NOT a unique column and a NULL imei does not
+     * violate the imei unique constraint, so both inserts succeed and
+     * the device is registered twice. Concurrent packets make it
+     * worse: two linkDeviceIdentity() calls can both pass the checks
+     * and both INSERT the same imei, the second failing with a
+     * SequelizeUniqueConstraintError ("Validation error") that is
+     * currently an unhandled rejection.
+     *
+     * This method avoids duplicates by:
+     *   a) looking up an existing row by imei first,
+     *   b) then looking up a placeholder by serial_number (any imei,
+     *      not just imei=null, so a placeholder created by findDevice()
+     *      is always found and updated instead of duplicated),
+     *   c) guarding the INSERT with a try/catch: if a concurrent call
+     *      already inserted the row (imei unique violation), re-fetch
+     *      it and update it instead of letting the rejection escape.
+     */
     let device = await db.Device.findOne({ where: { imei } });
 
     if (!device) {
-      /**
-       * No device found by IMEI. Check if there is a placeholder
-       * device that was auto-created for this protocol deviceId.
-       */
       device = await db.Device.findOne({
-        where: { serial_number: deviceId, imei: null },
+        where: { serial_number: deviceId },
       });
     }
 
@@ -2545,11 +2568,41 @@ class TcpServer {
             `with imei ${imei} (DB id: ${device.id})`
         );
       } catch (error: any) {
-        Logging.error(
-          `Failed to create placeholder Device for ${deviceId}: ` +
-            `${error.message}`
-        );
-        return;
+        /**
+         * A concurrent request inserted the row between our checks
+         * above (imei unique violation) — re-fetch it and update
+         * instead of letting this become an unhandled rejection or
+         * leaving a duplicate row.
+         */
+        const isUniqueViolation =
+          error.name === "SequelizeUniqueConstraintError" ||
+          error.parent?.code === "23505" ||
+          error.original?.code === "23505";
+
+        if (isUniqueViolation) {
+          Logging.warn(
+            `Race detected while creating placeholder for ${deviceId}/` +
+              `${imei} - re-fetching existing row.`
+          );
+          device =
+            (await db.Device.findOne({ where: { imei } })) ||
+            (await db.Device.findOne({
+              where: { serial_number: deviceId },
+            }));
+          if (!device) {
+            Logging.error(
+              `Could not re-fetch device after unique violation for ` +
+                `${deviceId}/${imei}`
+            );
+            return;
+          }
+        } else {
+          Logging.error(
+            `Failed to create placeholder Device for ${deviceId}: ` +
+              `${error.message}`
+          );
+          return;
+        }
       }
     }
 
@@ -2624,46 +2677,93 @@ class TcpServer {
     }
 
     if (!device) {
+      /**
+       * No registered Device found. Auto-create a placeholder so
+       * incoming data is not lost.
+       *
+       * NOTE: serial_number is intentionally NOT a unique column (a
+       * device may be re-registered under a different SN later, and
+       * multiple placeholders with imei=null must be allowed to
+       * coexist without violating the imei unique constraint).
+       *
+       * That means a find-then-create race is possible: two packets
+       * for the same deviceId processed concurrently can both pass
+       * the checks above and both INSERT. findOrCreate() keeps the
+       * create atomic (one row), and the catch below re-fetches the
+       * winner if we lost the race — so we never return null when a
+       * row actually exists, and we never leak a duplicate.
+       */
       Logging.info(
         `No registered Device found for protocol id ${deviceId} - ` +
           `creating placeholder.`
       );
 
       try {
-        device = await db.Device.create({
-          serial_number: deviceId,
-          imei: null,
-          owner_id: null,
-          device_name: `Device ${deviceId}`,
-          email: `${deviceId}@placeholder.local`,
-          phone_number: null,
-          country_code: null,
-          network_carrier: null,
-          network_type: null,
-          profile_image: null,
-          connection_status: "offline",
-          signal_status: null,
-          battery_percentage: null,
-          gps_strength: null,
-          is_online: false,
-          last_updated_at: null,
-          location_interval_minutes: 1,
-          height_cm: null,
-          gender: null,
-          age: null,
-          weight_kg: null,
+        const [createdDevice, created] = await db.Device.findOrCreate({
+          where: { serial_number: deviceId, imei: null },
+          defaults: {
+            serial_number: deviceId,
+            imei: null,
+            owner_id: null,
+            device_name: `Device ${deviceId}`,
+            email: `${deviceId}@placeholder.local`,
+            phone_number: null,
+            country_code: null,
+            network_carrier: null,
+            network_type: null,
+            profile_image: null,
+            connection_status: "offline",
+            signal_status: null,
+            battery_percentage: null,
+            gps_strength: null,
+            is_online: false,
+            last_updated_at: null,
+            location_interval_minutes: 1,
+            height_cm: null,
+            gender: null,
+            age: null,
+            weight_kg: null,
+          },
         });
 
-        Logging.info(
-          `Placeholder Device created for protocol id ${deviceId} ` +
-            `(DB id: ${device.id})`
-        );
+        if (created) {
+          Logging.info(
+            `Placeholder Device created for protocol id ${deviceId} ` +
+              `(DB id: ${createdDevice.id})`
+          );
+        }
+
+        device = createdDevice;
       } catch (error: any) {
-        Logging.error(
-          `Failed to create placeholder Device for ${deviceId}: ` +
-            `${error.message}`
-        );
-        return null;
+        const isUniqueViolation =
+          error.name === "SequelizeUniqueConstraintError" ||
+          error.parent?.code === "23505" ||
+          error.original?.code === "23505";
+
+        if (isUniqueViolation) {
+          /**
+           * A concurrent request inserted the row between our checks.
+           * Re-fetch it instead of returning null.
+           */
+          Logging.warn(
+            `Race detected while creating placeholder for ${deviceId} - ` +
+              `re-fetching existing row.`
+          );
+          device =
+            (await db.Device.findOne({
+              where: { serial_number: deviceId, imei: null },
+            })) ||
+            (await db.Device.findOne({
+              where: { serial_number: deviceId },
+            })) ||
+            (await db.Device.findOne({ where: { imei: deviceId } }));
+        } else {
+          Logging.error(
+            `Failed to create placeholder Device for ${deviceId}: ` +
+              `${error.message}`
+          );
+          return null;
+        }
       }
     }
 

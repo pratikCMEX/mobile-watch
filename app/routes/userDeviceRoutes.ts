@@ -353,7 +353,9 @@ router.post(
 // Register / update a device for the logged-in user.
 // The user_id is taken from the auth token, not the request body,
 // so a caller cannot register a device for another account.
-// Body: imei (SN auto-derived) OR serial_number (update-or-insert).
+// Body: imei (SN auto-derived) and/or serial_number.
+//   - serial exists with imei null → update in place
+//   - neither serial nor imei exists → insert new row
 router.post(
   "/register_device",
   checkToken,

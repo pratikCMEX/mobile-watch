@@ -15,6 +15,8 @@ router.post(
   Auth_controller.createUser
 );
 
+router.delete("/delete_account", checkToken, Auth_controller.deleteAccount);
+
 // Logout — invalidates the current session by clearing the stored token
 router.post("/logout", checkToken, Auth_controller.logout);
 
