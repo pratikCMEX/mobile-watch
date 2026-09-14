@@ -1387,17 +1387,6 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
       Boolean(enabled)
     );
 
-    await db.DeviceSetting.update(
-      {
-        sms_alert_enabled: enabled,
-      },
-      {
-        where: {
-          device_id: device.id,
-        },
-        returning: true,
-      }
-    );
     if (!commandSent) {
       return errorMessage(
         res,
@@ -1406,6 +1395,21 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     }
 
     const flag = enabled ? "1" : "0";
+
+    const [affectedRows] = await db.DeviceSetting.update(
+      {
+        sms_alert_enabled: flag,
+      },
+      {
+        where: {
+          device_id: device.id,
+        },
+      }
+    );
+
+    if (affectedRows === 0) {
+      return errorMessage(res, "Device setting not found for this device");
+    }
     const commandProtocol = `[3G*${serial_number}*0008*SOSSMS,${flag}]`;
 
     Logging.info(
