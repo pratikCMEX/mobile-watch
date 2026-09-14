@@ -114,15 +114,15 @@ export const pushToUser = async (
 
   const response = await messaging().sendEachForMulticast({
     tokens,
-    // notification: { title: data.title, body: data.body },
+    notification: { title: data.title, body: data.body },
     android: {
       priority: "high",
-      // notification: {
-      //   sound: "default",
-      //   channelId: "default_channel",
-      //   icon: "@drawable/ic_notification",
-      //   color: "#FF0000",
-      // },
+      notification: {
+        sound: "default",
+        channelId: "default_channel",
+        icon: "@drawable/ic_notification",
+        color: "#FF0000",
+      },
     },
     apns: {
       payload: {
