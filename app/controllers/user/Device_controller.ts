@@ -8,6 +8,8 @@ import {
 } from "../../library/Response";
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
+import Device from "../../models/Device";
+import DeviceSetting from "../../models/DeviceSetting";
 
 /**
  * Country code auto-prepended to 10-digit national numbers on the wire.
@@ -1383,6 +1385,18 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     const commandSent = tcpServer.sendSosSmsCommand(
       serial_number,
       Boolean(enabled)
+    );
+
+    await db.DeviceSetting.update(
+      {
+        sms_alert_enabled: enabled,
+      },
+      {
+        where: {
+          device_id: device.id,
+        },
+        returning: true,
+      }
     );
     if (!commandSent) {
       return errorMessage(
