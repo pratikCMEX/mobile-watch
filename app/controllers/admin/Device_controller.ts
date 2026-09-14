@@ -564,7 +564,7 @@ const listDevices = async function (
   next: NextFunction
 ) {
   try {
-    const { search = "", page = 1, limit = 20 } = req.body;
+    const { search = "", page = 1, limit = 20, connection_status } = req.body;
 
     const offset = (page - 1) * limit;
 
@@ -572,6 +572,10 @@ const listDevices = async function (
 
     if (search) {
       where.serial_number = { [Op.like]: `%${search}%` };
+    }
+
+    if (connection_status) {
+      where.connection_status = connection_status;
     }
 
     const { rows, count } = await db.Device.findAndCountAll({
@@ -594,6 +598,27 @@ const listDevices = async function (
   }
 };
 
+const getAllDeviceImei = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const devices = await db.Device.findAll({
+      attributes: ["id", "imei"],
+      order: [["createdAt", "DESC"]],
+    });
+
+    return successMessage(res, "All device IMEIs fetched successfully", {
+      devices,
+      total: devices.length,
+    });
+  } catch (err) {
+    console.error("getAllDeviceImei error:", err);
+    return errorMessage(res, "Error fetching device IMEIs");
+  }
+};
+
 
 export default {
   createDevice,
@@ -606,4 +631,5 @@ export default {
   assignOwner,
   updateDeviceIdentity,
   listDevices,
+  getAllDeviceImei,
 };

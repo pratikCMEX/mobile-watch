@@ -2,6 +2,8 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 
+const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+
 // Search snapshots by ID or IMEI number
 async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
   try {
@@ -48,13 +50,19 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
         order: [["captured_at", "DESC"]],
       });
 
+      // Add base URL to image URLs
+      const snapshotsWithFullUrl = snapshots.map((snap: any) => ({
+        ...snap.toJSON(),
+        image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
+      }));
+
       return successMessage(res, "Snapshots retrieved successfully", {
         device: {
           id: device.id,
           imei: device.imei,
           device_name: device.device_name,
         },
-        snapshots,
+        snapshots: snapshotsWithFullUrl,
       });
     }
   } catch (err) {
@@ -117,13 +125,19 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
           order: [["captured_at", "DESC"]],
         });
 
+        // Add base URL to image URLs
+        const snapshotsWithFullUrl = snapshots.map((snap: any) => ({
+          ...snap.toJSON(),
+          image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
+        }));
+
         return successMessage(res, "Snapshots retrieved successfully", {
           device: {
             id: device.id,
             imei: device.imei,
             device_name: device.device_name,
           },
-          snapshots,
+          snapshots: snapshotsWithFullUrl,
         });
       }
     }
@@ -154,8 +168,14 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
       // offset,
     });
 
+    // Add base URL to image URLs
+    const snapshotsWithFullUrl = rows.map((snap: any) => ({
+      ...snap.toJSON(),
+      image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
+    }));
+
     return successMessage(res, "Snapshots retrieved successfully", {
-      snapshots: rows,
+      snapshots: snapshotsWithFullUrl,
       pagination: {
         total: count,
         // page: Number(page),
@@ -170,7 +190,38 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
   }
 }
 
+// Delete snapshot by ID
+async function deleteSnapshot(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return errorMessage(res, "Snapshot ID is required");
+    }
+
+    const snapshot = await db.Snapshot.findOne({ where: { id } });
+    if (!snapshot) {
+      return errorMessage(res, "Snapshot not found");
+    }
+
+    // Delete the image file if it exists
+    if (snapshot.image_url) {
+      const { deleteFile } = require("../../helper/Helper");
+      const imagePath = snapshot.image_url.replace("/uploads/", "");
+      deleteFile("snapshot", imagePath);
+    }
+
+    await db.Snapshot.destroy({ where: { id } });
+
+    return successMessage(res, "Snapshot deleted successfully");
+  } catch (err) {
+    console.error("deleteSnapshot error:", err);
+    return errorMessage(res, "Error deleting snapshot");
+  }
+}
+
 export default {
   searchSnapshot,
   getAllSnapshots,
+  deleteSnapshot,
 };

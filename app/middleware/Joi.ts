@@ -44,6 +44,29 @@ export const Schemas = {
       .required()
       .messages({ "any.only": "Passwords do not match" }),
   }),
+  getAllSnapshots: Joi.object({
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    id: Joi.string().optional().allow(null),
+    imei: Joi.string().optional().allow(null),
+  }),
+  getDeviceLocation: Joi.object({
+    imei: Joi.string().required(),
+  }),
+  getAllHealthMetrics: Joi.object({
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    imei: Joi.string().optional().allow(null),
+  }),
+  deleteHealthMetric: Joi.object({
+    id: Joi.string().required(),
+  }),
+  listDevices: Joi.object({
+    search: Joi.string().optional().allow(""),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    connection_status: Joi.string().optional().allow(""),
+  }),
   login: Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().required(),
