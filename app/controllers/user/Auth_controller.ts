@@ -76,6 +76,7 @@ const logout = async (req: Request, res: Response, next: NextFunction) => {
     // Subsequent requests using this token will be rejected by checkToken
     // because user.session_token !== incoming token.
     user.session_token = "";
+    user.fcm_token = "";
     await user.save();
 
     return successMessage(res, "Logout successful", null);
