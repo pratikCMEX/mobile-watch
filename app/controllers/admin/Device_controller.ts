@@ -231,6 +231,7 @@ const getDeviceSettings = async function (
       ...settings.toJSON(),
       language: device.language,
       timezone: device.timezone,
+      center_number: device.center_number,
     });
   } catch (err) {
     console.error("getDeviceSettings error:", err);
