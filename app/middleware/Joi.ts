@@ -1398,8 +1398,6 @@ export const Schemas = {
   },
   notification: {
     list: Joi.object({
-      device_id: Joi.string().required(),
-      user_id: Joi.string().optional().allow(null),
       type: Joi.string()
         .valid(
           "sos",
