@@ -291,6 +291,45 @@ export const buildFallDetectionNotification = (
 };
 
 /**
+ * Helper: build a health-alert notification payload (e.g. abnormal
+ * heart-rate alarm).
+ */
+export const buildHealthAlertNotification = (
+  deviceId: string,
+  detail: string
+): NotificationPayload => {
+  return {
+    device_id: deviceId,
+    type: "health_alert",
+    title: "Health Alert",
+    body: `Device ${deviceId}: ${detail}`,
+    metadata: {
+      kind: "health_alert",
+      deviceId,
+      detail,
+    },
+  };
+};
+
+/**
+ * Helper: build a watch-remove notification payload.
+ */
+export const buildWatchRemoveNotification = (
+  deviceId: string
+): NotificationPayload => {
+  return {
+    device_id: deviceId,
+    type: "general",
+    title: "Watch Removed",
+    body: `Device ${deviceId} watch was removed`,
+    metadata: {
+      kind: "watch_remove",
+      deviceId,
+    },
+  };
+};
+
+/**
  * Helper: build a low-battery notification payload.
  */
 export const buildLowBatteryNotification = (

@@ -8,6 +8,8 @@ import {
   buildSosNotification,
   buildGeoFenceNotification,
   buildFallDetectionNotification,
+  buildHealthAlertNotification,
+  buildWatchRemoveNotification,
 } from "../services/notification.service";
 
 // ─────────────────────────────────────────────────────────────
@@ -1217,20 +1219,43 @@ class TcpServer {
    * AL / AL_LTE payload).
    *
    * Bits are counted from right to left (LSB = bit 0):
-   *   bit 16 → 0x00010000 → SOS
-   *   bit 21 → 0x00200000 → Fall-down
+   *
+   *   bit  0 → 0x00000001 → Low battery state
+   *   bit  1 → 0x00000002 → Out of fence state
+   *   bit  2 → 0x00000004 → Enter the fence state
+   *   bit  3 → 0x00000008 → Watch state
+   *   bit  4 → 0x00000010 → Device no moving state
+   *   bit 16 → 0x00010000 → SOS alarm
+   *   bit 17 → 0x00020000 → Low battery alarm
+   *   bit 18 → 0x00040000 → Out fence alarm
+   *   bit 19 → 0x00080000 → Into the fence alarm
+   *   bit 20 → 0x00100000 → Remove the watch alarm
+   *   bit 21 → 0x00200000 → Fall down alarm
+   *   bit 22 → 0x00400000 → Abnormal heart rate alarm
    */
+  private static readonly ALARM_BIT_LOW_BATTERY_STATE = 0x00000001;
+  private static readonly ALARM_BIT_OUT_FENCE_STATE = 0x00000002;
+  private static readonly ALARM_BIT_ENTER_FENCE_STATE = 0x00000004;
+  private static readonly ALARM_BIT_WATCH_STATE = 0x00000008;
+  private static readonly ALARM_BIT_NO_MOVING_STATE = 0x00000010;
   private static readonly ALARM_BIT_SOS = 0x00010000;
+  private static readonly ALARM_BIT_LOW_BATTERY_ALARM = 0x00020000;
+  private static readonly ALARM_BIT_OUT_FENCE_ALARM = 0x00040000;
+  private static readonly ALARM_BIT_ENTER_FENCE_ALARM = 0x00080000;
+  private static readonly ALARM_BIT_WATCH_REMOVE = 0x00100000;
   private static readonly ALARM_BIT_FALL_DOWN = 0x00200000;
+  private static readonly ALARM_BIT_ABNORMAL_HEART_RATE = 0x00400000;
 
   /**
    * Parse the alarm-status bitmask from an AL / AL_LTE payload and
-   * dispatch the appropriate notifications (SOS, fall-down) to the
-   * device owner via FCM.
+   * dispatch the appropriate notifications to the device owner via FCM.
    *
    * The alarm-status field is the 16th comma-separated value
    * (index 15) and is a hex string, e.g. "00010000" for SOS or
    * "00200000" for fall-down.
+   *
+   * All recognised alarm bits are checked and a notification is
+   * created for each one that is set.
    */
   private async processAlarmStatus(
     deviceId: string,
@@ -1262,14 +1287,6 @@ class TcpServer {
         .padStart(8, "0")})`
     );
 
-    const isSos = (alarmStatus & TcpServer.ALARM_BIT_SOS) !== 0;
-    const isFallDown = (alarmStatus & TcpServer.ALARM_BIT_FALL_DOWN) !== 0;
-
-    if (!isSos && !isFallDown) {
-      Logging.info(`${tag} no recognised alarm bits set`);
-      return;
-    }
-
     const device = await this.findDevice(deviceId);
 
     if (!device) {
@@ -1278,30 +1295,172 @@ class TcpServer {
     }
 
     const ownerId = device.owner_id;
+    const deviceIdDb = device.id;
 
-    if (isSos) {
+    // ── SOS alarm (bit 16) ──────────────────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_SOS) !== 0) {
       Logging.info(
         `${tag} SOS alarm detected — sending SOS notification to owner`
       );
-      const notificationPayload = buildSosNotification(device.id, "SOS");
+      const notificationPayload = buildSosNotification(deviceIdDb, "SOS");
       await createNotification({
         ...notificationPayload,
         user_id: ownerId,
       });
-      Logging.info(`${tag} SOS notification created for device ${device.id}`);
+      Logging.info(`${tag} SOS notification created for device ${deviceIdDb}`);
     }
 
-    if (isFallDown) {
+    // ── Low battery alarm (bit 17) ──────────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_LOW_BATTERY_ALARM) !== 0) {
+      Logging.info(
+        `${tag} Low battery alarm detected — sending notification to owner`
+      );
+      await createNotification({
+        device_id: deviceIdDb,
+        user_id: ownerId,
+        type: "low_battery",
+        title: "Low Battery",
+        body: `Device ${deviceId} battery is low`,
+        metadata: { kind: "low_battery_alarm", deviceId: deviceIdDb },
+      });
+      Logging.info(
+        `${tag} Low battery notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Out of fence alarm (bit 18) ─────────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_OUT_FENCE_ALARM) !== 0) {
+      Logging.info(
+        `${tag} Out-of-fence alarm detected — sending notification to owner`
+      );
+      const notificationPayload = buildGeoFenceNotification(
+        deviceIdDb,
+        "Unknown",
+        "out"
+      );
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Geo-fence-out notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Into the fence alarm (bit 19) ───────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_ENTER_FENCE_ALARM) !== 0) {
+      Logging.info(
+        `${tag} Into-fence alarm detected — sending notification to owner`
+      );
+      const notificationPayload = buildGeoFenceNotification(
+        deviceIdDb,
+        "Unknown",
+        "in"
+      );
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Geo-fence-in notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Remove the watch alarm (bit 20) ─────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_WATCH_REMOVE) !== 0) {
+      Logging.info(
+        `${tag} Watch-remove alarm detected — sending notification to owner`
+      );
+      const notificationPayload = buildWatchRemoveNotification(deviceIdDb);
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Watch-remove notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Fall down alarm (bit 21) ────────────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_FALL_DOWN) !== 0) {
       Logging.info(
         `${tag} Fall-down alarm detected — sending fall-detection notification to owner`
       );
-      const notificationPayload = buildFallDetectionNotification(device.id);
+      const notificationPayload = buildFallDetectionNotification(deviceIdDb);
       await createNotification({
         ...notificationPayload,
         user_id: ownerId,
       });
       Logging.info(
-        `${tag} Fall-detection notification created for device ${device.id}`
+        `${tag} Fall-detection notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Abnormal heart rate alarm (bit 22) ──────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_ABNORMAL_HEART_RATE) !== 0) {
+      Logging.info(
+        `${tag} Abnormal heart-rate alarm detected — sending notification to owner`
+      );
+      const notificationPayload = buildHealthAlertNotification(
+        deviceIdDb,
+        "Abnormal heart rate detected"
+      );
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Health-alert notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── State bits (bits 0–4) — informational only ──────────────
+    const stateLabels: { bit: number; mask: number; label: string }[] = [
+      {
+        bit: 0,
+        mask: TcpServer.ALARM_BIT_LOW_BATTERY_STATE,
+        label: "Low battery state",
+      },
+      {
+        bit: 1,
+        mask: TcpServer.ALARM_BIT_OUT_FENCE_STATE,
+        label: "Out of fence state",
+      },
+      {
+        bit: 2,
+        mask: TcpServer.ALARM_BIT_ENTER_FENCE_STATE,
+        label: "Enter the fence state",
+      },
+      { bit: 3, mask: TcpServer.ALARM_BIT_WATCH_STATE, label: "Watch state" },
+      {
+        bit: 4,
+        mask: TcpServer.ALARM_BIT_NO_MOVING_STATE,
+        label: "Device no moving state",
+      },
+    ];
+
+    for (const { bit, mask, label } of stateLabels) {
+      if ((alarmStatus & mask) !== 0) {
+        Logging.info(`${tag} state bit ${bit} set: ${label}`);
+      }
+    }
+
+    // If no alarm bits (16–22) were set, log that no alarm notifications
+    // were dispatched.
+    const anyAlarm =
+      (alarmStatus &
+        (TcpServer.ALARM_BIT_SOS |
+          TcpServer.ALARM_BIT_LOW_BATTERY_ALARM |
+          TcpServer.ALARM_BIT_OUT_FENCE_ALARM |
+          TcpServer.ALARM_BIT_ENTER_FENCE_ALARM |
+          TcpServer.ALARM_BIT_WATCH_REMOVE |
+          TcpServer.ALARM_BIT_FALL_DOWN |
+          TcpServer.ALARM_BIT_ABNORMAL_HEART_RATE)) !==
+      0;
+
+    if (!anyAlarm) {
+      Logging.info(
+        `${tag} no alarm bits (16–22) set — only state bits or none`
       );
     }
   }
@@ -3389,15 +3548,15 @@ class TcpServer {
 
     if (!device) return;
 
-    await db.Notification.create({
-      device_id: device.id,
-      user_id: null,
-      type: "general",
-      title: "Device alarm",
-      body: payload,
-      metadata: { kind: "alarm", raw: payload },
-      is_read: "0",
-    });
+    // await db.Notification.create({
+    //   device_id: device.id,
+    //   user_id: null,
+    //   type: "general",
+    //   title: "Device alarm",
+    //   body: payload,
+    //   metadata: { kind: "alarm", raw: payload },
+    //   is_read: "0",
+    // });
   }
 
   // ───────────────────────────────────────────────────────────
