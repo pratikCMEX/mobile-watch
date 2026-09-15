@@ -2609,7 +2609,7 @@ const requestBodyTemperature = async function (
     if (serial_number) {
       device = await db.Device.findOne({
         where: { serial_number },
-        order: [["id", "DESC"]],
+        order: [["createdAt", "DESC"]],
       });
     }
 
