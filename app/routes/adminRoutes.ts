@@ -15,6 +15,7 @@ const router = express.Router();
 // Dashboard stats
 router.get("/dashboard_stats", checkAdmin, Dashboard_controller.getDashboardStats);
 
+
 // Create geofence
 router.post(
     "/create_geofence",
