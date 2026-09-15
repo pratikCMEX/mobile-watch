@@ -53,6 +53,12 @@ export async function ensureAmrNarrowband(filePath: string): Promise<Buffer> {
 
   const outputPath = `${filePath}.converted.amr`;
 
+  // AMR-NB mode: watch firmware confirmed working with genuine
+  // Android-recorded AMR, but our ffmpeg/libopencore_amrnb output at
+  // MR122 (12.2kbps, the highest mode) played silent on the same
+  // device despite being structurally valid and byte-verified — a
+  // narrower firmware decoder is the likely explanation, so trying
+  // MR74 (7.4kbps), a widely-supported "safe" AMR-NB mode.
   await new Promise<void>((resolve, reject) => {
     execFile(
       "ffmpeg",
@@ -67,7 +73,7 @@ export async function ensureAmrNarrowband(filePath: string): Promise<Buffer> {
         "-c:a",
         "libopencore_amrnb",
         "-b:a",
-        "12200",
+        "7400",
         outputPath,
       ],
       { timeout: 30_000, maxBuffer: 8 * 1024 * 1024 },
