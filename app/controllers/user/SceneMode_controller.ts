@@ -93,6 +93,7 @@ const updateSceneMode = async (
           fall_down_reminder_call: "0",
           fall_down_level: 5,
           scene_mode: scene_mode,
+          low_battery_alert: "0",
         });
         Logging.info(
           `DeviceSetting created with scene mode for device ${device.id}: mode ${scene_mode}`

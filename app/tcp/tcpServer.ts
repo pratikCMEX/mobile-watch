@@ -6,6 +6,10 @@ import db from "../models";
 import {
   createNotification,
   buildSosNotification,
+  buildGeoFenceNotification,
+  buildFallDetectionNotification,
+  buildHealthAlertNotification,
+  buildWatchRemoveNotification,
 } from "../services/notification.service";
 
 // ─────────────────────────────────────────────────────────────
@@ -687,6 +691,10 @@ class TcpServer {
         this.handleAlarm(client, parsed);
         break;
 
+      case "AL_LTE":
+        this.handleAlarmLte(client, parsed);
+        break;
+
       case "TK":
         this.handleTracking(client, parsed);
         break;
@@ -801,6 +809,14 @@ class TcpServer {
         this.handleAppLockResponse(client, parsed);
         break;
 
+      case "REMOVE":
+        this.handleRemoveResponse(client, parsed);
+        break;
+
+      case "REMOVESMS":
+        this.handleRemoveSmsResponse(client, parsed);
+        break;
+
       case "SOS1":
       case "SOS2":
       case "SOS3":
@@ -809,6 +825,14 @@ class TcpServer {
 
       case "FALLDOWN":
         this.handleFallDownResponse(client, parsed);
+        break;
+
+      case "LOWBAT":
+        this.handleLowBatteryResponse(client, parsed);
+        break;
+
+      case "CENTER":
+        this.handleCenterResponse(client, parsed);
         break;
 
       case "LSSET":
@@ -927,31 +951,32 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleLocation(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(`UD location packet received from device ${packet.deviceId}`);
+    const tag = `[UD:${packet.deviceId}]`;
+    Logging.info(`${tag} step 1: UD location packet received`);
 
     const location = this.parseLocation(packet.payload);
 
     if (!location) {
       Logging.error(
-        `Unable to parse UD location packet from ` + `device ${packet.deviceId}`
+        `${tag} step 1 FAILED: could not parse payload="${packet.payload}"`
       );
 
       return;
     }
 
     Logging.info(
-      `GPS LOCATION | Device: ${packet.deviceId} | ` +
-        `Lat: ${location.latitude} ${location.latitudeDirection} | ` +
+      `${tag} step 2: parsed OK | Lat: ${location.latitude} ${location.latitudeDirection} | ` +
         `Lng: ${location.longitude} ${location.longitudeDirection} | ` +
-        `GPS: ${location.gpsStatus}`
+        `GPS: ${location.gpsStatus} -> calling saveLocation()`
     );
 
-    this.saveLocation(packet.deviceId, location, packet.command).catch(
-      (error: Error) =>
+    this.saveLocation(packet.deviceId, location, packet.command)
+      .then(() => Logging.info(`${tag} step 3: saveLocation() completed`))
+      .catch((error: Error) =>
         Logging.error(
-          `Failed to save location for device ${packet.deviceId}: ${error.message}`
+          `${tag} step 3 FAILED: saveLocation() threw: ${error.message}\n${error.stack}`
         )
-    );
+      );
   }
 
   // ───────────────────────────────────────────────────────────
@@ -1104,8 +1129,21 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleAlarm(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(
-      `ALARM received from device ${packet.deviceId}: ` + packet.payload
+    const tag = `[AL:${packet.deviceId}]`;
+    Logging.info(`${tag} step 1: ALARM packet received: ${packet.payload}`);
+
+    // Reply to the device so it stops constant alarming.
+    // Protocol: [CS*YYYYYYYYYY*LEN*AL]
+    const content = "AL";
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const reply = `[${packet.manufacturer}*${packet.deviceId}*${length}*${content}]`;
+    this.send(client, reply);
+    Logging.info(`${tag} step 2: reply sent: ${reply}`);
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from AL: ${error.message}`
+      )
     );
 
     this.saveAlarm(packet.deviceId, packet.payload).catch((error: Error) =>
@@ -1113,6 +1151,318 @@ class TcpServer {
         `Failed to save alarm for device ${packet.deviceId}: ${error.message}`
       )
     );
+
+    // Parse alarm status and dispatch notifications.
+    this.processAlarmStatus(packet.deviceId, packet.payload).catch(
+      (error: Error) =>
+        Logging.error(`${tag} Failed to process alarm status: ${error.message}`)
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // AL_LTE - Alarm (4G / LTE devices)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle an AL_LTE alarm data report from a 4G device.
+   *
+   * The payload has the same layout as the plain AL command but
+   * includes additional LTE-specific fields (cell tower MCC/MNC/LAC/CID
+   * and a WiFi AP list).  The alarm-status bitmask lives at index 15
+   * and uses the same bit definitions:
+   *
+   *   bit 16 (0x00010000) → SOS
+   *   bit 21 (0x00200000) → Fall-down
+   *
+   * Protocol:
+   *   Device send : [CS*YYYYYYYYYY*LEN*AL_LTE,<position data>]
+   *   Server reply: [CS*YYYYYYYYYY*LEN*AL_LTE]
+   *
+   * The server MUST reply — otherwise the device keeps alarming
+   * until it receives confirmation.
+   */
+  private handleAlarmLte(client: TcpClient, packet: ParsedPacket): void {
+    const tag = `[AL_LTE:${packet.deviceId}]`;
+    Logging.info(
+      `${tag} step 1: AL_LTE alarm packet received: ${packet.payload}`
+    );
+
+    // Reply to the device so it stops constant alarming.
+    // Protocol: [CS*YYYYYYYYYY*LEN*AL_LTE]
+    const content = "AL_LTE";
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const reply = `[${packet.manufacturer}*${packet.deviceId}*${length}*${content}]`;
+    this.send(client, reply);
+    Logging.info(`${tag} step 2: reply sent: ${reply}`);
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from AL_LTE: ${error.message}`
+      )
+    );
+
+    this.saveAlarm(packet.deviceId, packet.payload).catch((error: Error) =>
+      Logging.error(
+        `Failed to save alarm for device ${packet.deviceId}: ${error.message}`
+      )
+    );
+
+    // Parse alarm status and dispatch notifications.
+    this.processAlarmStatus(packet.deviceId, packet.payload).catch(
+      (error: Error) =>
+        Logging.error(`${tag} Failed to process alarm status: ${error.message}`)
+    );
+  }
+
+  /**
+   * Bitmask constants for the alarm-status field (index 15 of the
+   * AL / AL_LTE payload).
+   *
+   * Bits are counted from right to left (LSB = bit 0):
+   *
+   *   bit  0 → 0x00000001 → Low battery state
+   *   bit  1 → 0x00000002 → Out of fence state
+   *   bit  2 → 0x00000004 → Enter the fence state
+   *   bit  3 → 0x00000008 → Watch state
+   *   bit  4 → 0x00000010 → Device no moving state
+   *   bit 16 → 0x00010000 → SOS alarm
+   *   bit 17 → 0x00020000 → Low battery alarm
+   *   bit 18 → 0x00040000 → Out fence alarm
+   *   bit 19 → 0x00080000 → Into the fence alarm
+   *   bit 20 → 0x00100000 → Remove the watch alarm
+   *   bit 21 → 0x00200000 → Fall down alarm
+   *   bit 22 → 0x00400000 → Abnormal heart rate alarm
+   */
+  private static readonly ALARM_BIT_LOW_BATTERY_STATE = 0x00000001;
+  private static readonly ALARM_BIT_OUT_FENCE_STATE = 0x00000002;
+  private static readonly ALARM_BIT_ENTER_FENCE_STATE = 0x00000004;
+  private static readonly ALARM_BIT_WATCH_STATE = 0x00000008;
+  private static readonly ALARM_BIT_NO_MOVING_STATE = 0x00000010;
+  private static readonly ALARM_BIT_SOS = 0x00010000;
+  private static readonly ALARM_BIT_LOW_BATTERY_ALARM = 0x00020000;
+  private static readonly ALARM_BIT_OUT_FENCE_ALARM = 0x00040000;
+  private static readonly ALARM_BIT_ENTER_FENCE_ALARM = 0x00080000;
+  private static readonly ALARM_BIT_WATCH_REMOVE = 0x00100000;
+  private static readonly ALARM_BIT_FALL_DOWN = 0x00200000;
+  private static readonly ALARM_BIT_ABNORMAL_HEART_RATE = 0x00400000;
+
+  /**
+   * Parse the alarm-status bitmask from an AL / AL_LTE payload and
+   * dispatch the appropriate notifications to the device owner via FCM.
+   *
+   * The alarm-status field is the 16th comma-separated value
+   * (index 15) and is a hex string, e.g. "00010000" for SOS or
+   * "00200000" for fall-down.
+   *
+   * All recognised alarm bits are checked and a notification is
+   * created for each one that is set.
+   */
+  private async processAlarmStatus(
+    deviceId: string,
+    payload: string
+  ): Promise<void> {
+    const tag = `[processAlarmStatus:${deviceId}]`;
+    const parts = payload.split(",");
+
+    if (parts.length < 16) {
+      Logging.warn(
+        `${tag} payload too short to contain alarm status (got ${parts.length} fields)`
+      );
+      return;
+    }
+
+    const alarmStatusHex = parts[15] || "0";
+    const alarmStatus = parseInt(alarmStatusHex, 16);
+
+    if (isNaN(alarmStatus)) {
+      Logging.warn(
+        `${tag} could not parse alarm status "${alarmStatusHex}" as hex`
+      );
+      return;
+    }
+
+    Logging.info(
+      `${tag} alarm status = ${alarmStatusHex} (0x${alarmStatus
+        .toString(16)
+        .padStart(8, "0")})`
+    );
+
+    const device = await this.findDevice(deviceId);
+
+    if (!device) {
+      Logging.warn(`${tag} device not found, skipping notifications`);
+      return;
+    }
+
+    const ownerId = device.owner_id;
+    const deviceIdDb = device.id;
+
+    // ── SOS alarm (bit 16) ──────────────────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_SOS) !== 0) {
+      Logging.info(
+        `${tag} SOS alarm detected — sending SOS notification to owner`
+      );
+      const notificationPayload = buildSosNotification(deviceIdDb, "SOS");
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(`${tag} SOS notification created for device ${deviceIdDb}`);
+    }
+
+    // ── Low battery alarm (bit 17) ──────────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_LOW_BATTERY_ALARM) !== 0) {
+      Logging.info(
+        `${tag} Low battery alarm detected — sending notification to owner`
+      );
+      await createNotification({
+        device_id: deviceIdDb,
+        user_id: ownerId,
+        type: "low_battery",
+        title: "Low Battery",
+        body: `Device ${deviceId} battery is low`,
+        metadata: { kind: "low_battery_alarm", deviceId: deviceIdDb },
+      });
+      Logging.info(
+        `${tag} Low battery notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Out of fence alarm (bit 18) ─────────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_OUT_FENCE_ALARM) !== 0) {
+      Logging.info(
+        `${tag} Out-of-fence alarm detected — sending notification to owner`
+      );
+      const notificationPayload = buildGeoFenceNotification(
+        deviceIdDb,
+        "Unknown",
+        "out"
+      );
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Geo-fence-out notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Into the fence alarm (bit 19) ───────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_ENTER_FENCE_ALARM) !== 0) {
+      Logging.info(
+        `${tag} Into-fence alarm detected — sending notification to owner`
+      );
+      const notificationPayload = buildGeoFenceNotification(
+        deviceIdDb,
+        "Unknown",
+        "in"
+      );
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Geo-fence-in notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Remove the watch alarm (bit 20) ─────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_WATCH_REMOVE) !== 0) {
+      Logging.info(
+        `${tag} Watch-remove alarm detected — sending notification to owner`
+      );
+      const notificationPayload = buildWatchRemoveNotification(deviceIdDb);
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Watch-remove notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Fall down alarm (bit 21) ────────────────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_FALL_DOWN) !== 0) {
+      Logging.info(
+        `${tag} Fall-down alarm detected — sending fall-detection notification to owner`
+      );
+      const notificationPayload = buildFallDetectionNotification(deviceIdDb);
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Fall-detection notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── Abnormal heart rate alarm (bit 22) ──────────────────────
+    if ((alarmStatus & TcpServer.ALARM_BIT_ABNORMAL_HEART_RATE) !== 0) {
+      Logging.info(
+        `${tag} Abnormal heart-rate alarm detected — sending notification to owner`
+      );
+      const notificationPayload = buildHealthAlertNotification(
+        deviceIdDb,
+        "Abnormal heart rate detected"
+      );
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Health-alert notification created for device ${deviceIdDb}`
+      );
+    }
+
+    // ── State bits (bits 0–4) — informational only ──────────────
+    const stateLabels: { bit: number; mask: number; label: string }[] = [
+      {
+        bit: 0,
+        mask: TcpServer.ALARM_BIT_LOW_BATTERY_STATE,
+        label: "Low battery state",
+      },
+      {
+        bit: 1,
+        mask: TcpServer.ALARM_BIT_OUT_FENCE_STATE,
+        label: "Out of fence state",
+      },
+      {
+        bit: 2,
+        mask: TcpServer.ALARM_BIT_ENTER_FENCE_STATE,
+        label: "Enter the fence state",
+      },
+      { bit: 3, mask: TcpServer.ALARM_BIT_WATCH_STATE, label: "Watch state" },
+      {
+        bit: 4,
+        mask: TcpServer.ALARM_BIT_NO_MOVING_STATE,
+        label: "Device no moving state",
+      },
+    ];
+
+    for (const { bit, mask, label } of stateLabels) {
+      if ((alarmStatus & mask) !== 0) {
+        Logging.info(`${tag} state bit ${bit} set: ${label}`);
+      }
+    }
+
+    // If no alarm bits (16–22) were set, log that no alarm notifications
+    // were dispatched.
+    const anyAlarm =
+      (alarmStatus &
+        (TcpServer.ALARM_BIT_SOS |
+          TcpServer.ALARM_BIT_LOW_BATTERY_ALARM |
+          TcpServer.ALARM_BIT_OUT_FENCE_ALARM |
+          TcpServer.ALARM_BIT_ENTER_FENCE_ALARM |
+          TcpServer.ALARM_BIT_WATCH_REMOVE |
+          TcpServer.ALARM_BIT_FALL_DOWN |
+          TcpServer.ALARM_BIT_ABNORMAL_HEART_RATE)) !==
+      0;
+
+    if (!anyAlarm) {
+      Logging.info(
+        `${tag} no alarm bits (16–22) set — only state bits or none`
+      );
+    }
   }
 
   // ───────────────────────────────────────────────────────────
@@ -1147,34 +1497,33 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleLteLocation(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(
-      `UD_LTE location packet received from device ${packet.deviceId}`
-    );
+    const tag = `[UD_LTE:${packet.deviceId}]`;
+    Logging.info(`${tag} step 1: UD_LTE location packet received`);
 
     const location = this.parseLteLocation(packet.payload);
 
     if (!location) {
       Logging.error(
-        `Unable to parse UD_LTE location packet from device ${packet.deviceId}`
+        `${tag} step 1 FAILED: could not parse payload="${packet.payload}"`
       );
 
       return;
     }
 
     Logging.info(
-      `LTE LOCATION | Device: ${packet.deviceId} | ` +
-        `Lat: ${location.latitude} ${location.latitudeDirection} | ` +
+      `${tag} step 2: parsed OK | Lat: ${location.latitude} ${location.latitudeDirection} | ` +
         `Lng: ${location.longitude} ${location.longitudeDirection} | ` +
-        `Battery: ${location.battery} | Signal: ${location.gsmSignal}`
+        `GPS: ${location.gpsStatus} | Battery: ${location.battery} | ` +
+        `Signal: ${location.gsmSignal} | networkType(command): ${packet.command} -> calling saveLteLocation()`
     );
-    Logging.info(`packet.command: ${packet.command}`);
 
-    this.saveLteLocation(packet.deviceId, location, packet.command).catch(
-      (error: Error) =>
+    this.saveLteLocation(packet.deviceId, location, packet.command)
+      .then(() => Logging.info(`${tag} step 3: saveLteLocation() completed`))
+      .catch((error: Error) =>
         Logging.error(
-          `Failed to save LTE location for device ${packet.deviceId}: ${error.message}`
+          `${tag} step 3 FAILED: saveLteLocation() threw: ${error.message}\n${error.stack}`
         )
-    );
+      );
   }
 
   /**
@@ -1183,7 +1532,11 @@ class TcpServer {
    * 0 date (DDMMYY), 1 time (HHMMSS), 2 GPS status, 3 latitude (decimal
    * degrees - NOT ddmm.mm like plain UD), 4 lat direction, 5 longitude
    * (decimal degrees), 6 lon direction, 7 speed, 8 course, 9 altitude,
-   * 10 satellites, 11 battery %, 12 GSM signal.
+   * 10 satellites, 11 GSM signal, 12 battery %.
+   *
+   * NOTE: Some firmwares swap battery and signal at indices 11/12.
+   * We log both values and let the device status handler (TS packet)
+   * provide the authoritative battery/signal values.
    *
    * Fields after index 12 (status flags, cell tower MCC/MNC/LAC/CID,
    * nearby WiFi AP MAC/RSSI list) are present but not confidently
@@ -1213,8 +1566,11 @@ class TcpServer {
       altitude: parts[9],
 
       satellites: parts[10],
-      battery: parts[11],
-      gsmSignal: parts[12],
+      // Some firmwares send signal at index 11 and battery at index 12.
+      // We store both and let the TS device-status handler provide
+      // the authoritative values.
+      gsmSignal: parts[11],
+      battery: parts[12],
 
       rawFields: parts,
     };
@@ -1225,9 +1581,18 @@ class TcpServer {
     location: GpsLocation,
     networkType: string
   ): Promise<void> {
+    const tag = `[saveLteLocation:${deviceId}]`;
+    Logging.info(
+      `${tag} step 1: looking up device (networkType=${networkType})`
+    );
+
     const device = await this.findDevice(deviceId);
-    Logging.info(`saveLteLocation networkType: ${networkType}`);
-    if (!device) return;
+
+    if (!device) {
+      Logging.error(`${tag} step 1 FAILED: findDevice() returned null`);
+      return;
+    }
+    Logging.info(`${tag} step 1 OK: device.id=${device.id}`);
 
     const latitude = this.convertDecimalCoordinate(
       location.latitude,
@@ -1240,16 +1605,24 @@ class TcpServer {
 
     if (latitude === null || longitude === null) {
       Logging.error(
-        `Could not convert LTE coordinates for device ${deviceId}: ` +
+        `${tag} step 2 FAILED: could not convert coordinates ` +
           `${location.latitude}${location.latitudeDirection}, ` +
           `${location.longitude}${location.longitudeDirection}`
       );
 
       return;
     }
+    Logging.info(
+      `${tag} step 2 OK: latitude=${latitude} longitude=${longitude}`
+    );
 
     const recordedAt = this.parseRecordedAt(location.date, location.time);
     const isValidFix = location.gpsStatus === "A";
+    Logging.info(
+      `${tag} step 3: recordedAt=${recordedAt.toISOString()} isValidFix=${isValidFix} (gpsStatus="${
+        location.gpsStatus
+      }")`
+    );
 
     await db.Location.create({
       device_id: device.id,
@@ -1260,6 +1633,7 @@ class TcpServer {
       is_valid_fix: isValidFix,
       recorded_at: recordedAt,
     });
+    Logging.info(`${tag} step 4 OK: Location row created`);
 
     const battery = parseInt(location.battery || "", 10);
 
@@ -1274,10 +1648,12 @@ class TcpServer {
         ? { battery_percentage: battery }
         : {}),
     });
+    Logging.info(`${tag} step 5 OK: Device row updated (battery=${battery})`);
 
     // Refresh the cached "latest position" columns on the Device row
     // so dashboards can render the current pin immediately without
     // scanning the Locations history.
+    Logging.info(`${tag} step 6: calling cacheLatestLocationOnDevice()`);
     await this.cacheLatestLocationOnDevice(
       device,
       latitude,
@@ -1285,6 +1661,7 @@ class TcpServer {
       recordedAt,
       isValidFix
     );
+    Logging.info(`${tag} step 6 OK: cacheLatestLocationOnDevice() completed`);
   }
 
   // ───────────────────────────────────────────────────────────
@@ -1838,7 +2215,7 @@ class TcpServer {
     Logging.info(
       `DEVICE STATUS | Device: ${packet.deviceId} | ` +
         `Firmware: ${status.ver} | ` +
-        `Battery: ${status.batlevel} | ` +
+        `Battery: ${status.batlevel || status["bat level"]} | ` +
         `GPS: ${status.gps} | ` +
         `NET: ${status.net}`
     );
@@ -2331,9 +2708,11 @@ class TcpServer {
 
     /**
      * Battery level (percentage)
+     * Some firmwares send "batlevel:87" and others send "bat level:3".
      */
-    if (status.batlevel) {
-      const battery = parseInt(status.batlevel, 10);
+    const batteryRaw = status.batlevel || status["bat level"];
+    if (batteryRaw) {
+      const battery = parseInt(batteryRaw, 10);
 
       if (!isNaN(battery) && battery >= 0 && battery <= 100) {
         updates.battery_percentage = battery;
@@ -2385,10 +2764,17 @@ class TcpServer {
 
     /**
      * Network status — e.g. "OK(100)"
+     * Extract the numeric signal strength from parentheses if present.
      */
     if (status.NET) {
       updates.network_status = status.NET;
-      updates.signal_status = status.NET;
+      // Extract numeric signal from "OK(48)" → 48
+      const netMatch = status.NET.match(/\((\d+)\)/);
+      if (netMatch && netMatch[1]) {
+        updates.signal_status = parseInt(netMatch[1], 10);
+      } else {
+        updates.signal_status = status.NET;
+      }
     }
 
     /**
@@ -2440,6 +2826,7 @@ class TcpServer {
               fall_down_reminder_call: "0",
               fall_down_level: 5,
               scene_mode: profile,
+              low_battery_alert: "0",
             });
           }
         } catch (settingErr) {
@@ -2468,15 +2855,38 @@ class TcpServer {
     deviceId: string,
     imei: string
   ): Promise<void> {
+    /**
+     * Race-safe device linking.
+     *
+     * A brand-new device can easily end up with TWO Device rows:
+     *   1. findDevice() (invoked for every packet) auto-creates a
+     *      placeholder with serial_number=deviceId, imei=null.
+     *   2. linkDeviceIdentity() (invoked on ICCID/RYIMEI) then tries
+     *      to create a second placeholder with serial_number=deviceId,
+     *      imei=<real>.
+     *
+     * serial_number is NOT a unique column and a NULL imei does not
+     * violate the imei unique constraint, so both inserts succeed and
+     * the device is registered twice. Concurrent packets make it
+     * worse: two linkDeviceIdentity() calls can both pass the checks
+     * and both INSERT the same imei, the second failing with a
+     * SequelizeUniqueConstraintError ("Validation error") that is
+     * currently an unhandled rejection.
+     *
+     * This method avoids duplicates by:
+     *   a) looking up an existing row by imei first,
+     *   b) then looking up a placeholder by serial_number (any imei,
+     *      not just imei=null, so a placeholder created by findDevice()
+     *      is always found and updated instead of duplicated),
+     *   c) guarding the INSERT with a try/catch: if a concurrent call
+     *      already inserted the row (imei unique violation), re-fetch
+     *      it and update it instead of letting the rejection escape.
+     */
     let device = await db.Device.findOne({ where: { imei } });
 
     if (!device) {
-      /**
-       * No device found by IMEI. Check if there is a placeholder
-       * device that was auto-created for this protocol deviceId.
-       */
       device = await db.Device.findOne({
-        where: { serial_number: deviceId, imei: null },
+        where: { serial_number: deviceId },
       });
     }
 
@@ -2516,11 +2926,41 @@ class TcpServer {
             `with imei ${imei} (DB id: ${device.id})`
         );
       } catch (error: any) {
-        Logging.error(
-          `Failed to create placeholder Device for ${deviceId}: ` +
-            `${error.message}`
-        );
-        return;
+        /**
+         * A concurrent request inserted the row between our checks
+         * above (imei unique violation) — re-fetch it and update
+         * instead of letting this become an unhandled rejection or
+         * leaving a duplicate row.
+         */
+        const isUniqueViolation =
+          error.name === "SequelizeUniqueConstraintError" ||
+          error.parent?.code === "23505" ||
+          error.original?.code === "23505";
+
+        if (isUniqueViolation) {
+          Logging.warn(
+            `Race detected while creating placeholder for ${deviceId}/` +
+              `${imei} - re-fetching existing row.`
+          );
+          device =
+            (await db.Device.findOne({ where: { imei } })) ||
+            (await db.Device.findOne({
+              where: { serial_number: deviceId },
+            }));
+          if (!device) {
+            Logging.error(
+              `Could not re-fetch device after unique violation for ` +
+                `${deviceId}/${imei}`
+            );
+            return;
+          }
+        } else {
+          Logging.error(
+            `Failed to create placeholder Device for ${deviceId}: ` +
+              `${error.message}`
+          );
+          return;
+        }
       }
     }
 
@@ -2586,56 +3026,116 @@ class TcpServer {
    *   - owner_id = null (assigned later via admin API)
    */
   private async findDevice(deviceId: string): Promise<any | null> {
+    const tag = `[findDevice:${deviceId}]`;
+
     let device = await db.Device.findOne({
       where: { serial_number: deviceId },
     });
 
-    if (!device) {
-      device = await db.Device.findOne({ where: { imei: deviceId } });
+    if (device) {
+      Logging.info(`${tag} found by serial_number -> device.id=${device.id}`);
     }
 
     if (!device) {
+      device = await db.Device.findOne({ where: { imei: deviceId } });
+      if (device) {
+        Logging.info(`${tag} found by imei -> device.id=${device.id}`);
+      }
+    }
+
+    if (!device) {
+      /**
+       * No registered Device found. Auto-create a placeholder so
+       * incoming data is not lost.
+       *
+       * NOTE: serial_number is intentionally NOT a unique column (a
+       * device may be re-registered under a different SN later, and
+       * multiple placeholders with imei=null must be allowed to
+       * coexist without violating the imei unique constraint).
+       *
+       * That means a find-then-create race is possible: two packets
+       * for the same deviceId processed concurrently can both pass
+       * the checks above and both INSERT. findOrCreate() keeps the
+       * create atomic (one row), and the catch below re-fetches the
+       * winner if we lost the race — so we never return null when a
+       * row actually exists, and we never leak a duplicate.
+       */
       Logging.info(
         `No registered Device found for protocol id ${deviceId} - ` +
           `creating placeholder.`
       );
 
       try {
-        device = await db.Device.create({
-          serial_number: deviceId,
-          imei: null,
-          owner_id: null,
-          device_name: `Device ${deviceId}`,
-          email: `${deviceId}@placeholder.local`,
-          phone_number: null,
-          country_code: null,
-          network_carrier: null,
-          network_type: null,
-          profile_image: null,
-          connection_status: "offline",
-          signal_status: null,
-          battery_percentage: null,
-          gps_strength: null,
-          is_online: false,
-          last_updated_at: null,
-          location_interval_minutes: 1,
-          height_cm: null,
-          gender: null,
-          age: null,
-          weight_kg: null,
+        const [createdDevice, created] = await db.Device.findOrCreate({
+          where: { serial_number: deviceId, imei: null },
+          defaults: {
+            serial_number: deviceId,
+            imei: null,
+            owner_id: null,
+            device_name: `Device ${deviceId}`,
+            email: `${deviceId}@placeholder.local`,
+            phone_number: null,
+            country_code: null,
+            network_carrier: null,
+            network_type: null,
+            profile_image: null,
+            connection_status: "offline",
+            signal_status: null,
+            battery_percentage: null,
+            gps_strength: null,
+            is_online: false,
+            last_updated_at: null,
+            location_interval_minutes: 1,
+            height_cm: null,
+            gender: null,
+            age: null,
+            weight_kg: null,
+          },
         });
 
-        Logging.info(
-          `Placeholder Device created for protocol id ${deviceId} ` +
-            `(DB id: ${device.id})`
-        );
+        if (created) {
+          Logging.info(
+            `Placeholder Device created for protocol id ${deviceId} ` +
+              `(DB id: ${createdDevice.id})`
+          );
+        }
+
+        device = createdDevice;
       } catch (error: any) {
-        Logging.error(
-          `Failed to create placeholder Device for ${deviceId}: ` +
-            `${error.message}`
-        );
-        return null;
+        const isUniqueViolation =
+          error.name === "SequelizeUniqueConstraintError" ||
+          error.parent?.code === "23505" ||
+          error.original?.code === "23505";
+
+        if (isUniqueViolation) {
+          /**
+           * A concurrent request inserted the row between our checks.
+           * Re-fetch it instead of returning null.
+           */
+          Logging.warn(
+            `Race detected while creating placeholder for ${deviceId} - ` +
+              `re-fetching existing row.`
+          );
+          device =
+            (await db.Device.findOne({
+              where: { serial_number: deviceId, imei: null },
+            })) ||
+            (await db.Device.findOne({
+              where: { serial_number: deviceId },
+            })) ||
+            (await db.Device.findOne({ where: { imei: deviceId } }));
+        } else {
+          Logging.error(
+            `Failed to create placeholder Device for ${deviceId}: ` +
+              `${error.message}`
+          );
+          return null;
+        }
       }
+    }
+
+    if (!device) {
+      Logging.error(`${tag} returning null — no device found or created`);
     }
 
     return device;
@@ -2742,6 +3242,14 @@ class TcpServer {
     recordedAt: Date,
     isValidFix: boolean
   ): Promise<void> {
+    const tag = `[cacheLatestLocationOnDevice:${
+      device.serial_number || device.id
+    }]`;
+    Logging.info(
+      `${tag} step 1: caching latest_lat=${latitude} latest_lng=${longitude} ` +
+        `isValidFix=${isValidFix}`
+    );
+
     try {
       await device.update({
         latest_lat: latitude,
@@ -2749,13 +3257,165 @@ class TcpServer {
         latest_location_at: recordedAt,
         latest_location_is_valid: isValidFix,
       });
+      Logging.info(`${tag} step 1 OK`);
     } catch (err: any) {
-      Logging.warn(
-        `Failed to cache latest location on device ${
-          device.serial_number || device.id
-        }: ` + (err?.message || String(err))
+      Logging.warn(`${tag} step 1 FAILED: ` + (err?.message || String(err)));
+    }
+
+    // Run geofencing on every reported location, not just GPS-grade
+    // fixes. Many LTE/RTOS watches report gpsStatus "V" (no satellite
+    // fix) on essentially every packet — they rely on WiFi/cell (LBS)
+    // positioning instead, especially indoors — yet still send a
+    // usable lat/lng. Gating this on isValidFix meant geofencing
+    // silently never ran at all for those devices.
+    Logging.info(`${tag} step 2: calling checkGeofence()`);
+    await this.checkGeofence(device, latitude, longitude);
+    Logging.info(`${tag} step 2 OK: checkGeofence() completed`);
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Geofencing
+  //
+  // A device may have several active Geofence rows (e.g. "Home",
+  // "School"). It's considered inside the allowed area if it's
+  // within the radius of ANY active geofence, and outside only when
+  // it's outside ALL of them. We alert every time the computed
+  // in/out status differs from Device.geofence_status (this
+  // includes the very first-ever check for a device — if it's
+  // already outside the fence the first time we look, that's still
+  // something the owner should be told about).
+  // ───────────────────────────────────────────────────────────
+
+  private async checkGeofence(
+    device: any,
+    latitude: number,
+    longitude: number
+  ): Promise<void> {
+    const deviceLabel = device.serial_number || device.id;
+    const tag = `[GEOFENCE:${deviceLabel}]`;
+
+    try {
+      Logging.info(
+        `${tag} step 1: looking up active geofences for device.id=${device.id} ` +
+          `at lat=${latitude} lng=${longitude}`
+      );
+
+      const geofences = await db.Geofence.findAll({
+        where: { device_id: device.id, is_active: true },
+      });
+
+      Logging.info(
+        `${tag} step 1 OK: found ${geofences.length} active geofence(s)`
+      );
+
+      if (geofences.length === 0) {
+        Logging.info(
+          `${tag} step 2 SKIPPED: no active geofences configured for this device — nothing to check`
+        );
+        return;
+      }
+
+      let matchedGeofence: any = null;
+      for (const geofence of geofences) {
+        const distance = this.haversineDistanceMeters(
+          latitude,
+          longitude,
+          parseFloat(geofence.latitude as any),
+          parseFloat(geofence.longitude as any)
+        );
+
+        Logging.info(
+          `${tag} step 2: geofence "${geofence.name || geofence.id}" ` +
+            `center=(${geofence.latitude},${geofence.longitude}) radius=${geofence.radius_meters}m ` +
+            `-> distance=${distance.toFixed(1)}m ` +
+            `(${
+              distance <= parseFloat(geofence.radius_meters as any)
+                ? "INSIDE"
+                : "outside"
+            })`
+        );
+
+        if (distance <= parseFloat(geofence.radius_meters as any)) {
+          matchedGeofence = geofence;
+          break;
+        }
+      }
+
+      const newStatus: "in" | "out" = matchedGeofence ? "in" : "out";
+      const previousStatus = device.geofence_status as
+        | "in"
+        | "out"
+        | null
+        | undefined;
+
+      Logging.info(
+        `${tag} step 3: previousStatus=${
+          previousStatus ?? "null"
+        } newStatus=${newStatus}`
+      );
+
+      if (previousStatus === newStatus) {
+        Logging.info(`${tag} step 3 SKIPPED: no status change, not notifying`);
+        return;
+      }
+
+      await device.update({ geofence_status: newStatus });
+      Logging.info(
+        `${tag} step 4 OK: Device.geofence_status updated to "${newStatus}"`
+      );
+
+      const geofenceName = matchedGeofence?.name || "the safe zone";
+
+      const notificationPayload = buildGeoFenceNotification(
+        device.id,
+        geofenceName,
+        newStatus
+      );
+
+      Logging.info(
+        `${tag} step 5: device.owner_id=${
+          device.owner_id ?? "null"
+        } -> calling createNotification()`
+      );
+
+      const notification = await createNotification({
+        ...notificationPayload,
+        user_id: device.owner_id || null,
+      });
+
+      Logging.info(
+        `${tag} step 5 OK: Notification row id=${notification?.id} type=${
+          newStatus === "in" ? "geo_fence_in" : "geo_fence_out"
+        } ` + `| ${newStatus === "in" ? "ENTER" : "EXIT"} "${geofenceName}"`
+      );
+    } catch (err: any) {
+      Logging.error(
+        `${tag} UNCAUGHT: ${err?.message || String(err)}\n${err?.stack || ""}`
       );
     }
+  }
+
+  /**
+   * Great-circle distance between two lat/lng points, in meters.
+   */
+  private haversineDistanceMeters(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): number {
+    const EARTH_RADIUS_METERS = 6371000;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return EARTH_RADIUS_METERS * c;
   }
 
   private async saveLocation(
@@ -2763,9 +3423,18 @@ class TcpServer {
     location: GpsLocation,
     networkType: string
   ): Promise<void> {
+    const tag = `[saveLocation:${deviceId}]`;
+    Logging.info(
+      `${tag} step 1: looking up device (networkType=${networkType})`
+    );
+
     const device = await this.findDevice(deviceId);
 
-    if (!device) return;
+    if (!device) {
+      Logging.error(`${tag} step 1 FAILED: findDevice() returned null`);
+      return;
+    }
+    Logging.info(`${tag} step 1 OK: device.id=${device.id}`);
 
     const latitude = this.convertCoordinate(
       location.latitude,
@@ -2778,16 +3447,24 @@ class TcpServer {
 
     if (latitude === null || longitude === null) {
       Logging.error(
-        `Could not convert coordinates for device ${deviceId}: ` +
+        `${tag} step 2 FAILED: could not convert coordinates ` +
           `${location.latitude}${location.latitudeDirection}, ` +
           `${location.longitude}${location.longitudeDirection}`
       );
 
       return;
     }
+    Logging.info(
+      `${tag} step 2 OK: latitude=${latitude} longitude=${longitude}`
+    );
 
     const recordedAt = this.parseRecordedAt(location.date, location.time);
     const isValidFix = location.gpsStatus === "A";
+    Logging.info(
+      `${tag} step 3: recordedAt=${recordedAt.toISOString()} isValidFix=${isValidFix} (gpsStatus="${
+        location.gpsStatus
+      }")`
+    );
 
     await db.Location.create({
       device_id: device.id,
@@ -2798,16 +3475,19 @@ class TcpServer {
       is_valid_fix: isValidFix,
       recorded_at: recordedAt,
     });
+    Logging.info(`${tag} step 4 OK: Location row created`);
 
     await device.update({
       last_updated_at: new Date(),
       gps_strength: parseInt(location.satellites, 10) >= 4 ? "strong" : "weak",
       network_type: networkType,
     });
+    Logging.info(`${tag} step 5 OK: Device row updated`);
 
     // Refresh the cached "latest position" columns on the Device
     // row so dashboards can render the current pin immediately
     // without scanning the Locations history.
+    Logging.info(`${tag} step 6: calling cacheLatestLocationOnDevice()`);
     await this.cacheLatestLocationOnDevice(
       device,
       latitude,
@@ -2815,6 +3495,7 @@ class TcpServer {
       recordedAt,
       isValidFix
     );
+    Logging.info(`${tag} step 6 OK: cacheLatestLocationOnDevice() completed`);
   }
 
   private async saveHeartRate(
@@ -2867,15 +3548,15 @@ class TcpServer {
 
     if (!device) return;
 
-    await db.Notification.create({
-      device_id: device.id,
-      user_id: null,
-      type: "general",
-      title: "Device alarm",
-      body: payload,
-      metadata: { kind: "alarm", raw: payload },
-      is_read: "0",
-    });
+    // await db.Notification.create({
+    //   device_id: device.id,
+    //   user_id: null,
+    //   type: "general",
+    //   title: "Device alarm",
+    //   body: payload,
+    //   metadata: { kind: "alarm", raw: payload },
+    //   is_read: "0",
+    // });
   }
 
   // ───────────────────────────────────────────────────────────
@@ -3622,10 +4303,37 @@ class TcpServer {
     // Validate number (1-3)
     const num = Math.max(1, Math.min(3, Math.floor(Number(number) || 1)));
 
+    // ── Process voice data ──────────────────────────────────────
+    // 1. Strip AMR file header if present (#!AMR\n = 6 bytes)
+    // 2. Enforce max size (64 KB raw ≈ 15 seconds at 12.2 kbps)
+    let processedVoice: Buffer | null = null;
+    if (voiceData && voiceData.length > 0) {
+      const AMR_HEADER = Buffer.from("#!AMR\n");
+      let raw = voiceData;
+      if (
+        raw.length >= AMR_HEADER.length &&
+        raw.subarray(0, AMR_HEADER.length).equals(AMR_HEADER)
+      ) {
+        Logging.info(
+          `Stripping AMR file header (6 bytes) from reminder voice data for device ${deviceId}.`
+        );
+        raw = raw.subarray(AMR_HEADER.length);
+      }
+
+      const MAX_AMR_BYTES = 64 * 1024;
+      if (raw.length > MAX_AMR_BYTES) {
+        Logging.error(
+          `Refusing to send TAKEPILLS to device ${deviceId}: AMR data is ${raw.length} bytes, max ${MAX_AMR_BYTES} allowed (≈15 seconds).`
+        );
+        return false;
+      }
+
+      processedVoice = escape(raw);
+    }
+
     // Build the content parts
     const textPart = reminderText || "";
-    const voicePart =
-      voiceData && voiceData.length > 0 ? escape(voiceData) : null;
+    const voicePart = processedVoice;
 
     // Build content: TAKEPILLS,settings,number,text,voice
     // Voice data is always included as a comma separator even if empty
@@ -3663,12 +4371,17 @@ class TcpServer {
     Logging.info(
       `Sending TAKEPILLS (reminder) command to device ${deviceId} ` +
         `(settings=${reminderSettings}, number=${num}, text=${textPart}, ` +
-        `voice=${voiceData ? voiceData.length + "B" : "none"}, len=${length})`
+        `voice_raw=${voiceData ? voiceData.length + "B" : "none"}, ` +
+        `voice_escaped=${
+          processedVoice ? processedVoice.length + "B" : "none"
+        }, ` +
+        `len=${length})`
     );
     Logging.debug(`TAKEPILLS raw packet: ${rawCommand}`);
     Logging.warn(
       `TAKEPILLS prerequisite: device CONFIG must have DD=2 (medication reminder enabled). ` +
-        `If reminder does not fire, verify DD config and device time sync.`
+        `If reminder does not fire, verify DD config and device time sync. ` +
+        `AMR must be raw frames (no #!AMR header), AMR-NB format, max 64KB.`
     );
 
     this.send(client, command);
@@ -5025,6 +5738,381 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Send Low-Battery Alarm (LOWBAT) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Toggle the watch's "low battery alarm SMS alert" switch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [CS*<id>*0008*LOWBAT,0]  (off, do NOT send SMS on low battery)
+   *                 [CS*<id>*0008*LOWBAT,1]  (on, send SMS on low battery)
+   *
+   *   Device reply: [CS*<id>*0006*LOWBAT]    (bare ack = success)
+   *
+   * When ON, the watch will send an SMS alert when the battery level
+   * drops below a threshold. When OFF, no SMS is sent.
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param enabled   true = send SMS on low battery, false = do NOT send
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendLowBatteryCommand(deviceId: string, enabled: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send LOWBAT command.`
+      );
+      return false;
+    }
+
+    // Content is exactly "LOWBAT,0" or "LOWBAT,1" — 8 chars.
+    const flag = enabled ? "1" : "0";
+    const command = `[CS*${deviceId}*0008*LOWBAT,${flag}]`;
+
+    Logging.info(
+      `Sending low-battery alarm (LOWBAT) command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a LOWBAT reply from the device.
+   *
+   * Reply shapes:
+   *   [CS*<id>*0006*LOWBAT]            bare ack → success
+   *   [CS*<id>*0008*LOWBAT,0]          failure (some firmwares)
+   *   [CS*<id>*0008*LOWBAT,1]          explicit success (some firmwares)
+   */
+  private handleLowBatteryResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `LOWBAT response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from LOWBAT: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Low battery alert updated",
+            body: `Device ${packet.deviceId} acknowledged low battery alert command.`,
+            metadata: { kind: "low_battery", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save low battery notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Center Number (CENTER) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Set the watch's center phone number for SMS alarm alerts.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [CS*<id>*<LEN>*CENTER,<phoneNumber>]
+   *
+   *   Device reply: [CS*<id>*<LEN>*CENTER]   (bare ack = success)
+   *
+   * The center number is the phone number that receives all SMS alarm
+   * alerts from the device (e.g., low battery, SOS, fall-down, etc.).
+   *
+   * @param deviceId   The device ID (e.g. 8800000015)
+   * @param centerNumber  Digits-only phone number (country code included)
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendCenterCommand(deviceId: string, centerNumber: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send CENTER command.`
+      );
+      return false;
+    }
+
+    // Strip any non-digit characters from the phone number.
+    const digits = centerNumber.replace(/[^0-9]/g, "");
+
+    if (digits.length < 5 || digits.length > 20) {
+      Logging.error(
+        `Invalid center number "${centerNumber}" for device ${deviceId} — must be 5–20 digits`
+      );
+      return false;
+    }
+
+    const content = `CENTER,${digits}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[CS*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending center number (CENTER) command to device ${deviceId} ` +
+        `(center=${digits}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a CENTER reply from the device.
+   *
+   * Reply shape:
+   *   [CS*<id>*<LEN>*CENTER]   bare ack → success
+   */
+  private handleCenterResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `CENTER response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+
+    // The device sends a bare ack ([CS*<id>*<LEN>*CENTER]) on
+    // success.  There is no payload to parse, but we mark the device
+    // online and create a notification so the user knows the command
+    // was acknowledged.
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from CENTER: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Center number updated",
+            body: `Device ${packet.deviceId} acknowledged center number command.`,
+            metadata: { kind: "center_number", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save center number notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Send Take-Off Watch Alarm (REMOVE) command to device
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Toggle the watch's "take-off alarm" switch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [CS*<id>*0008*REMOVE,0]  (off, do NOT send alarm on take-off)
+   *                 [CS*<id>*0008*REMOVE,1]  (on, send alarm on take-off)
+   *
+   *   Device reply: [CS*<id>*0006*REMOVE]    (bare ack = success)
+   *
+   * NOTE: This feature depends on the device firmware having a light
+   * sensor. If the watch does not have a light sensor, this command
+   * is unnecessary and may not be supported.
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param enabled   true = send alarm on take-off, false = do NOT send
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendRemoveCommand(deviceId: string, enabled: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send REMOVE command.`
+      );
+      return false;
+    }
+
+    // Content is exactly "REMOVE,0" or "REMOVE,1" — 8 chars.
+    const flag = enabled ? "1" : "0";
+    const command = `[CS*${deviceId}*0008*REMOVE,${flag}]`;
+
+    Logging.info(
+      `Sending take-off alarm (REMOVE) command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Toggle the watch's "take-off SMS alarm" switch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [CS*<id>*0008*REMOVESMS,0]  (off, do NOT send SMS alarm on take-off)
+   *                 [CS*<id>*0008*REMOVESMS,1]  (on, send SMS alarm on take-off)
+   *
+   *   Device reply: [CS*<id>*0006*REMOVESMS]    (bare ack = success)
+   *
+   * NOTE: This feature depends on the device firmware supporting SMS alerts
+   * on take-off. If the device does not support it, this command may not be acknowledged.
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param enabled   true = send SMS alarm on take-off, false = do NOT send
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendRemoveSmsCommand(deviceId: string, enabled: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send REMOVESMS command.`
+      );
+      return false;
+    }
+
+    // Content is exactly "REMOVESMS,0" or "REMOVESMS,1" — 12 chars.
+    const flag = enabled ? "1" : "0";
+    const command = `[CS*${deviceId}*0008*REMOVESMS,${flag}]`;
+
+    Logging.info(
+      `Sending take-off SMS alarm (REMOVESMS) command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Handle a REMOVE reply from the device.
+   *
+   * Reply shapes:
+   *   [CS*<id>*0006*REMOVE]            bare ack → success
+   *   [CS*<id>*0008*REMOVE,0]          failure (some firmwares)
+   *   [CS*<id>*0008*REMOVE,1]          explicit success (some firmwares)
+   */
+  private handleRemoveResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `REMOVE response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from REMOVE: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Take-off alarm updated",
+            body: `Device ${packet.deviceId} acknowledged take-off alarm command.`,
+            metadata: { kind: "take_off", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save take-off notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  /**
+   * Handle a REMOVESMS reply from the device.
+   *
+   * Reply shapes:
+   *   [CS*<id>*0006*REMOVESMS]        bare ack → success
+   *   [CS*<id>*0008*REMOVESMS,0]     failure (some firmwares)
+   *   [CS*<id>*0008*REMOVESMS,1]     explicit success (some firmwares)
+   */
+  private handleRemoveSmsResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `REMOVESMS response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from REMOVESMS: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Take-off SMS alarm updated",
+            body: `Device ${packet.deviceId} acknowledged take-off SMS alarm command.`,
+            metadata: { kind: "take_off_sms", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save take-off SMS notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Send Fall-Down Sensitivity (LSSET) command to device
   // ───────────────────────────────────────────────────────────
 
@@ -5133,6 +6221,7 @@ class TcpServer {
                   fall_down_reminder_call: "0",
                   fall_down_level: levelNum,
                   scene_mode: 1,
+                  low_battery_alert: "0",
                 });
               }
               setting.fall_down_level = levelNum;
@@ -5617,6 +6706,7 @@ interface DeviceStatus {
   upload?: string;
   lk?: string;
   batlevel?: string;
+  "bat level"?: string;
   language?: string;
   zone?: string;
   profile?: string;

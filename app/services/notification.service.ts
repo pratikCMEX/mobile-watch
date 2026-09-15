@@ -102,7 +102,7 @@ export const pushToUser = async (
   }
 ): Promise<any> => {
   const user = await db.User.findByPk(userId, {
-    attributes: ["fcm_token"],
+    attributes: ["fcm_token", "device_type"],
   });
 
   if (!user || !user.fcm_token) {
@@ -111,47 +111,78 @@ export const pushToUser = async (
   }
 
   const tokens = [user.fcm_token];
+  let response: any;
 
-  const response = await messaging().sendEachForMulticast({
-    tokens,
-    // notification: { title: data.title, body: data.body },
-    android: {
-      priority: "high",
-      // notification: {
-      //   sound: "default",
-      //   channelId: "default_channel",
-      //   icon: "@drawable/ic_notification",
-      //   color: "#FF0000",
-      // },
-    },
-    apns: {
-      payload: {
-        aps: {
-          sound: "default",
-          badge: 1,
-          contentAvailable: true,
-          mutableContent: true,
-          category: data.type,
+  if (user.device_type === "ios") {
+    // iOS: notification payload for visible alerts + APNs config
+    response = await messaging().sendEachForMulticast({
+      tokens,
+      notification: { title: data.title, body: data.body },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+            badge: 1,
+            contentAvailable: true,
+            mutableContent: true,
+            category: data.type,
+          },
+        },
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert",
         },
       },
-      headers: {
-        "apns-priority": "10",
-        "apns-push-type": "alert",
+      data: {
+        type: data.type,
+        title: data.title,
+        body: data.body,
+        channelId: "default_channel",
+        device_type: user.device_type,
+        ...stringifyMetadata(data.metadata),
       },
-    },
-    data: {
-      type: data.type,
-      title: data.title,
-      body: data.body,
-      channelId: "default_channel",
-
-      ...stringifyMetadata(data.metadata),
-    },
-  });
+    });
+  } else {
+    // Android: data-only (no notification payload), Android-specific config
+    response = await messaging().sendEachForMulticast({
+      tokens,
+      android: {
+        priority: "high",
+      },
+      data: {
+        type: data.type,
+        title: data.title,
+        body: data.body,
+        channelId: "default_channel",
+        device_type: user.device_type,
+        ...stringifyMetadata(data.metadata),
+      },
+    });
+  }
 
   Logging.info(
     `FCM push to user ${userId}: success=${response.successCount}, failed=${response.failureCount}`
   );
+
+  /**
+   * Log every failed token individually so the exact token, error
+   * code and message are visible in the logs (e.g. a
+   * "mismatched-credential / SenderId mismatch" points straight at
+   * a credential/project pairing problem instead of being buried
+   * in a count).
+   */
+  if (response.failureCount > 0) {
+    response.responses.forEach((res: any, index: any) => {
+      if (!res.success) {
+        Logging.error(
+          `FCM push failed for token[${index}] ` +
+            `token=${tokens[index]} code=${res.error?.code ?? "unknown"} ` +
+            `message=${res.error?.message ?? "no message"} ` +
+            `detail=${res.error?.detail ?? ""}`
+        );
+      }
+    });
+  }
 
   await handleInvalidTokens(tokens, response);
 
@@ -237,6 +268,63 @@ export const buildSosNotification = (
       kind: "sos",
       deviceId,
       phoneNumber,
+    },
+  };
+};
+
+/**
+ * Helper: build a fall-detection notification payload.
+ */
+export const buildFallDetectionNotification = (
+  deviceId: string
+): NotificationPayload => {
+  return {
+    device_id: deviceId,
+    type: "fall_detection",
+    title: "Fall Detection",
+    body: `Device ${deviceId} detected a fall`,
+    metadata: {
+      kind: "fall_detection",
+      deviceId,
+    },
+  };
+};
+
+/**
+ * Helper: build a health-alert notification payload (e.g. abnormal
+ * heart-rate alarm).
+ */
+export const buildHealthAlertNotification = (
+  deviceId: string,
+  detail: string
+): NotificationPayload => {
+  return {
+    device_id: deviceId,
+    type: "health_alert",
+    title: "Health Alert",
+    body: `Device ${deviceId}: ${detail}`,
+    metadata: {
+      kind: "health_alert",
+      deviceId,
+      detail,
+    },
+  };
+};
+
+/**
+ * Helper: build a watch-remove notification payload.
+ */
+export const buildWatchRemoveNotification = (
+  deviceId: string
+): NotificationPayload => {
+  return {
+    device_id: deviceId,
+    type: "general",
+    title: "Watch Removed",
+    body: `Device ${deviceId} watch was removed`,
+    metadata: {
+      kind: "watch_remove",
+      deviceId,
     },
   };
 };

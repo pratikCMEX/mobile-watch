@@ -164,6 +164,132 @@ const ListSnapshots = async (
   }
 };
 
+async function getAllSnapshots(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const alldata = await db.Snapshot.findAll();
+    console.log("alldata:", alldata);
+
+    const body = req.body || {};
+    const { id, imei } = body;
+
+    console.log("getAllSnapshots request body:", { id, imei });
+
+    // const offset = (Number(page) - 1) * Number(limit);
+
+    // If id or imei is provided, use search logic
+    if (id || imei) {
+      if (id) {
+        const snapshot = await db.Snapshot.findOne({
+          where: { id: id as string },
+          include: [
+            {
+              model: db.Device,
+              as: "DeviceSnapshot",
+              attributes: ["id", "imei", "device_name", "owner_id"],
+            },
+          ],
+        });
+
+        if (!snapshot) {
+          return errorMessage(res, "Snapshot not found");
+        }
+
+        return successMessage(res, "Snapshot retrieved successfully", snapshot);
+      }
+
+      if (imei) {
+        const device = await db.Device.findOne({
+          where: { imei: imei as string },
+          attributes: ["id", "imei", "device_name"],
+        });
+
+        if (!device) {
+          return errorMessage(res, "Device not found with this IMEI");
+        }
+
+        const snapshots = await db.Snapshot.findAll({
+          where: { device_id: device.id },
+          attributes: [
+            "id",
+            "device_id",
+            "image_url",
+            "captured_at",
+            "createdAt",
+            "updatedAt",
+          ],
+          order: [["captured_at", "DESC"]],
+        });
+
+        return successMessage(res, "Snapshots retrieved successfully", {
+          device: {
+            id: device.id,
+            imei: device.imei,
+            device_name: device.device_name,
+          },
+          snapshots,
+        });
+      }
+    }
+
+    // Otherwise, return all snapshots with pagination
+    // First try without include to see if we get data
+    const snapshotsWithoutInclude = await db.Snapshot.findAll({
+      attributes: [
+        "id",
+        "device_id",
+        "image_url",
+        "captured_at",
+        "createdAt",
+        "updatedAt",
+      ],
+      order: [["captured_at", "DESC"]],
+      // limit: Number(limit),
+      // offset,
+    });
+
+    console.log("Snapshots without include:", snapshotsWithoutInclude.length);
+
+    const { count, rows } = await db.Snapshot.findAndCountAll({
+      include: [
+        {
+          model: db.Device,
+          as: "DeviceSnapshot",
+          attributes: ["id", "imei", "device_name"],
+          required: false, // LEFT JOIN instead of INNER JOIN
+        },
+      ],
+      attributes: [
+        "id",
+        "device_id",
+        "image_url",
+        "captured_at",
+        "createdAt",
+        "updatedAt",
+      ],
+      order: [["captured_at", "DESC"]],
+      // limit: Number(limit),
+      // offset,
+    });
+
+    return successMessage(res, "Snapshots retrieved successfully", {
+      snapshots: rows,
+      pagination: {
+        total: count,
+        // page: Number(page),
+        // limit: Number(limit),
+        // totalPages: Math.ceil(count / Number(limit)),
+      },
+    });
+  } catch (err) {
+    console.error("getAllSnapshots error:", err);
+    console.error("Error details:", JSON.stringify(err, null, 2));
+    return errorMessage(res, "Error retrieving snapshots");
+  }
+}
 const GetSnapshotsBySerialNumber = async (
   req: Request,
   res: Response,
@@ -236,4 +362,5 @@ export default {
   ListSnapshots,
   GetSnapshotsBySerialNumber,
   deleteSnapshot,
+  getAllSnapshots,
 };

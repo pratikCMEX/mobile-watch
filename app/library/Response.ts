@@ -61,7 +61,7 @@ export const errorMessage = (
   message: string = "Error",
   resData: any = {}
 ) => {
-  return res.status(500).json({
+  return res.status(200).json({
     success: false,
     message: message,
     data: resData,

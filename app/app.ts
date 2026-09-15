@@ -27,6 +27,7 @@ const geofenceRoutes = require("./routes/geofenceRoutes");
 const sceneModeRoutes = require("./routes/sceneModeRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const testNotificationRoutes = require("./routes/testNotificationRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 // ─── Security Middleware ────────────────────────────────────────
 const allowedOrigins = (
@@ -110,6 +111,7 @@ app.use("/emergency_contact", emergencyContactRoutes);
 app.use("/geofence", geofenceRoutes);
 app.use("/scene_mode", sceneModeRoutes);
 app.use("/test", testNotificationRoutes);
+app.use("/notification", notificationRoutes);
 
 // ─── Healthcheck ───────────────────────────────────────────────
 app.get("/ping", (req: Request, res: Response) => {

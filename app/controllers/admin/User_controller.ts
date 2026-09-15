@@ -132,7 +132,7 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
 
 async function deleteUser(req: Request, res: Response, next: NextFunction) {
   try {
-      const { id } = req.body;
+    const { id } = req.body;
     const user = await db.User.findOne({ where: { id } });
     if (!user) {
       return errorMessage(res, "User not found");
@@ -161,7 +161,11 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
   }
 }
 
-async function getCurrentAdmin(req: Request, res: Response, next: NextFunction) {
+async function getCurrentAdmin(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const adminData = (req as any).user;
     if (!adminData) {

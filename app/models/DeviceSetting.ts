@@ -21,6 +21,7 @@ export interface DeviceSettingAttributes {
   walk_time_sections: string[] | null;
   walk_time_step_target: number | null;
   dial_lock_enabled: string;
+  low_battery_alert: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,6 +52,7 @@ class DeviceSetting
   public walk_time_sections!: string[] | null;
   public walk_time_step_target!: number | null;
   public dial_lock_enabled!: string;
+  public low_battery_alert!: string;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -183,6 +185,12 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         allowNull: true,
         defaultValue: "0",
         comment: "Watch dial plate lock (APPLOCK,PH-1=ON, PH-0=OFF)",
+      },
+      low_battery_alert: {
+        type: DataTypes.ENUM("1", "0"),
+        allowNull: true,
+        defaultValue: "0",
+        comment: "Low battery alarm SMS alert switch (LOWBAT,1=ON, 0=OFF)",
       },
 
       createdAt: {

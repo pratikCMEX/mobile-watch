@@ -9,9 +9,14 @@ const listNotifications = async (
   next: NextFunction
 ) => {
   try {
+    // user_id comes from the logged-in user (JWT token)
+    const user_id = (req as any)?.userinfo?.payload?.id;
+
+    if (!user_id) {
+      return errorMessage(res, "User not authenticated");
+    }
+
     const {
-      device_id,
-      user_id,
       type,
       is_read,
       page = 1,
@@ -21,22 +26,9 @@ const listNotifications = async (
       end_date,
     } = req.body;
 
-    if (!device_id) {
-      return errorMessage(res, "device_id is required");
-    }
-
-    const device = await db.Device.findByPk(device_id);
-    if (!device) {
-      return errorMessage(res, "Device not found");
-    }
-
     const offset = (Number(page) - 1) * Number(limit);
 
-    const whereCondition: any = { device_id };
-
-    if (user_id) {
-      whereCondition.user_id = user_id;
-    }
+    const whereCondition: any = { user_id };
 
     if (type) {
       whereCondition.type = type;

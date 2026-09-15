@@ -9,17 +9,17 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     const { email, password, fcm_token } = req.body;
 
     if (!email || !password) {
-      return errorMessage(res, "Email and password are required", 400);
+      return errorMessage(res, "Email and password are required", null);
     }
 
     const user = await db.User.findOne({ where: { email } });
     if (!user) {
-      return errorMessage(res, "Invalid email or password", 401);
+      return errorMessage(res, "Invalid email or password", null);
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return errorMessage(res, "Invalid email or password", 401);
+      return errorMessage(res, "Invalid email or password", null);
     }
 
     // if (user.status && user.status !== "active") {
@@ -76,6 +76,7 @@ const logout = async (req: Request, res: Response, next: NextFunction) => {
     // Subsequent requests using this token will be rejected by checkToken
     // because user.session_token !== incoming token.
     user.session_token = "";
+    user.fcm_token = "";
     await user.save();
 
     return successMessage(res, "Logout successful", null);
@@ -185,9 +186,77 @@ const getProfile = async (req: Request, res: Response, next: NextFunction) => {
     return errorMessage(res, "Error fetching profile");
   }
 };
+const createUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!email || !password) {
+      return errorMessage(res, "Email and password are required", 400);
+    }
+
+    // Check if user already exists
+    const existingUser = await db.User.findOne({ where: { email } });
+    if (existingUser) {
+      return errorMessage(res, "User with this email already exists", 409);
+    }
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create the user
+    const user = await db.User.create({
+      name,
+      email,
+      password: hashedPassword,
+    });
+
+    // Generate auth token
+    // const token = await generateAuthToken(user);
+
+    // Clear password from response
+    const userData = user.toJSON();
+    delete userData.password;
+
+    return successMessage(res, "User created successfully", {
+      // token,
+      user: userData,
+    });
+  } catch (error) {
+    console.error("createUser error:", error);
+    return errorMessage(res, "Error creating user");
+  }
+};
+
+const deleteAccount = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  const lang = (req as any).lang;
+  try {
+    const userId = (req as any)?.userinfo?.payload?.id;
+    const user = await db.User.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      return errorMessage(res, "User not found");
+    }
+    await db.Device.destroy({ where: { owner_id: userId } });
+
+    await user.destroy({ force: true });
+
+    return successMessage(res, "Account deleted successfully");
+  } catch (error: any) {
+    console.error("Delete account error:", error);
+    return res.status(500).json({ message: error.message });
+  }
+};
 export default {
   login,
   logout,
   updateProfile,
   getProfile,
+  createUser,
+  deleteAccount,
 };

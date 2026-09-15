@@ -97,7 +97,7 @@ const audioOnlyFilter = (req: any, file: any, cb: any) => {
 const uploadVoice = multer({
   storage: voice,
   fileFilter: audioOnlyFilter,
-  limits: { fileSize: 64 * 1024 }, // 64 KB max (≈15 seconds of AMR)
+  // limits: { fileSize: 64 * 1024 }, // 64 KB max (≈15 seconds of AMR)
 });
 
 export { uploadProfile, uploadSnapshot, uploadVoice };

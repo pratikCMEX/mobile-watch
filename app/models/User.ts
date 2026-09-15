@@ -13,6 +13,7 @@ export interface UserAttributes {
   session_token: string;
   profile_image?: string | null;
   fcm_token?: string | null;
+  device_type?: string | null;
   deletedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -34,6 +35,7 @@ class User
   public session_token!: string;
   public profile_image?: string | null;
   public fcm_token?: string | null;
+  public device_type?: string | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public readonly deletedAt!: Date;
@@ -121,6 +123,12 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         allowNull: true,
         defaultValue: null,
         comment: "Firebase Cloud Messaging token for push notifications",
+      },
+      device_type: {
+        type: DataTypes.ENUM("android", "ios"),
+        allowNull: true,
+        defaultValue: null,
+        comment: "Device type: android or ios",
       },
       deletedAt: {
         type: DataTypes.DATE,

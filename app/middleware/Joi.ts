@@ -187,6 +187,7 @@ export const Schemas = {
       }),
     }),
     sendReminder: Joi.object({
+      id: Joi.string().optional().allow(null, ""),
       serial_number: Joi.string().required().messages({
         "string.empty": "serial_number is required",
         "any.required": "serial_number is required",
@@ -215,6 +216,18 @@ export const Schemas = {
       reminder_text: Joi.string().optional().allow(""),
       voice_file: Joi.any().optional(),
     }),
+    listReminders: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      type: Joi.string()
+        .valid("pill", "water", "general", "sedentary")
+        .optional()
+        .messages({
+          "any.only": "type must be one of: pill, water, general, sedentary",
+        }),
+    }),
     listUnlinked: Joi.object({
       page: Joi.number().integer().min(1).optional().default(1),
       limit: Joi.number().integer().min(1).optional().default(20),
@@ -234,11 +247,11 @@ export const Schemas = {
     update: Joi.object({
       device_id: Joi.string().required(),
       device_type: Joi.string()
-        .valid("android", "rtos", "rt_os")
+        .valid("android", "rtos", "rt_os", "ios")
         .optional()
         .default("android")
         .messages({
-          "any.only": "device_type must be 'android' or 'rtos'",
+          "any.only": "device_type must be 'android' , 'rt_os' or 'ios'",
         }),
       sms_alert_enabled: Joi.string().valid("1", "0").optional(),
       take_off_device_alert: Joi.string().valid("1", "0").optional(),
@@ -702,6 +715,131 @@ export const Schemas = {
   },
 
   /**
+   * Set the watch's take-off alarm switch (REMOVE command).
+   *
+   * Per the protocol spec:
+   *   Server send : [CS*<id>*0008*REMOVE,0]  (off, do NOT send alarm on take-off)
+   *                 [CS*<id>*0008*REMOVE,1]  (on, send alarm on take-off)
+   *   Device reply: [CS*<id>*0006*REMOVE]    (bare ack = success)
+   *
+   * NOTE: This feature depends on the device firmware having a light
+   * sensor. If the watch does not have a light sensor, this command
+   * is unnecessary and may not be supported.
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "enabled":       true
+   *   }
+   */
+  takeOffAlert: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be a boolean (true or false)",
+        "any.required":
+          "enabled is required (true = send alarm on take-off, false = do not send alarm)",
+      }),
+    }),
+  },
+
+  /**
+   * Set the watch's take-off SMS alarm switch (REMOVESMS command).
+   *
+   * Per the protocol spec:
+   *   Server send : [CS*<id>*0008*REMOVESMS,0]  (off, do NOT send SMS alarm on take-off)
+   *                 [CS*<id>*0008*REMOVESMS,1]  (on, send SMS alarm on take-off)
+   *   Device reply: [CS*<id>*0006*REMOVESMS]    (bare ack = success)
+   *
+   * NOTE: This feature depends on the device firmware supporting
+   * SMS alerts on take-off. If the device does not support it,
+   * this command may not be acknowledged.
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "enabled":       true
+   *   }
+   */
+  removeSmsAlert: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be a boolean (true or false)",
+        "any.required":
+          "enabled is required (true = send SMS alarm on take-off, false = do not send SMS alarm)",
+      }),
+    }),
+  },
+
+  /**
+   * Set the watch's center phone number for SMS alarm alerts (CENTER command).
+   *
+   * Per the protocol spec:
+   *   Server send : [CS*<id>*<LEN>*CENTER,<phoneNumber>]
+   *   Device reply: [CS*<id>*<LEN>*CENTER]  (bare ack = success)
+   *
+   * The center number is the phone number that receives all SMS alarm
+   * alerts from the device (e.g., low battery, SOS, fall-down, etc.).
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "center_number": "00000000000"
+   *   }
+   */
+  centerNumber: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      center_number: Joi.string().required().messages({
+        "string.empty": "center_number is required",
+        "any.required":
+          "center_number is required (digits-only phone number, 5–20 digits)",
+      }),
+    }),
+  },
+
+  /**
+   * Set the watch's low-battery alarm SMS alert switch (LOWBAT command).
+   *
+   * Per the protocol spec:
+   *   Server send : [CS*<id>*0008*LOWBAT,0]  (off, do NOT send SMS on low battery)
+   *                 [CS*<id>*0008*LOWBAT,1]  (on, send SMS on low battery)
+   *   Device reply: [CS*<id>*0006*LOWBAT]    (bare ack = success)
+   *
+   * When ON, the watch sends an SMS alert when the battery level
+   * drops below a threshold. When OFF, no SMS is sent.
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "enabled":       true
+   *   }
+   */
+  lowBatteryAlert: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be a boolean (true or false)",
+        "any.required":
+          "enabled is required (true = send SMS on low battery, false = do not send SMS)",
+      }),
+    }),
+  },
+
+  /**
    * Set the watch's fall-down alarm alert switch and the
    * "call center number after fall" switch (FALLDOWN command).
    *
@@ -768,11 +906,11 @@ export const Schemas = {
         "any.required": "level is required (1 = most sensitive)",
       }),
       device_type: Joi.string()
-        .valid("android", "rtos", "rt_os")
+        .valid("android", "rtos", "rt_os", "ios")
         .optional()
         .default("android")
         .messages({
-          "any.only": "device_type must be 'android' or 'rtos'",
+          "any.only": "device_type must be 'android', 'rtos','ios'",
         }),
     }),
   },
@@ -1352,8 +1490,6 @@ export const Schemas = {
   },
   notification: {
     list: Joi.object({
-      device_id: Joi.string().required(),
-      user_id: Joi.string().optional().allow(null),
       type: Joi.string()
         .valid(
           "sos",
@@ -1377,6 +1513,11 @@ export const Schemas = {
     }),
   },
   auth: {
+    createUser: Joi.object({
+      email: Joi.string().email().required(),
+      password: Joi.string().min(6).required(),
+      name: Joi.string().optional().allow(""),
+    }),
     updateProfile: Joi.object({
       name: Joi.string().optional().allow(""),
       email: Joi.string().email().optional().allow(""),
@@ -1427,5 +1568,41 @@ export const Schemas = {
         "any.required": "user_id is required",
       }),
     }),
+  },
+  deviceRegister: {
+    // Register a device for the currently authenticated user.
+    // user_id comes from the auth token, NOT from the request body —
+    // prevents privilege escalation.
+    //
+    // Two identity modes are supported:
+    //   1. IMEI only  → serial_number is auto-derived from the IMEI
+    //                    (TAC|SN|CD layout, e.g. 868017032159118 → SN 1703215911)
+    //   2. serial_number only → no IMEI; used to update an existing
+    //                    device row or insert one carrying only the SN.
+    // At least one of imei / serial_number must be supplied.
+    byImei: Joi.object({
+      imei: Joi.string()
+        .optional()
+        .pattern(/^[0-9]{6,20}$/)
+        .messages({
+          "string.pattern.base": "imei must be 6-20 digits",
+        }),
+      serial_number: Joi.string().optional().allow(null, ""),
+      device_name: Joi.string().optional().allow(null, ""),
+      email: Joi.string().email().optional().allow(null, ""),
+      phone_number: Joi.string().optional().allow(null, ""),
+      country_code: Joi.string().optional().allow(null, ""),
+      network_carrier: Joi.string().optional().allow(null, ""),
+      network_type: Joi.string().optional().allow(null, ""),
+      location_interval_minutes: Joi.number()
+        .integer()
+        .min(1)
+        .optional()
+        .default(1),
+      height_cm: Joi.number().integer().optional().allow(null),
+      gender: Joi.string().optional().allow(null),
+      age: Joi.number().integer().optional().allow(null),
+      weight_kg: Joi.number().integer().optional().allow(null),
+    }).or("imei", "serial_number"),
   },
 };

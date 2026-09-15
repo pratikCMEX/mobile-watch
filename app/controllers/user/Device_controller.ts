@@ -8,6 +8,8 @@ import {
 } from "../../library/Response";
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
+import Device from "../../models/Device";
+import DeviceSetting from "../../models/DeviceSetting";
 
 /**
  * Country code auto-prepended to 10-digit national numbers on the wire.
@@ -54,6 +56,7 @@ const updateDeviceSettings = async function (
       fall_down_reminder_call,
       fall_down_level,
       scene_mode,
+      low_battery_alert,
     } = req.body;
 
     if (!device_id) {
@@ -124,6 +127,7 @@ const updateDeviceSettings = async function (
         walk_time_enabled: "0",
         walk_time_sections: [],
         walk_time_step_target: null,
+        low_battery_alert: low_battery_alert ?? "0",
       });
     } else {
       if (sms_alert_enabled !== undefined)
@@ -148,11 +152,13 @@ const updateDeviceSettings = async function (
       if (fall_down_level !== undefined)
         deviceSetting.fall_down_level = Number(fall_down_level);
       if (scene_mode !== undefined) deviceSetting.scene_mode = scene_mode;
+      if (low_battery_alert !== undefined)
+        deviceSetting.low_battery_alert = low_battery_alert;
 
       await deviceSetting.save();
     }
 
-    // ── Push fall-down settings to the device via TCP ───────
+    // ── Push settings to the device via TCP ──────────────────
     // Only attempt if the device has a serial_number and is
     // currently connected via TCP.
     const tcpCommands: string[] = [];
@@ -211,6 +217,21 @@ const updateDeviceSettings = async function (
             );
           }
         }
+
+        // Send LOWBAT command if low battery alert switch changed
+        if (low_battery_alert !== undefined) {
+          const lowBatEnabled = low_battery_alert === "1";
+          const sent = tcpServer.sendLowBatteryCommand(
+            device.serial_number,
+            lowBatEnabled
+          );
+          if (sent) {
+            const flag = lowBatEnabled ? "1" : "0";
+            tcpCommands.push(
+              `[CS*${device.serial_number}*0008*LOWBAT,${flag}]`
+            );
+          }
+        }
       }
     }
 
@@ -222,13 +243,14 @@ const updateDeviceSettings = async function (
         ...deviceSetting.toJSON(),
         fall_down_alert_enabled: deviceSetting.fall_down_alert_enabled === "1",
         fall_down_reminder_call: deviceSetting.fall_down_reminder_call === "1",
+        low_battery_alert: deviceSetting.low_battery_alert === "1",
       },
     };
 
     if (tcpCommands.length > 0) {
       response.tcp_commands_sent = tcpCommands;
       response.command_message =
-        "Fall-down settings pushed to device via TCP. Device will acknowledge.";
+        "Settings pushed to device via TCP. Device will acknowledge.";
     } else if (device.serial_number) {
       response.command_message =
         "Device is not connected via TCP. Settings saved to database only. They will be applied when the device reconnects.";
@@ -342,6 +364,7 @@ const getDeviceSettings = async (
         fall_down_reminder_call: "0",
         fall_down_level: 5,
         scene_mode: 1,
+        low_battery_alert: "0",
       });
     }
 
@@ -379,6 +402,8 @@ const getDeviceSettings = async (
         walk_time_enabled: deviceSetting.walk_time_enabled === "1",
         walk_time_sections: deviceSetting.walk_time_sections ?? [],
         walk_time_step_target: deviceSetting.walk_time_step_target ?? null,
+        // Low battery alarm SMS alert (LOWBAT command)
+        low_battery_alert: deviceSetting.low_battery_alert === "1",
         // Locale (last-known values sent to the device via LZ command)
         language: device.language,
         timezone: device.timezone,
@@ -1361,6 +1386,24 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
       serial_number,
       Boolean(enabled)
     );
+
+    const flag = enabled ? "1" : "0";
+
+    const [affectedRows] = await db.DeviceSetting.update(
+      {
+        sms_alert_enabled: flag,
+      },
+      {
+        where: {
+          device_id: device.id,
+        },
+      }
+    );
+
+    if (affectedRows === 0) {
+      return errorMessage(res, "Device setting not found for this device");
+    }
+
     if (!commandSent) {
       return errorMessage(
         res,
@@ -1368,7 +1411,6 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
       );
     }
 
-    const flag = enabled ? "1" : "0";
     const commandProtocol = `[3G*${serial_number}*0008*SOSSMS,${flag}]`;
 
     Logging.info(
@@ -1476,6 +1518,7 @@ const setFallDownAlert = async (
         fall_down_reminder_call: callCenter ? "1" : "0",
         fall_down_level: 5,
         scene_mode: 1,
+        low_battery_alert: "0",
       });
     } else {
       deviceSetting.fall_down_alert_enabled = alertEnabled ? "1" : "0";
@@ -1513,6 +1556,433 @@ const setFallDownAlert = async (
   } catch (err) {
     console.error("setFallDownAlert error:", err);
     return errorMessage(res, "Error sending fall-down alarm command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// Take-Off Watch Alarm (REMOVE) — toggle the watch's take-off
+// alarm switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*REMOVE,0]  (off, do NOT send alarm on take-off)
+//                 [CS*<id>*0008*REMOVE,1]  (on, send alarm on take-off)
+//   Device reply: [CS*<id>*0006*REMOVE]    (bare ack = success)
+//
+// NOTE: This feature depends on the device firmware having a light
+// sensor. If the watch does not have a light sensor, this command
+// is unnecessary and may not be supported.
+//
+// Server-side mirror: DeviceSetting.take_off_device_alert
+// ────────────────────────────────────────────────────────────
+
+const setTakeOffAlert = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, enabled } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendRemoveCommand(
+      serial_number,
+      Boolean(enabled)
+    );
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send REMOVE command. Device may be disconnected."
+      );
+    }
+
+    // Mirror to the server-side DeviceSetting table.
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: enabled ? "1" : "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
+        fall_down_level: 5,
+        scene_mode: 1,
+      });
+    } else {
+      deviceSetting.take_off_device_alert = enabled ? "1" : "0";
+      await deviceSetting.save();
+    }
+
+    const flag = enabled ? "1" : "0";
+    const commandProtocol = `[CS*${serial_number}*0008*REMOVE,${flag}]`;
+
+    Logging.info(
+      `Take-off alarm (REMOVE) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, enabled=${Boolean(enabled)})`
+    );
+
+    return successMessage(res, "Take-off alarm command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      enabled: Boolean(enabled),
+      command_sent: true,
+      command_message: enabled
+        ? "REMOVE ON command sent. Device will send an alarm when the watch is taken off."
+        : "REMOVE OFF command sent. Device will NOT send an alarm when the watch is taken off.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*0006*REMOVE] (bare ack = success).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setTakeOffAlert error:", err);
+    return errorMessage(res, "Error sending take-off alarm command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// Take-Off Watch Alarm SMS (REMOVESMS) — toggle the watch's
+// take-off SMS alarm switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*REMOVESMS,0]  (off, do NOT send SMS alarm on take-off)
+//                 [CS*<id>*0008*REMOVESMS,1]  (on, send SMS alarm on take-off)
+//   Device reply: [CS*<id>*0006*REMOVESMS]    (bare ack = success)
+//
+// NOTE: This feature depends on the device firmware supporting
+// SMS alerts on take-off. If the device does not support it,
+// this command may not be acknowledged.
+//
+// Server-side mirror: DeviceSetting.take_off_device_alert
+// ────────────────────────────────────────────────────────────
+
+const setRemoveSmsAlert = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, enabled } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendRemoveSmsCommand(
+      serial_number,
+      Boolean(enabled)
+    );
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send REMOVESMS command. Device may be disconnected."
+      );
+    }
+
+    // Mirror to the server-side DeviceSetting table.
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: enabled ? "1" : "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
+        fall_down_level: 5,
+        scene_mode: 1,
+      });
+    } else {
+      deviceSetting.take_off_device_alert = enabled ? "1" : "0";
+      await deviceSetting.save();
+    }
+
+    const flag = enabled ? "1" : "0";
+    const commandProtocol = `[CS*${serial_number}*0008*REMOVESMS,${flag}]`;
+
+    Logging.info(
+      `Take-off SMS alarm (REMOVESMS) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, enabled=${Boolean(enabled)})`
+    );
+
+    return successMessage(res, "Take-off SMS alarm command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      enabled: Boolean(enabled),
+      command_sent: true,
+      command_message: enabled
+        ? "REMOVESMS ON command sent. Device will send an SMS alarm when the watch is taken off."
+        : "REMOVESMS OFF command sent. Device will NOT send an SMS alarm when the watch is taken off.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*0006*REMOVESMS] (bare ack = success).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setRemoveSmsAlert error:", err);
+    return errorMessage(res, "Error sending take-off SMS alarm command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// Center Number (CENTER) — set the watch's center phone number
+// for SMS alarm alerts.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*<LEN>*CENTER,<phoneNumber>]
+//   Device reply: [CS*<id>*<LEN>*CENTER]  (bare ack = success)
+//
+// Server-side mirror: Device.center_number
+// ────────────────────────────────────────────────────────────
+
+const setCenterNumber = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, center_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (!center_number) {
+      return errorMessage(res, "center_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendCenterCommand(
+      serial_number,
+      center_number
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send CENTER command. Device may be disconnected or invalid center number."
+      );
+    }
+
+    // Mirror to the server-side Device table.
+    await device.update({
+      center_number: center_number.replace(/[^0-9]/g, ""),
+    });
+
+    const digits = center_number.replace(/[^0-9]/g, "");
+    const content = `CENTER,${digits}`;
+    const lenHex = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[CS*${serial_number}*${lenHex}*${content}]`;
+
+    Logging.info(
+      `Center number (CENTER) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, center=${digits})`
+    );
+
+    return successMessage(res, "Center number command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      center_number: digits,
+      command_sent: true,
+      command_message:
+        "CENTER command sent. Device will use this number for SMS alarm alerts.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*<LEN>*CENTER] (bare ack = success).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setCenterNumber error:", err);
+    return errorMessage(res, "Error sending center number command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// Low-Battery Alarm Alert (LOWBAT) — toggle the watch's
+// low-battery alarm SMS alert switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*LOWBAT,0]  (off, do NOT send SMS on low battery)
+//                 [CS*<id>*0008*LOWBAT,1]  (on, send SMS on low battery)
+//   Device reply: [CS*<id>*0006*LOWBAT]    (bare ack = success)
+//
+// Server-side mirror: DeviceSetting.low_battery_alert
+// ────────────────────────────────────────────────────────────
+
+const setLowBatteryAlert = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, enabled } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const alertEnabled = Boolean(enabled);
+
+    const commandSent = tcpServer.sendLowBatteryCommand(
+      serial_number,
+      alertEnabled
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send LOWBAT command. Device may be disconnected."
+      );
+    }
+
+    // Mirror to the server-side DeviceSetting table.
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
+        fall_down_level: 5,
+        scene_mode: 1,
+        low_battery_alert: alertEnabled ? "1" : "0",
+      });
+    } else {
+      deviceSetting.low_battery_alert = alertEnabled ? "1" : "0";
+      await deviceSetting.save();
+    }
+
+    const flag = alertEnabled ? "1" : "0";
+    const content = `LOWBAT,${flag}`;
+    const lenHex = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[CS*${serial_number}*${lenHex}*${content}]`;
+
+    Logging.info(
+      `Low-battery alarm (LOWBAT) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, enabled=${alertEnabled})`
+    );
+
+    return successMessage(res, "Low-battery alarm command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      enabled: alertEnabled,
+      command_sent: true,
+      command_message: alertEnabled
+        ? "LOWBAT ON command sent. Device will send an SMS alert when battery is low."
+        : "LOWBAT OFF command sent. Device will NOT send an SMS alert on low battery.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*0006*LOWBAT] (bare ack = success).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setLowBatteryAlert error:", err);
+    return errorMessage(res, "Error sending low-battery alarm command");
   }
 };
 
@@ -1616,6 +2086,7 @@ const setFallDownSensitivity = async (
         fall_down_reminder_call: "0",
         fall_down_level: levelNum,
         scene_mode: 1,
+        low_battery_alert: "0",
       });
     } else {
       deviceSetting.fall_down_level = levelNum;
@@ -2697,6 +3168,7 @@ const setUploadInterval = async function (
         walk_time_enabled: "0",
         walk_time_sections: [],
         walk_time_step_target: null,
+        low_battery_alert: "0",
       });
     } else {
       deviceSetting.upload_interval_seconds = interval_seconds;
@@ -2948,6 +3420,7 @@ const getWalkTime = async function (
         walk_time_enabled: "0",
         walk_time_sections: [],
         walk_time_step_target: null,
+        low_battery_alert: "0",
       });
     }
 
@@ -3252,6 +3725,284 @@ const getDeviceLocation = async function (
   }
 };
 
+// ── Register / update a device for the logged-in user ──────────
+// The user_id is derived from the auth token (req.userinfo.payload.id),
+// never from the request body, so a caller cannot register a device for
+// someone else.
+//
+// Logic (serial_number is auto-derived from a 15-digit IMEI when only
+// the IMEI is supplied):
+//   1. A row already exists with this serial_number:
+//        - if its imei is null → UPDATE in place (link owner + imei
+//          + any provided fields), do NOT insert a duplicate.
+//        - if its imei is set   → return the existing row as-is.
+//   2. No row with this serial_number:
+//        - if imei supplied and already registered to another user → 409
+//        - otherwise INSERT a new device row.
+const registerDeviceByImei = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const userId = (req as any)?.userinfo?.payload?.id;
+    if (!userId) {
+      return errorMessage(res, "Invalid token payload", 401);
+    }
+
+    const user = await db.User.findByPk(userId);
+    if (!user) {
+      return errorMessage(res, "User not found", 404);
+    }
+
+    const {
+      imei,
+      serial_number,
+      device_name,
+      email,
+      phone_number,
+      country_code,
+      network_carrier,
+      network_type,
+      location_interval_minutes,
+      height_cm,
+      gender,
+      age,
+      weight_kg,
+    } = req.body;
+
+    // ── Derive serial number from the IMEI ─────────────────────
+    // IMEI layout used by this device family:
+    //   TAC (4) | Serial Number (10) | Check Digit (1)  = 15 digits
+    // e.g. 868017032159118  →  SN = "1703215911", CD = "8"
+    // The SN is everything between the 4-digit TAC and the final
+    // check digit. Fall back to the caller-supplied value when the
+    // IMEI shape is unexpected.
+    const derivedSerialNumber =
+      imei && /^\d{15}$/.test(imei) ? imei.slice(4, -1) : serial_number ?? null;
+
+    if (!imei && !serial_number) {
+      return errorMessage(res, "imei or serial_number is required");
+    }
+
+    // ── 1) A device row already exists with this serial_number ──
+    const existingBySerial = await db.Device.findOne({
+      where: { serial_number: derivedSerialNumber },
+    });
+    if (existingBySerial) {
+      if (!existingBySerial.owner_id) {
+        /**
+         * Serial exists but has no owner yet — this is an
+         * unclaimed placeholder (with or without an IMEI). Link the
+         * owner + imei + any provided fields in place instead of
+         * inserting a duplicate row, and report it as "added" since
+         * the device is now being registered for the first time.
+         */
+        existingBySerial.owner_id = userId;
+        existingBySerial.imei = imei ?? existingBySerial.imei ?? null;
+        if (device_name) existingBySerial.device_name = device_name;
+        if (email !== undefined) existingBySerial.email = email;
+        if (phone_number !== undefined)
+          existingBySerial.phone_number = phone_number;
+        if (country_code !== undefined)
+          existingBySerial.country_code = country_code;
+        if (network_carrier !== undefined)
+          existingBySerial.network_carrier = network_carrier;
+        if (network_type !== undefined)
+          existingBySerial.network_type = network_type;
+        if (location_interval_minutes !== undefined)
+          existingBySerial.location_interval_minutes =
+            location_interval_minutes;
+        if (height_cm !== undefined) existingBySerial.height_cm = height_cm;
+        if (gender !== undefined) existingBySerial.gender = gender;
+        if (age !== undefined) existingBySerial.age = age;
+        if (weight_kg !== undefined) existingBySerial.weight_kg = weight_kg;
+        await existingBySerial.save();
+        return successMessage(
+          res,
+          "Device added successfully",
+          existingBySerial
+        );
+      }
+      if (existingBySerial.owner_id === userId) {
+        return successMessage(
+          res,
+          "Device already registered",
+          existingBySerial
+        );
+      }
+      // Serial is owned by a different user — do not hijack it.
+      return customMessage(
+        res,
+        409,
+        "This serial number is already registered to another account"
+      );
+    }
+
+    // ── 2) No row with this serial_number. If an IMEI was supplied,
+    //        make sure it isn't already registered under a different row.
+    if (imei) {
+      const existingByImei = await db.Device.findOne({ where: { imei } });
+      if (existingByImei) {
+        if (existingByImei.owner_id === userId) {
+          return successMessage(
+            res,
+            "Device already registered",
+            existingByImei
+          );
+        }
+        if (!existingByImei.owner_id) {
+          /**
+           * IMEI exists on an unclaimed placeholder — link the owner
+           * in place instead of refusing (no other account owns it).
+           */
+          existingByImei.owner_id = userId;
+          if (device_name) existingByImei.device_name = device_name;
+          if (email !== undefined) existingByImei.email = email;
+          if (phone_number !== undefined)
+            existingByImei.phone_number = phone_number;
+          if (country_code !== undefined)
+            existingByImei.country_code = country_code;
+          if (network_carrier !== undefined)
+            existingByImei.network_carrier = network_carrier;
+          if (network_type !== undefined)
+            existingByImei.network_type = network_type;
+          if (location_interval_minutes !== undefined)
+            existingByImei.location_interval_minutes =
+              location_interval_minutes;
+          if (height_cm !== undefined) existingByImei.height_cm = height_cm;
+          if (gender !== undefined) existingByImei.gender = gender;
+          if (age !== undefined) existingByImei.age = age;
+          if (weight_kg !== undefined) existingByImei.weight_kg = weight_kg;
+          await existingByImei.save();
+          return successMessage(
+            res,
+            "Device added successfully",
+            existingByImei
+          );
+        }
+        // IMEI is owned by a different user — refuse to hijack it.
+        return customMessage(
+          res,
+          409,
+          "This IMEI is already registered to another account"
+        );
+      }
+    }
+
+    // ── 3) Neither serial nor imei exists — insert a new record ─
+    /**
+     * Guarded insert: serial_number is intentionally NOT unique and
+     * imei is only unique when non-null, so a check-then-create race
+     * (two concurrent requests for the same identity) could otherwise
+     * insert two rows — or, for the imei path, throw a
+     * SequelizeUniqueConstraintError that escapes as an unhandled
+     * rejection. findOrCreate() keeps the create atomic; the catch
+     * below re-fetches the winner if we lost the race.
+     */
+    const whereClause = imei
+      ? { imei }
+      : { serial_number: derivedSerialNumber, imei: null };
+
+    let device: any;
+    try {
+      const [createdDevice, created] = await db.Device.findOrCreate({
+        where: whereClause,
+        defaults: {
+          owner_id: userId,
+          imei: imei ?? null,
+          serial_number: derivedSerialNumber,
+          device_name: device_name ?? "Device".concat(derivedSerialNumber),
+          email: email ?? null,
+          phone_number: phone_number ?? null,
+          country_code: country_code ?? null,
+          network_carrier: network_carrier ?? null,
+          network_type: network_type ?? null,
+          location_interval_minutes: location_interval_minutes ?? 1,
+          height_cm: height_cm ?? null,
+          gender: gender ?? null,
+          age: age ?? null,
+          weight_kg: weight_kg ?? null,
+          connection_status: "offline",
+          signal_status: null,
+          battery_percentage: null,
+          is_online: false,
+          last_updated_at: null,
+        },
+      });
+
+      device = createdDevice;
+
+      if (!created) {
+        /**
+         * A concurrent request inserted the row between our checks.
+         * Link the owner if it isn't already linked to this user.
+         */
+        const hadNoOwner = !device.owner_id;
+        if (device.owner_id !== userId) {
+          device.owner_id = userId;
+          if (device_name) device.device_name = device_name;
+          if (email !== undefined) device.email = email;
+          if (phone_number !== undefined) device.phone_number = phone_number;
+          if (country_code !== undefined) device.country_code = country_code;
+          if (network_carrier !== undefined)
+            device.network_carrier = network_carrier;
+          if (network_type !== undefined) device.network_type = network_type;
+          if (location_interval_minutes !== undefined)
+            device.location_interval_minutes = location_interval_minutes;
+          if (height_cm !== undefined) device.height_cm = height_cm;
+          if (gender !== undefined) device.gender = gender;
+          if (age !== undefined) device.age = age;
+          if (weight_kg !== undefined) device.weight_kg = weight_kg;
+          await device.save();
+        }
+        return successMessage(
+          res,
+          hadNoOwner
+            ? "Device added successfully"
+            : "Device already registered",
+          device
+        );
+      }
+    } catch (error: any) {
+      const isUniqueViolation =
+        error.name === "SequelizeUniqueConstraintError" ||
+        error.parent?.code === "23505" ||
+        error.original?.code === "23505";
+
+      if (isUniqueViolation) {
+        device =
+          (await db.Device.findOne({ where: { imei } })) ||
+          (await db.Device.findOne({
+            where: { serial_number: derivedSerialNumber },
+          }));
+        if (!device) {
+          return errorMessage(res, "Error registering device: race detected");
+        }
+        const hadNoOwner = !device.owner_id;
+        if (device.owner_id !== userId) {
+          device.owner_id = userId;
+          await device.save();
+        }
+        return successMessage(
+          res,
+          hadNoOwner
+            ? "Device added successfully"
+            : "Device already registered",
+          device
+        );
+      }
+      throw error;
+    }
+
+    return successMessage(res, "Device registered successfully", device);
+  } catch (err: any) {
+    console.error("registerDeviceByImei error :", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error registering device: " + msg);
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -3267,6 +4018,10 @@ export default {
   makeOutgoingCall,
   setSosSms,
   setFallDownAlert,
+  setLowBatteryAlert,
+  setCenterNumber,
+  setTakeOffAlert,
+  setRemoveSmsAlert,
   setFallDownSensitivity,
   setLanguageTimezone,
   setSilenceTime,
@@ -3281,4 +4036,5 @@ export default {
   getWalkTime,
   locateDevice,
   getDeviceLocation,
+  registerDeviceByImei,
 };

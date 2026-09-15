@@ -136,6 +136,33 @@ router.post(
   Device_controller.setFallDownAlert
 );
 
+// Low-Battery Alarm Alert (LOWBAT) API — toggle the watch's
+// low-battery alarm SMS alert switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*LOWBAT,0]  (off, do NOT send SMS on low battery)
+//                 [CS*<id>*0008*LOWBAT,1]  (on, send SMS on low battery)
+//   Device reply: [CS*<id>*0006*LOWBAT]    (bare ack = success)
+router.post(
+  "/low_battery_alert",
+  checkToken,
+  ValidateJoi(Schemas.lowBatteryAlert.set),
+  Device_controller.setLowBatteryAlert
+);
+
+// Center Number (CENTER) API — set the watch's center phone number
+// for SMS alarm alerts.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*<LEN>*CENTER,<phoneNumber>]
+//   Device reply: [CS*<id>*<LEN>*CENTER]  (bare ack = success)
+router.post(
+  "/center_number",
+  checkToken,
+  ValidateJoi(Schemas.centerNumber.set),
+  Device_controller.setCenterNumber
+);
+
 // Fall-Down Sensitivity (LSSET) API — set the watch's fall-down
 // detection sensitivity level.
 //
@@ -210,6 +237,38 @@ router.post(
   checkToken,
   ValidateJoi(Schemas.dialLock.set),
   Device_controller.setDialLock
+);
+
+// Take-Off Watch Alarm (REMOVE) API — toggle the watch's take-off
+// alarm switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*REMOVE,0]  (off, do NOT send alarm on take-off)
+//                 [CS*<id>*0008*REMOVE,1]  (on, send alarm on take-off)
+//   Device reply: [CS*<id>*0006*REMOVE]    (bare ack = success)
+//
+// NOTE: This feature depends on the device firmware having a light
+// sensor. If the watch does not have a light sensor, this command
+// is unnecessary and may not be supported.
+router.post(
+  "/take_off_alert",
+  checkToken,
+  ValidateJoi(Schemas.takeOffAlert.set),
+  Device_controller.setTakeOffAlert
+);
+
+// Take-Off Watch Alarm SMS (REMOVESMS) API — toggle the watch's
+// take-off SMS alarm switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*REMOVESMS,0]  (off, do NOT send SMS alarm on take-off)
+//                 [CS*<id>*0008*REMOVESMS,1]  (on, send SMS alarm on take-off)
+//   Device reply: [CS*<id>*0006*REMOVESMS]    (bare ack = success)
+router.post(
+  "/remove_sms_alert",
+  checkToken,
+  ValidateJoi(Schemas.removeSmsAlert.set),
+  Device_controller.setRemoveSmsAlert
 );
 
 // Voice Monitor / Listen In (MONITOR command) - OPTIONAL FEATURE
@@ -303,6 +362,19 @@ router.post(
   checkToken,
   ValidateJoi(Schemas.notification.list),
   Notification_controller.listNotifications
+);
+
+// Register / update a device for the logged-in user.
+// The user_id is taken from the auth token, not the request body,
+// so a caller cannot register a device for another account.
+// Body: imei (SN auto-derived) and/or serial_number.
+//   - serial exists with imei null → update in place
+//   - neither serial nor imei exists → insert new row
+router.post(
+  "/register_device",
+  checkToken,
+  ValidateJoi(Schemas.deviceRegister.byImei),
+  Device_controller.registerDeviceByImei
 );
 
 module.exports = router;
