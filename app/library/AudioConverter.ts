@@ -52,11 +52,18 @@ export async function ensureAmrNarrowband(filePath: string): Promise<Buffer> {
   );
 
   // Persist the converted file permanently as a real ".amr" file next
-  // to the original upload (e.g. "..._voice.m4a" -> "..._voice.amr"),
-  // instead of a throwaway temp file — so what's on disk actually
-  // reflects what was sent to the device.
-  const parsed = path.parse(filePath);
-  const outputPath = path.join(parsed.dir, `${parsed.name}.amr`);
+  // to the original upload, instead of a throwaway temp file — so
+  // what's on disk actually reflects what was sent to the device.
+  //
+  // Always append ".amr" to the FULL original filename (extension
+  // included) rather than replacing the extension — some Android
+  // uploads already arrive named "*.amr" while actually being a 3GP/
+  // MP4 container wrapping an AMR stream (not the bare "#!AMR\n"
+  // format), which still needs conversion. Replacing the extension in
+  // that case would make the output path equal the input path, and
+  // ffmpeg refuses to edit a file in place ("Output same as Input").
+  // Appending guarantees the output path can never collide.
+  const outputPath = `${filePath}.amr`;
 
   // AMR-NB mode: watch firmware confirmed working with genuine
   // Android-recorded AMR, but our ffmpeg/libopencore_amrnb output at
