@@ -187,7 +187,7 @@ const getAnalytics = async (
         createdAt: { [Op.between]: [start, end] },
       },
       attributes: ["value_primary", "value_secondary", "unit", "recorded_at"],
-      order: [["id", "DESC"]],
+      order: [["value_primary", "ASC"]],
     });
 
     let summary = {
