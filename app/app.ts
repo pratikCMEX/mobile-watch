@@ -15,6 +15,7 @@ const server = http.createServer(app);
 
 const userRoutes = require("./routes/userRoutes");
 const authRoutes = require("./routes/authRoutes");
+const adminAuthRoutes = require("./routes/adminAuthRoutes");
 const healthRoutes = require("./routes/healthmetricsRoutes");
 const deviceRoutes = require("./routes/deviceRoutes");
 const logRoutes = require("./routes/logRoutes");
@@ -24,6 +25,7 @@ const snapshotRoutes = require("./routes/snapshotRoutes");
 const emergencyContactRoutes = require("./routes/emergencyContactRoutes");
 const geofenceRoutes = require("./routes/geofenceRoutes");
 const sceneModeRoutes = require("./routes/sceneModeRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 const testNotificationRoutes = require("./routes/testNotificationRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 
@@ -36,16 +38,13 @@ const allowedOrigins = (
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
+    origin: "*", // Allows all domains
+    methods: ["GET", "POST", "PUT", "DELETE"], // Allowed request methods
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+    ], // Allowed headers
+    credentials: true, // If cookies/auth headers are needed, set this to true
   })
 );
 
@@ -99,6 +98,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // ─── Routes ────────────────────────────────────────────────────
 app.use("/admin", userRoutes);
+app.use("/admin", adminAuthRoutes);
+app.use("/admin", adminRoutes);
 app.use("/auth", authRoutes);
 app.use("/device", deviceRoutes);
 app.use("/user/device", userDeviceRoutes);

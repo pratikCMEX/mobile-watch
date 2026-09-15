@@ -591,67 +591,64 @@ const updateDeviceIdentity = async function (
   }
 };
 
-// ─────────────────────────────────────────────────────────────
-// List all reminders for a device
-// ─────────────────────────────────────────────────────────────
-const listReminders = async function (
+const listDevices = async function (
   req: Request,
   res: Response,
   next: NextFunction
 ) {
   try {
-    const { serial_number, type } = req.body;
+    const { search = "", page = 1, limit = 20, connection_status } = req.body;
 
-    if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+    const offset = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (search) {
+      where.serial_number = { [Op.like]: `%${search}%` };
     }
 
-    const device = await db.Device.findOne({
-      where: { serial_number: serial_number as string },
-    });
-    if (!device) {
-      return errorMessage(
-        res,
-        `Device with serial_number '${serial_number}' not found`
-      );
+    if (connection_status) {
+      where.connection_status = connection_status;
     }
 
-    // Build filter
-    const whereClause: any = { device_id: device.id };
-    if (type) {
-      whereClause.type = type as string;
-    }
+    const { rows, count } = await db.Device.findAndCountAll({
+      where,
+      limit: Number(limit),
+      offset: Number(offset),
+      order: [["createdAt", "DESC"]],
+    }); // order: [["createdAt", "DESC"]],
 
-    // Fetch reminders ordered by number (slot) then creation date
-    const reminders = await db.Reminder.findAll({
-      where: whereClause,
-      order: [
-        ["number", "ASC"],
-        ["createdAt", "ASC"],
-      ],
-    });
-
-    // Map to safe JSON (exclude voice_data binary from default response)
-    const safeReminders = reminders.map((r: any) => {
-      const plain: any = r.get({ plain: true });
-      // Only include voice_data if explicitly requested or if it's small
-      if (plain.voice_data && plain.voice_data.length > 0) {
-        plain.voice_data = `[BINARY DATA: ${plain.voice_data.length} bytes]`;
-      }
-      return plain;
-    });
-
-    return successMessage(res, "Reminders fetched successfully", {
-      serial_number,
-      device_id: device.id,
-      device_name: device.device_name,
-      filter_type: type || "all",
-      total: safeReminders.length,
-      reminders: safeReminders,
+    return successMessage(res, "Devices fetched successfully", {
+      devices: rows,
+      total: count,
+      page: Number(page),
+      limit: Number(limit),
+      totalPages: Math.ceil(count / Number(limit)),
     });
   } catch (err) {
-    console.error("listReminders error:", err);
-    return errorMessage(res, "Error fetching reminders");
+    console.error("listDevices error:", err);
+    return errorMessage(res, "Error fetching devices");
+  }
+};
+
+const getAllDeviceImei = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const devices = await db.Device.findAll({
+      attributes: ["id", "imei"],
+      order: [["createdAt", "DESC"]],
+    });
+
+    return successMessage(res, "All device IMEIs fetched successfully", {
+      devices,
+      total: devices.length,
+    });
+  } catch (err) {
+    console.error("getAllDeviceImei error:", err);
+    return errorMessage(res, "Error fetching device IMEIs");
   }
 };
 
@@ -662,8 +659,9 @@ export default {
   getDeviceSettings,
   sendVoiceMessage,
   sendReminder,
-  listReminders,
   listUnlinkedDevices,
   assignOwner,
   updateDeviceIdentity,
+  listDevices,
+  getAllDeviceImei,
 };

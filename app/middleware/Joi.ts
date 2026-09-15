@@ -33,8 +33,39 @@ export const Schemas = {
     email: Joi.string().email().optional().allow(""),
   }).or("mobile_no", "email"),
   adminLogin: Joi.object({
-    email: Joi.string().email().required(),
+    username: Joi.string().required(),
     password: Joi.string().required(),
+  }),
+  adminUpdatePassword: Joi.object({
+    oldPassword: Joi.string().required(),
+    newPassword: Joi.string().min(6).required(),
+    confirmPassword: Joi.string()
+      .valid(Joi.ref("newPassword"))
+      .required()
+      .messages({ "any.only": "Passwords do not match" }),
+  }),
+  getAllSnapshots: Joi.object({
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    id: Joi.string().optional().allow(null),
+    imei: Joi.string().optional().allow(null),
+  }),
+  getDeviceLocation: Joi.object({
+    imei: Joi.string().required(),
+  }),
+  getAllHealthMetrics: Joi.object({
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    imei: Joi.string().optional().allow(null),
+  }),
+  deleteHealthMetric: Joi.object({
+    id: Joi.string().required(),
+  }),
+  listDevices: Joi.object({
+    search: Joi.string().optional().allow(""),
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).optional(),
+    connection_status: Joi.string().optional().allow(""),
   }),
   login: Joi.object({
     email: Joi.string().email().required(),

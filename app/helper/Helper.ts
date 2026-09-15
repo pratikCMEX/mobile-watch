@@ -7,7 +7,7 @@ import { NextFunction, Request, Response } from "express";
 export const generateAuthToken = (user: {
   id: string;
   name: string;
-  email: string;
+ 
 }) => {
   const JWT_ENCRYPTION = process.env.JWT_ENCRYPTION || "";
   if (!JWT_ENCRYPTION) {
@@ -18,7 +18,7 @@ export const generateAuthToken = (user: {
       payload: {
         id: user.id,
         name: user.name,
-        email: user.email,
+       
       },
     },
     JWT_ENCRYPTION
