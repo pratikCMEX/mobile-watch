@@ -40,10 +40,7 @@ app.use(
   cors({
     origin: "*", // Allows all domains
     methods: ["GET", "POST", "PUT", "DELETE"], // Allowed request methods
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-    ], // Allowed headers
+    allowedHeaders: ["Content-Type", "Authorization"], // Allowed headers
     credentials: true, // If cookies/auth headers are needed, set this to true
   })
 );
@@ -99,7 +96,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─── Routes ────────────────────────────────────────────────────
 app.use("/admin", userRoutes);
 app.use("/admin", adminAuthRoutes);
-app.use("/admin", adminRoutes);
+app.use("/admins", adminRoutes);
 app.use("/auth", authRoutes);
 app.use("/device", deviceRoutes);
 app.use("/user/device", userDeviceRoutes);
