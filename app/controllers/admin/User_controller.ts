@@ -96,8 +96,8 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
 async function updateUser(req: Request, res: Response, next: NextFunction) {
   try {
     const { id, name, email, password, phone_number, country_code } = req.body;
-    if (!name || !email || !password) {
-      return errorMessage(res, "Name, email and password are required");
+    if (!email) {
+      return errorMessage(res, "Email is required");
     }
     const existing = await db.User.findOne({
       where: { email, id: { [Op.ne]: id } },
@@ -105,17 +105,19 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
     if (existing) {
       return errorMessage(res, "A user with this email already exists");
     }
-    const password_hash = await bcrypt.hash(password, 10);
-    const user = await db.User.update(
-      {
-        name,
-        email,
-        password: password_hash,
-        phone_number,
-        country_code,
-      },
-      { where: { id } }
-    );
+
+    const updateData: any = {
+      email,
+    };
+
+    if (name) updateData.name = name;
+    if (phone_number) updateData.phone_number = phone_number;
+    if (country_code) updateData.country_code = country_code;
+    if (password) {
+      updateData.password = await bcrypt.hash(password, 10);
+    }
+
+    const user = await db.User.update(updateData, { where: { id } });
 
     if (!user) {
       return errorMessage(res, "User not found");
