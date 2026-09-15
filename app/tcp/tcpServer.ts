@@ -7,9 +7,6 @@ import {
   createNotification,
   buildSosNotification,
   buildGeoFenceNotification,
-  buildFallDetectionNotification,
-  buildHealthAlertNotification,
-  buildWatchRemoveNotification,
 } from "../services/notification.service";
 
 // ─────────────────────────────────────────────────────────────
@@ -1371,11 +1368,7 @@ class TcpServer {
       Logging.info(
         `${tag} Watch-remove alarm detected — sending notification to owner`
       );
-      const notificationPayload = buildWatchRemoveNotification(deviceIdDb);
-      await createNotification({
-        ...notificationPayload,
-        user_id: ownerId,
-      });
+
       Logging.info(
         `${tag} Watch-remove notification created for device ${deviceIdDb}`
       );
@@ -1386,11 +1379,7 @@ class TcpServer {
       Logging.info(
         `${tag} Fall-down alarm detected — sending fall-detection notification to owner`
       );
-      const notificationPayload = buildFallDetectionNotification(deviceIdDb);
-      await createNotification({
-        ...notificationPayload,
-        user_id: ownerId,
-      });
+
       Logging.info(
         `${tag} Fall-detection notification created for device ${deviceIdDb}`
       );
@@ -1401,14 +1390,7 @@ class TcpServer {
       Logging.info(
         `${tag} Abnormal heart-rate alarm detected — sending notification to owner`
       );
-      const notificationPayload = buildHealthAlertNotification(
-        deviceIdDb,
-        "Abnormal heart rate detected"
-      );
-      await createNotification({
-        ...notificationPayload,
-        user_id: ownerId,
-      });
+
       Logging.info(
         `${tag} Health-alert notification created for device ${deviceIdDb}`
       );
