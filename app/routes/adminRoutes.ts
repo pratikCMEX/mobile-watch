@@ -8,7 +8,7 @@ import Monitor_controller from "../controllers/admin/Monitor_controller";
 import Health_controller from "../controllers/admin/Health_controller";
 import User_controller from "../controllers/admin/User_controller";
 import Dashboard_controller from "../controllers/admin/Dashboard_controller";
-import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
+import Admin_Auth_controller from "../controllers/admin/Auth_controller";
 const router = express.Router();
 
 // Dashboard stats
@@ -17,6 +17,21 @@ router.get(
   checkAdmin,
   Dashboard_controller.getDashboardStats
 );
+
+router.post(
+  "/login",
+  ValidateJoi(Schemas.adminLogin),
+  Admin_Auth_controller.adminLogin
+);
+
+router.post(
+  "/update_password",
+  checkAdmin,
+  ValidateJoi(Schemas.adminUpdatePassword),
+  Admin_Auth_controller.updatePassword
+);
+
+router.post("/logout", checkAdmin, Admin_Auth_controller.logout);
 
 // Create geofence
 router.post(

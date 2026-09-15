@@ -15,7 +15,6 @@ const server = http.createServer(app);
 
 const userRoutes = require("./routes/userRoutes");
 const authRoutes = require("./routes/authRoutes");
-const adminAuthRoutes = require("./routes/adminAuthRoutes");
 const healthRoutes = require("./routes/healthmetricsRoutes");
 const deviceRoutes = require("./routes/deviceRoutes");
 const logRoutes = require("./routes/logRoutes");
@@ -94,9 +93,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // ─── Routes ────────────────────────────────────────────────────
-app.use("/admin", userRoutes);
-app.use("/admin", adminAuthRoutes);
-app.use("/admins", adminRoutes);
+app.use("/admin", adminRoutes);
 app.use("/auth", authRoutes);
 app.use("/device", deviceRoutes);
 app.use("/user/device", userDeviceRoutes);
