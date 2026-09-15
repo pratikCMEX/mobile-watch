@@ -97,8 +97,8 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 // ─── Routes ────────────────────────────────────────────────────
-app.use("/admin", userRoutes);
-app.use("/admin", adminAuthRoutes);
+// app.use("/admin", userRoutes);
+// app.use("/admin", adminAuthRoutes);
 app.use("/admin", adminRoutes);
 app.use("/auth", authRoutes);
 app.use("/device", deviceRoutes);
