@@ -1632,4 +1632,43 @@ export const Schemas = {
       type: Joi.string().valid("ios", "android").optional().allow(null, ""),
     }),
   },
+
+  /**
+   * Change the reporting server (server portal) for a device.
+   *
+   * Per the device protocol spec:
+   *   Server send : [3G*<deviceId>*<LEN>*IP,<host>,<port>]
+   *   Example     : [3G*8800000015*0014*IP,113.81.229.9,5900]
+   *
+   * The device does NOT acknowledge this command. It closes the
+   * current TCP session and reconnects to the requested host/port
+   * after its internal delay (5-8 minutes).
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "host": "113.81.229.9",
+   *     "port": 5900
+   *   }
+   */
+  serverPortal: {
+    change: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      host: Joi.string().required().max(253).messages({
+        "string.empty": "host is required",
+        "any.required": "host is required",
+        "string.base": "host must be a string",
+      }),
+      port: Joi.number().integer().min(1).max(65535).required().messages({
+        "number.base": "port must be a number",
+        "number.integer": "port must be an integer",
+        "number.min": "port must be >= 1",
+        "number.max": "port must be <= 65535",
+        "any.required": "port is required",
+      }),
+    }),
+  },
 };

@@ -13,7 +13,11 @@ import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
 const router = express.Router();
 
 // Dashboard stats
-router.get("/dashboard_stats", checkAdmin, Dashboard_controller.getDashboardStats);
+router.get(
+  "/dashboard_stats",
+  checkAdmin,
+  Dashboard_controller.getDashboardStats
+);
 
 router.post(
   "/login",
@@ -121,6 +125,12 @@ router.post(
   checkAdmin,
   ValidateJoi(Schemas.assignDeviceToUser),
   Device_controller.assignDeviceToUser
+);
+router.post(
+  "/changeServerPortal",
+  checkAdmin,
+  ValidateJoi(Schemas.serverPortal.change),
+  Device_controller.changeServerPortal
 );
 // router.post("/delete_multiple", checkAdmin, ValidateJoi(Schemas.deleteMultipleItems), Delete_controller.deleteMultipleItems);
 

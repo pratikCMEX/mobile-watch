@@ -2,6 +2,7 @@ import net from "net";
 import path from "path";
 import fs from "fs";
 import Logging from "../library/Logging";
+import { buildServerPortalCommand } from "./protocol";
 import db from "../models";
 import {
   createNotification,
@@ -3632,6 +3633,51 @@ class TcpServer {
     }
 
     this.send(client, message);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Change reporting server (server portal)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send the vendor server-portal command.
+   *
+   * The watch does not acknowledge this command. It closes the current
+   * TCP session and reconnects to the requested host/port after its
+   * internal delay. Do not destroy the socket here: the write must be allowed
+   * to flush before the device performs the reconnect.
+   *
+   * @param deviceId Protocol device ID (serial number)
+   * @param host IP address or DNS name
+   * @param port TCP port number (1-65535)
+   */
+  public sendServerPortalCommand(
+    deviceId: string,
+    host: string,
+    port: number
+  ): boolean {
+    const command = buildServerPortalCommand(deviceId, host, port);
+    if (!command) {
+      Logging.error(
+        `Invalid server portal command for device ${deviceId}: host=${host}, port=${port}`
+      );
+      return false;
+    }
+
+    const client = this.devices.get(deviceId);
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot change server portal.`
+      );
+      return false;
+    }
+
+    Logging.info(
+      `Sending server portal command to device ${deviceId}: ${command.packet}`
+    );
+    this.send(client, command.packet);
 
     return true;
   }

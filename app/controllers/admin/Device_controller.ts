@@ -597,7 +597,13 @@ const listDevices = async function (
   next: NextFunction
 ) {
   try {
-    const { search = "", page = 1, limit = 20, connection_status, id } = req.body;
+    const {
+      search = "",
+      page = 1,
+      limit = 20,
+      connection_status,
+      id,
+    } = req.body;
 
     const offset = (page - 1) * limit;
 
@@ -735,6 +741,75 @@ const assignDeviceToUser = async function (
   }
 };
 
+const changeServerPortal = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, host, port } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { imei: serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(res, `Device with imei '${serial_number}' not found`);
+    }
+
+    const tcpClient = tcpServer.getDevice(serial_number as string);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected to the TCP server."
+      );
+    }
+
+    const commandSent = tcpServer.sendServerPortalCommand(
+      serial_number as string,
+      host as string,
+      Number(port)
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send server portal command. Device may be disconnected."
+      );
+    }
+
+    Logging.info(
+      `Server portal change command sent to device ${serial_number}: ` +
+        `host=${host}, port=${port}`
+    );
+
+    return successMessage(
+      res,
+      "Server portal change command sent successfully",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        host,
+        port,
+        command_sent: true,
+        command_protocol: `[3G*${serial_number}*IP,${host},${port}]`,
+        note:
+          "Device will disconnect and reconnect to the new server after 5-8 minutes. " +
+          "Restart the device to expedite the switch. Verify the connection on the new server portal.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err) {
+    console.error("changeServerPortal error:", err);
+    return errorMessage(res, "Error changing server portal");
+  }
+};
+
 export default {
   createDevice,
   updateDevice,
@@ -749,4 +824,5 @@ export default {
   listDevices,
   getAllDeviceImei,
   deleteMultipleDevices,
+  changeServerPortal,
 };
