@@ -1408,7 +1408,10 @@ class TcpServer {
           `${tag} Fall-down alert is disabled for device ${deviceIdDb} — skipping notification`
         );
       } else {
-        const notificationPayload = buildFallDownNotification(deviceIdDb);
+        const notificationPayload = buildFallDownNotification(
+          deviceIdDb,
+          deviceName || deviceId
+        );
         await createNotification({
           ...notificationPayload,
           user_id: ownerId,
