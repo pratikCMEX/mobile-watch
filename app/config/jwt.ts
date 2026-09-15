@@ -123,13 +123,13 @@ export const checkAdmin = async (req: Request, res: Response, next: NextFunction
       return errorMessage(res, "Admin account is inactive");
     }
 
-    // if (!admin.session_token || admin.session_token !== token) {
-    //   return res.status(401).json({
-    //     success: false,
-    //     message: "Session expired. Please login again.",
-    //     data: {},
-    //   });
-    // }
+    if (!admin.session_token || admin.session_token !== token) {
+      return res.status(401).json({
+        success: false,
+        message: "Session expired. Please login again.",
+        data: {},
+      });
+    }
 
     (req as any).user = { id: admin.id, username: admin.username };
     (req as any).userinfo = decoded;
