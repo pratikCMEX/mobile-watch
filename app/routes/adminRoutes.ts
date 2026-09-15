@@ -9,6 +9,7 @@ import Health_controller from "../controllers/admin/Health_controller";
 import User_controller from "../controllers/admin/User_controller";
 import Dashboard_controller from "../controllers/admin/Dashboard_controller";
 import Admin_Auth_controller from "../controllers/admin/Auth_controller";
+import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
 const router = express.Router();
 
 // Dashboard stats
