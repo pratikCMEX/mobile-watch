@@ -67,6 +67,15 @@ export const Schemas = {
     limit: Joi.number().integer().min(1).optional(),
     connection_status: Joi.string().optional().allow(""),
   }),
+  deleteMultipleSnapshots: Joi.object({
+    ids: Joi.array().items(Joi.string()).required(),
+  }),
+  deleteMultipleHealthMetrics: Joi.object({
+    ids: Joi.array().items(Joi.string()).required(),
+  }),
+  deleteMultipleDevices: Joi.object({
+    ids: Joi.array().items(Joi.string()).required(),
+  }),
   login: Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().required(),
@@ -95,6 +104,21 @@ export const Schemas = {
       page: Joi.number().integer().min(1).optional().default(1),
       sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
       limit: Joi.number().integer().min(1).optional().default(20),
+    }),
+    createUser: Joi.object({
+      name: Joi.string().required(),
+      email: Joi.string().email().required(),
+      password: Joi.string().min(6).required(),
+      phone_number: Joi.string().optional().allow(null, ""),
+      country_code: Joi.string().optional().allow(null, ""),
+    }),
+    updateUser: Joi.object({
+      id: Joi.string().required(),
+      name: Joi.string().required(),
+      email: Joi.string().email().required(),
+      password: Joi.string().min(6).required(),
+      phone_number: Joi.string().optional().allow(null, ""),
+      country_code: Joi.string().optional().allow(null, ""),
     }),
     deleteUser: Joi.object({
       id: Joi.string().required(),
@@ -1507,12 +1531,22 @@ export const Schemas = {
       longitude: Joi.number().optional(),
       radius_meters: Joi.number().optional(),
     }),
+    create: Joi.object({
+      imei: Joi.string().required(),
+      name: Joi.string().optional().allow(null, ""),
+      latitude: Joi.number().required(),
+      longitude: Joi.number().required(),
+      radius_meters: Joi.number().required(),
+      is_active: Joi.boolean().optional(),
+      fence_type: Joi.string().optional().allow(null, ""),
+      fence_alarm_type: Joi.number().integer().valid(0, 1, 2).optional(),
+    }),
     list: Joi.object({
       search: Joi.string().optional().allow(""),
       page: Joi.number().integer().min(1).optional().default(1),
       sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
       limit: Joi.number().integer().min(1).optional().default(10),
-      device_id: Joi.string().required(),
+      device_id: Joi.string().optional(),
     }),
     delete: Joi.object({
       id: Joi.string().required(),
