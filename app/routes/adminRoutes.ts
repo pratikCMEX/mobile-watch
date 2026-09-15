@@ -128,7 +128,7 @@ router.post(
 );
 router.post(
   "/changeServerPortal",
-  checkAdmin,
+  // checkAdmin,
   ValidateJoi(Schemas.serverPortal.change),
   Device_controller.changeServerPortal
 );
