@@ -81,7 +81,7 @@ const deleteGeofence = async function (
     next: NextFunction
 ) {
     try {
-        const { id } = req.params;
+        const { id } = req.body;
 
         const geofence = await db.Geofence.findByPk(id);
         if (!geofence) {
