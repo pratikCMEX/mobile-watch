@@ -9,6 +9,7 @@ import Health_controller from "../controllers/admin/Health_controller";
 import User_controller from "../controllers/admin/User_controller";
 import Dashboard_controller from "../controllers/admin/Dashboard_controller";
 import Admin_Auth_controller from "../controllers/admin/Auth_controller";
+import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
 const router = express.Router();
 
 // Dashboard stats
@@ -160,36 +161,35 @@ router.delete(
 );
 router.get("/get_current_admin", checkAdmin, User_controller.getCurrentAdmin);
 
-// App update management routes
-// router.post(
-//   "/create_app_update",
-//   checkAdmin,
-//   ValidateJoi(Schemas.appUpdate.create),
-//   AppUpdate_controller.createAppUpdate
-// );
-// router.post(
-//   "/list_app_updates",
-//   checkAdmin,
-//   ValidateJoi(Schemas.appUpdate.list),
-//   AppUpdate_controller.listAppUpdates
-// );
-// router.post(
-//   "/update_app_update",
-//   checkAdmin,
-//   ValidateJoi(Schemas.appUpdate.update),
-//   AppUpdate_controller.updateAppUpdate
-// );
-// router.post(
-//   "/get_app_update",
-//   checkAdmin,
-//   ValidateJoi(Schemas.appUpdate.delete),
-//   AppUpdate_controller.getAppUpdate
-// );
-// router.delete(
-//   "/delete_app_update",
-//   checkAdmin,
-//   ValidateJoi(Schemas.appUpdate.delete),
-//   AppUpdate_controller.deleteAppUpdate
-// );
+router.post(
+  "/create_app_update",
+  checkAdmin,
+  ValidateJoi(Schemas.appUpdate.create),
+  AppUpdate_controller.createAppUpdate
+);
+router.post(
+  "/list_app_updates",
+  checkAdmin,
+  ValidateJoi(Schemas.appUpdate.list),
+  AppUpdate_controller.listAppUpdates
+);
+router.post(
+  "/update_app_update",
+  checkAdmin,
+  ValidateJoi(Schemas.appUpdate.update),
+  AppUpdate_controller.updateAppUpdate
+);
+router.post(
+  "/get_app_update",
+  checkAdmin,
+  ValidateJoi(Schemas.appUpdate.delete),
+  AppUpdate_controller.getAppUpdate
+);
+router.delete(
+  "/delete_app_update",
+  checkAdmin,
+  ValidateJoi(Schemas.appUpdate.delete),
+  AppUpdate_controller.deleteAppUpdate
+);
 
 module.exports = router;
