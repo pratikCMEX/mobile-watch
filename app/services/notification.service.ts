@@ -288,16 +288,18 @@ export const buildLowBatteryNotification = (
  * Helper: build a fall-down / fall-detection notification payload.
  */
 export const buildFallDownNotification = (
-  deviceId: string
+  deviceId: string,
+  deviceName: string
 ): NotificationPayload => {
   return {
     device_id: deviceId,
     type: "fall_detection",
     title: "Fall-down Alert",
-    body: `Fall-down detected from device ${deviceId}`,
+    body: `Fall-down detected from ${deviceName}`,
     metadata: {
       kind: "fall_down",
       deviceId,
+      deviceName,
     },
   };
 };
