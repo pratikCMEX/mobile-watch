@@ -397,10 +397,25 @@ const sendReminder = async function (
         .toUpperCase();
     }
 
-    // Read voice file if provided
+    // Normalize voice file if provided. iOS clients upload .m4a (AAC),
+    // not .amr — same fix as sendVoiceMessage: convert to AMR-NB
+    // unless the upload is already narrowband AMR.
     let voiceBuffer: Buffer | null = null;
     if (voiceFile) {
-      voiceBuffer = require("fs").readFileSync(voiceFile.path);
+      try {
+        voiceBuffer = await ensureAmrNarrowband(voiceFile.path);
+      } catch (conversionError: any) {
+        Logging.error(
+          `Reminder voice AMR conversion failed for device ${serial_number} ` +
+            `(file=${voiceFile.originalname}): ${
+              conversionError?.message || conversionError
+            }`
+        );
+        return errorMessage(
+          res,
+          "Could not process the uploaded audio file (unsupported format or conversion failure)"
+        );
+      }
     }
 
     const commandSent = tcpServer.sendTakePillsCommand(
