@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
+import { Op } from "sequelize";
 
 // Get all health metrics (admin view) - also supports search by IMEI
 async function getAllHealthMetrics(req: Request, res: Response, next: NextFunction) {
@@ -95,7 +96,34 @@ async function deleteHealthMetric(req: Request, res: Response, next: NextFunctio
   }
 }
 
+// Delete multiple health metrics by IDs
+async function deleteMultipleHealthMetrics(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return errorMessage(res, "Health metric IDs array is required");
+    }
+
+    const healthMetrics = await db.HealthMetric.findAll({
+      where: { id: { [Op.in]: ids } },
+    });
+
+    if (healthMetrics.length === 0) {
+      return errorMessage(res, "No health metrics found with the provided IDs");
+    }
+
+    await db.HealthMetric.destroy({ where: { id: { [Op.in]: ids } } });
+
+    return successMessage(res, `${healthMetrics.length} health metrics deleted successfully`);
+  } catch (err) {
+    console.error("deleteMultipleHealthMetrics error:", err);
+    return errorMessage(res, "Error deleting health metrics");
+  }
+}
+
 export default {
   getAllHealthMetrics,
   deleteHealthMetric,
+  deleteMultipleHealthMetrics,
 };

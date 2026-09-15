@@ -36,13 +36,14 @@ async function createUser(req: Request, res: Response, next: NextFunction) {
 }
 const allUsers = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const body = req.body || {};
     const {
       search = "",
       page = 1,
       sorting = "DESC",
       limit = 20,
       // status = "",
-    } = req.body;
+    } = body;
 
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -79,7 +80,7 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
       total: count,
     });
   } catch (error) {
-    // console.error("SQL Error:", error);
+    console.error("allUsers error:", error);
     return errorMessage(res, "Error fetching users");
   }
 };
@@ -122,7 +123,7 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
 
 async function deleteUser(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+      const { id } = req.body;
     const user = await db.User.findOne({ where: { id } });
     if (!user) {
       return errorMessage(res, "User not found");
@@ -136,7 +137,10 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
 }
 async function getUserDetail(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const { id } = req.body;
+    if (!id) {
+      return errorMessage(res, "User ID is required");
+    }
     const user = await db.User.findOne({ where: { id } });
     if (!user) {
       return errorMessage(res, "User not found");
@@ -147,10 +151,25 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
     return errorMessage(res, "Error fetching user");
   }
 }
+
+async function getCurrentAdmin(req: Request, res: Response, next: NextFunction) {
+  try {
+    const admin = (req as any).user;
+    if (!admin) {
+      return errorMessage(res, "Admin not found in request");
+    }
+    return successMessage(res, "Admin fetched successfully", admin);
+  } catch (err) {
+    console.error("getCurrentAdmin error:", err);
+    return errorMessage(res, "Error fetching admin");
+  }
+}
+
 export default {
   createUser,
   updateUser,
   deleteUser,
   allUsers,
   getUserDetail,
+  getCurrentAdmin,
 };

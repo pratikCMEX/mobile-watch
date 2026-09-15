@@ -619,6 +619,35 @@ const getAllDeviceImei = async function (
   }
 };
 
+// Delete multiple devices by IDs
+const deleteMultipleDevices = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return errorMessage(res, "Device IDs array is required");
+    }
+
+    const devices = await db.Device.findAll({
+      where: { id: { [Op.in]: ids } },
+    });
+
+    if (devices.length === 0) {
+      return errorMessage(res, "No devices found with the provided IDs");
+    }
+
+    await db.Device.destroy({ where: { id: { [Op.in]: ids } } });
+
+    return successMessage(res, `${devices.length} devices deleted successfully`);
+  } catch (err) {
+    console.error("deleteMultipleDevices error:", err);
+    return errorMessage(res, "Error deleting devices");
+  }
+};
 
 export default {
   createDevice,
@@ -632,4 +661,5 @@ export default {
   updateDeviceIdentity,
   listDevices,
   getAllDeviceImei,
+  deleteMultipleDevices,
 };

@@ -11,6 +11,8 @@ export interface GeofenceAttributes {
   longitude: number;
   radius_meters: number;
   is_active: boolean;
+  fence_type: string;
+  fence_alarm_type: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,6 +31,8 @@ class Geofence
   public longitude!: number;
   public radius_meters!: number;
   public is_active!: boolean;
+  public fence_type!: string;
+  public fence_alarm_type!: number;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -82,6 +86,19 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.BOOLEAN,
         allowNull: false,
         defaultValue: true,
+      },
+      fence_type: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: null,
+      },
+      fence_alarm_type: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        validate: {
+          isIn: [[0, 1, 2]],
+        },
       },
       createdAt: {
         type: DataTypes.DATE,

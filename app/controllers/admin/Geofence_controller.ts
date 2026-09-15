@@ -48,7 +48,16 @@ const listGeofences = async (
                 "longitude",
                 "radius_meters",
                 "is_active",
+                "fence_type",
+                "fence_alarm_type",
                 "createdAt",
+            ],
+            include: [
+                {
+                    model: db.Device,
+                    as: "DeviceGeofence",
+                    attributes: ["id", "imei", "device_name"],
+                },
             ],
             order: [["createdAt", sorting]],
             limit: Number(limit),
@@ -119,9 +128,58 @@ const toggleGeofenceStatus = async function (
     }
 };
 
+const createGeofence = async function (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) {
+    try {
+        const {
+            imei,
+            name,
+            latitude,
+            longitude,
+            radius_meters,
+            is_active = true,
+            fence_type,
+            fence_alarm_type = 0,
+        } = req.body;
+
+        if (!imei) {
+            return errorMessage(res, "IMEI is required");
+        }
+
+        const device = await db.Device.findOne({ where: { imei } });
+        if (!device) {
+            return errorMessage(res, "Device not found with this IMEI");
+        }
+
+        if (!latitude || !longitude || !radius_meters) {
+            return errorMessage(res, "latitude, longitude, and radius_meters are required");
+        }
+
+        const geofence = await db.Geofence.create({
+            device_id: device.id,
+            name,
+            latitude,
+            longitude,
+            radius_meters,
+            is_active,
+            fence_type,
+            fence_alarm_type,
+        });
+
+        return successMessage(res, "Geofence created successfully", geofence);
+    } catch (err) {
+        console.error("createGeofence error:", err);
+        return errorMessage(res, "Error creating geofence");
+    }
+};
+
 export default {
 
     listGeofences,
     deleteGeofence,
     toggleGeofenceStatus,
+    createGeofence,
 };
