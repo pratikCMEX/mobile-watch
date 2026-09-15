@@ -183,7 +183,7 @@ async function getAppUpdate(req: Request, res: Response, next: NextFunction) {
  */
 async function checkAppUpdate(req: Request, res: Response, next: NextFunction) {
   try {
-    const { type, current_version } = req.body || {};
+    const { type } = req.body || {};
 
     const whereCondition: any = {};
     if (type) {
@@ -201,12 +201,6 @@ async function checkAppUpdate(req: Request, res: Response, next: NextFunction) {
 
     // Determine whether the installed version is behind the latest.
     let updateAvailable = false;
-    if (current_version) {
-      updateAvailable =
-        compareVersions(current_version, latest.apk_version) < 0;
-    } else {
-      updateAvailable = true;
-    }
 
     return successMessage(res, "App update checked successfully", {
       update_available: updateAvailable,

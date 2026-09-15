@@ -1629,7 +1629,6 @@ export const Schemas = {
     }),
     check: Joi.object({
       type: Joi.string().valid("ios", "android").optional().allow(null, ""),
-      current_version: Joi.string().optional().allow(""),
     }),
   },
 };
