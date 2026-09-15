@@ -771,7 +771,7 @@ const changeServerPortal = async function (
     }
 
     const device = await db.Device.findOne({
-      where: { imei: serial_number },
+      where: { serial_number: serial_number },
     });
 
     if (!device) {
