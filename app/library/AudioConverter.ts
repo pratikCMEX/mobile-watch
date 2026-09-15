@@ -51,7 +51,12 @@ export async function ensureAmrNarrowband(filePath: string): Promise<Buffer> {
         .toString("hex")}) — converting via ffmpeg.`
   );
 
-  const outputPath = `${filePath}.converted.amr`;
+  // Persist the converted file permanently as a real ".amr" file next
+  // to the original upload (e.g. "..._voice.m4a" -> "..._voice.amr"),
+  // instead of a throwaway temp file — so what's on disk actually
+  // reflects what was sent to the device.
+  const parsed = path.parse(filePath);
+  const outputPath = path.join(parsed.dir, `${parsed.name}.amr`);
 
   // AMR-NB mode: watch firmware confirmed working with genuine
   // Android-recorded AMR, but our ffmpeg/libopencore_amrnb output at
@@ -91,14 +96,7 @@ export async function ensureAmrNarrowband(filePath: string): Promise<Buffer> {
     );
   });
 
-  let converted: Buffer;
-  try {
-    converted = fs.readFileSync(outputPath);
-  } finally {
-    fs.unlink(outputPath, () => {
-      // best-effort cleanup of the intermediate file
-    });
-  }
+  const converted = fs.readFileSync(outputPath);
 
   if (!isAmrNarrowband(converted)) {
     throw new Error(
@@ -107,8 +105,8 @@ export async function ensureAmrNarrowband(filePath: string): Promise<Buffer> {
   }
 
   Logging.info(
-    `[AudioConverter] Converted "${path.basename(filePath)}" -> AMR-NB ` +
-      `(${converted.length} bytes)`
+    `[AudioConverter] Converted "${path.basename(filePath)}" -> ` +
+      `"${path.basename(outputPath)}" (${converted.length} bytes)`
   );
 
   return converted.subarray(AMR_NB_MAGIC.length);
