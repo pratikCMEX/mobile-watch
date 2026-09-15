@@ -13,11 +13,7 @@ import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
 const router = express.Router();
 
 // Dashboard stats
-router.get(
-  "/dashboard_stats",
-  checkAdmin,
-  Dashboard_controller.getDashboardStats
-);
+router.get("/dashboard_stats", checkAdmin, Dashboard_controller.getDashboardStats);
 
 router.post(
   "/login",
