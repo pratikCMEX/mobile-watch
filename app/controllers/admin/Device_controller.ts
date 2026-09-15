@@ -564,7 +564,7 @@ const listDevices = async function (
   next: NextFunction
 ) {
   try {
-    const { search = "", page = 1, limit = 20, connection_status } = req.body;
+    const { search = "", page = 1, limit = 20, connection_status, id } = req.body;
 
     const offset = (page - 1) * limit;
 
@@ -578,15 +578,33 @@ const listDevices = async function (
       where.connection_status = connection_status;
     }
 
+    if (id) {
+      where.id = id;
+    }
+
     const { rows, count } = await db.Device.findAndCountAll({
       where,
       limit: Number(limit),
       offset: Number(offset),
       order: [["createdAt", "DESC"]],
+      include: [
+        {
+          model: db.User,
+          as: "DeviceOwner",
+          attributes: ["id", "name", "email"],
+          required: false,
+        },
+      ],
     }); // order: [["createdAt", "DESC"]],
 
+    // Ensure DeviceOwner is always present (even if null)
+    const devicesWithOwner = rows.map((device: any) => ({
+      ...device.toJSON(),
+      DeviceOwner: device.DeviceOwner || null,
+    }));
+
     return successMessage(res, "Devices fetched successfully", {
-      devices: rows,
+      devices: devicesWithOwner,
       total: count,
       page: Number(page),
       limit: Number(limit),
@@ -649,6 +667,38 @@ const deleteMultipleDevices = async function (
   }
 };
 
+const assignDeviceToUser = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, user_id } = req.body;
+
+    if (!device_id || !user_id) {
+      return errorMessage(res, "device_id and user_id are required");
+    }
+
+    const device = await db.Device.findOne({ where: { id: device_id } });
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const user = await db.User.findOne({ where: { id: user_id } });
+    if (!user) {
+      return errorMessage(res, "User not found");
+    }
+
+    device.owner_id = user_id;
+    await device.save();
+
+    return successMessage(res, "Device assigned to user successfully", device);
+  } catch (err) {
+    console.error("assignDeviceToUser error:", err);
+    return errorMessage(res, "Error assigning device to user");
+  }
+};
+
 export default {
   createDevice,
   updateDevice,
@@ -656,6 +706,7 @@ export default {
   getDeviceSettings,
   sendVoiceMessage,
   sendReminder,
+  assignDeviceToUser,
   listUnlinkedDevices,
   assignOwner,
   updateDeviceIdentity,

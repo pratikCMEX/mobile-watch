@@ -163,10 +163,20 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
 
 async function getCurrentAdmin(req: Request, res: Response, next: NextFunction) {
   try {
-    const admin = (req as any).user;
-    if (!admin) {
+    const adminData = (req as any).user;
+    if (!adminData) {
       return errorMessage(res, "Admin not found in request");
     }
+
+    const admin = await db.Admin.findOne({
+      where: { id: adminData.id },
+      attributes: { exclude: ["password"] },
+    });
+
+    if (!admin) {
+      return errorMessage(res, "Admin not found");
+    }
+
     return successMessage(res, "Admin fetched successfully", admin);
   } catch (err) {
     console.error("getCurrentAdmin error:", err);

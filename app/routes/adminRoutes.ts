@@ -42,7 +42,7 @@ router.post(
 
 // Delete geofence by ID
 router.delete(
-    "/delete_geofence/:id",
+    "/delete_geofence",
     checkAdmin,
     ValidateJoi(Schemas.geofence.delete, "params"),
     Geofence_controller.deleteGeofence
@@ -57,6 +57,7 @@ router.post("/get_all_health", checkAdmin, ValidateJoi(Schemas.getAllHealthMetri
 router.delete("/delete_health_metric/:id", checkAdmin, ValidateJoi(Schemas.deleteHealthMetric, "params"), Health_controller.deleteHealthMetric);
 router.post("/delete_multiple_health_metrics", checkAdmin, ValidateJoi(Schemas.deleteMultipleHealthMetrics), Health_controller.deleteMultipleHealthMetrics);
 router.post("/delete_multiple_devices", checkAdmin, ValidateJoi(Schemas.deleteMultipleDevices), Device_controller.deleteMultipleDevices);
+router.post("/assign_device_to_user", checkAdmin, ValidateJoi(Schemas.assignDeviceToUser), Device_controller.assignDeviceToUser);
 // router.post("/delete_multiple", checkAdmin, ValidateJoi(Schemas.deleteMultipleItems), Delete_controller.deleteMultipleItems);
 
 // User management routes

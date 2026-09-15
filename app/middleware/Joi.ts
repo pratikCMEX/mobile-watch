@@ -66,6 +66,7 @@ export const Schemas = {
     page: Joi.number().integer().min(1).optional(),
     limit: Joi.number().integer().min(1).optional(),
     connection_status: Joi.string().optional().allow(""),
+    id: Joi.string().optional().allow(""),
   }),
   deleteMultipleSnapshots: Joi.object({
     ids: Joi.array().items(Joi.string()).required(),
@@ -75,6 +76,10 @@ export const Schemas = {
   }),
   deleteMultipleDevices: Joi.object({
     ids: Joi.array().items(Joi.string()).required(),
+  }),
+  assignDeviceToUser: Joi.object({
+    device_id: Joi.string().required(),
+    user_id: Joi.string().required(),
   }),
   login: Joi.object({
     email: Joi.string().email().required(),
