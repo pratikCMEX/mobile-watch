@@ -3,11 +3,12 @@ import fs from "fs";
 import path from "path";
 import db from "../models";
 import { NextFunction, Request, Response } from "express";
+import nodemailer from "nodemailer";
 
 export const generateAuthToken = (user: {
   id: string;
   name: string;
- 
+
 }) => {
   const JWT_ENCRYPTION = process.env.JWT_ENCRYPTION || "";
   if (!JWT_ENCRYPTION) {
@@ -18,11 +19,56 @@ export const generateAuthToken = (user: {
       payload: {
         id: user.id,
         name: user.name,
-       
+
       },
     },
     JWT_ENCRYPTION
   );
+};
+
+const sendEmail = async (to: string, subject: string, html: string) => {
+  try {
+    const transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST || "smtp.gmail.com",
+      port: parseInt(process.env.EMAIL_PORT || "587"),
+      secure: false,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const mailOptions = {
+      from: process.env.MAIL_FROM_ADDRESS || process.env.EMAIL_USER,
+      to,
+      subject,
+      html,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Email sent to ${to}`);
+  } catch (error) {
+    console.error("Error sending email:", error);
+    throw error;
+  }
+};
+
+export const sendWelcomeEmail = async (email: string, name: string, password: string) => {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #333;">Welcome to Mobile Watch</h2>
+      <p style="color: #666;">Hello ${name},</p>
+      <p style="color: #666;">Your account has been created successfully. Here are your login credentials:</p>
+      <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <p style="margin: 5px 0;"><strong>Email:</strong> ${email}</p>
+        <p style="margin: 5px 0;"><strong>Password:</strong> ${password}</p>
+      </div>
+      <p style="color: #666;">Please login and change your password for security.</p>
+      <p style="color: #666;">Best regards,<br>Mobile Watch Team</p>
+    </div>
+  `;
+
+  await sendEmail(email, "Welcome to Mobile Watch - Your Account Details", html);
 };
 
 const deleteFile = (folder: string, fileUrlOrName: string): void => {

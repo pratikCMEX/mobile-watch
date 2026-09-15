@@ -8,7 +8,7 @@ import {
 import { Op } from "sequelize";
 import bcrypt from "bcrypt";
 
-import { generateAuthToken } from "../../helper/Helper";
+import { generateAuthToken, sendWelcomeEmail } from "../../helper/Helper";
 
 async function createUser(req: Request, res: Response, next: NextFunction) {
   try {
@@ -28,6 +28,15 @@ async function createUser(req: Request, res: Response, next: NextFunction) {
       phone_number,
       country_code,
     });
+
+    // Send welcome email with credentials
+    try {
+      await sendWelcomeEmail(email, name, password);
+    } catch (emailError) {
+      console.error("Failed to send welcome email:", emailError);
+      // Continue with response even if email fails
+    }
+
     return successMessage(res, "User created successfully", user);
   } catch (err) {
     console.error("createUser error:", err);
