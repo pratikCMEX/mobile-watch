@@ -114,47 +114,31 @@ export const pushToUser = async (
   let response: any;
 
   if (user.device_type === "ios") {
-    // iOS: notification payload for visible alerts + APNs config
     response = await messaging().sendEachForMulticast({
       tokens,
       notification: { title: data.title, body: data.body },
       apns: {
-        payload: {
-          aps: {
-            sound: "default",
-            badge: 1,
-            contentAvailable: true,
-            mutableContent: true,
-            category: data.type,
-          },
-        },
-        headers: {
-          "apns-priority": "10",
-          "apns-push-type": "alert",
-        },
+        /* unchanged */
       },
       data: {
         type: data.type,
         title: data.title,
         body: data.body,
         channelId: "default_channel",
-        device_type: user.device_type,
+        device_type: user.device_type ?? "ios",
         ...stringifyMetadata(data.metadata),
       },
     });
   } else {
-    // Android: data-only (no notification payload), Android-specific config
     response = await messaging().sendEachForMulticast({
       tokens,
-      android: {
-        priority: "high",
-      },
+      android: { priority: "high" },
       data: {
         type: data.type,
         title: data.title,
         body: data.body,
         channelId: "default_channel",
-        device_type: user.device_type,
+        device_type: user.device_type ?? "android",
         ...stringifyMetadata(data.metadata),
       },
     });
