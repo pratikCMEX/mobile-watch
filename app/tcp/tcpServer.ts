@@ -610,9 +610,7 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleMessage(client: TcpClient, message: string): void {
-    Logging.info(
-      `GPS packet from ${client.id}: ${message.substring(0, 80)}...`
-    );
+    Logging.info(`GPS packet from ${client.id}: ${message}`);
 
     // Check if this is an image packet (contains binary JPEG data)
     // Image packets start with [3G*DEVICEID*LENGTH*img,
@@ -643,9 +641,7 @@ class TcpServer {
     const parsed = this.parsePacket(message);
 
     if (!parsed) {
-      Logging.error(
-        `Invalid GPS packet from ${client.id}: ${message.substring(0, 80)}`
-      );
+      Logging.error(`Invalid GPS packet from ${client.id}: ${message}`);
 
       return;
     }
