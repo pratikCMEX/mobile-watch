@@ -311,15 +311,16 @@ const sendVoiceMessage = async function (
 
     Logging.info(
       `Voice message (TK) sent to device ${serial_number} ` +
-        `(file=${voiceFile.originalname}, size=${amrBuffer.length} bytes)`
+        `(uploaded_as=${voiceFile.originalname}, sent_as=AMR, sent_size=${amrBuffer.length} bytes)`
     );
 
     return successMessage(res, "Voice message sent successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
-      file_name: voiceFile.originalname,
-      file_size: amrBuffer.length,
+      uploaded_file_name: voiceFile.originalname,
+      sent_format: "amr (narrowband)",
+      sent_file_size: amrBuffer.length,
       command_sent: true,
       command_message:
         "TK command sent to device. The device will play the voice message.",

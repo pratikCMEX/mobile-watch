@@ -5557,21 +5557,14 @@ class TcpServer {
       return false;
     }
 
-    // Defensive: strip the ".amr" file magic header if the caller
-    // passed the raw file bytes instead of already-stripped frames
-    // (same convention as the TAKEPILLS reminder-voice path below —
-    // the watch firmware expects raw AMR frames, not the file header).
-    const AMR_HEADER = Buffer.from("#!AMR\n");
-    let rawAmr = amrBuffer;
-    if (
-      rawAmr.length >= AMR_HEADER.length &&
-      rawAmr.subarray(0, AMR_HEADER.length).equals(AMR_HEADER)
-    ) {
-      Logging.info(
-        `Stripping AMR file header (6 bytes) from voice message data for device ${deviceId}.`
-      );
-      rawAmr = rawAmr.subarray(AMR_HEADER.length);
-    }
+    // NOTE: unlike the TAKEPILLS reminder-voice path below, TK does
+    // NOT strip the "#!AMR\n" file header — send the buffer exactly
+    // as given (matching the original, confirmed-working behavior
+    // for genuine AMR uploads from before AudioConverter existed).
+    // An earlier version of this code stripped it here defensively,
+    // which silently broke previously-working Android voice messages
+    // that the firmware apparently expects to include the header.
+    const rawAmr = amrBuffer;
 
     // Validate max duration: AMR is typically 8kHz or 16kHz, ~12.2 kbps
     // 15 seconds ≈ 23 KB at 12.2 kbps. We allow up to 64 KB as a safe
