@@ -273,6 +273,24 @@ export const buildSosNotification = (
 };
 
 /**
+ * Helper: build a fall-detection notification payload.
+ */
+export const buildFallDetectionNotification = (
+  deviceId: string
+): NotificationPayload => {
+  return {
+    device_id: deviceId,
+    type: "fall_detection",
+    title: "Fall Detection",
+    body: `Device ${deviceId} detected a fall`,
+    metadata: {
+      kind: "fall_detection",
+      deviceId,
+    },
+  };
+};
+
+/**
  * Helper: build a low-battery notification payload.
  */
 export const buildLowBatteryNotification = (

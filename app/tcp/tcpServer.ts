@@ -7,6 +7,7 @@ import {
   createNotification,
   buildSosNotification,
   buildGeoFenceNotification,
+  buildFallDetectionNotification,
 } from "../services/notification.service";
 
 // ─────────────────────────────────────────────────────────────
@@ -688,6 +689,10 @@ class TcpServer {
         this.handleAlarm(client, parsed);
         break;
 
+      case "AL_LTE":
+        this.handleAlarmLte(client, parsed);
+        break;
+
       case "TK":
         this.handleTracking(client, parsed);
         break;
@@ -1122,8 +1127,21 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleAlarm(client: TcpClient, packet: ParsedPacket): void {
-    Logging.info(
-      `ALARM received from device ${packet.deviceId}: ` + packet.payload
+    const tag = `[AL:${packet.deviceId}]`;
+    Logging.info(`${tag} step 1: ALARM packet received: ${packet.payload}`);
+
+    // Reply to the device so it stops constant alarming.
+    // Protocol: [CS*YYYYYYYYYY*LEN*AL]
+    const content = "AL";
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const reply = `[${packet.manufacturer}*${packet.deviceId}*${length}*${content}]`;
+    this.send(client, reply);
+    Logging.info(`${tag} step 2: reply sent: ${reply}`);
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from AL: ${error.message}`
+      )
     );
 
     this.saveAlarm(packet.deviceId, packet.payload).catch((error: Error) =>
@@ -1131,6 +1149,161 @@ class TcpServer {
         `Failed to save alarm for device ${packet.deviceId}: ${error.message}`
       )
     );
+
+    // Parse alarm status and dispatch notifications.
+    this.processAlarmStatus(packet.deviceId, packet.payload).catch(
+      (error: Error) =>
+        Logging.error(`${tag} Failed to process alarm status: ${error.message}`)
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // AL_LTE - Alarm (4G / LTE devices)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle an AL_LTE alarm data report from a 4G device.
+   *
+   * The payload has the same layout as the plain AL command but
+   * includes additional LTE-specific fields (cell tower MCC/MNC/LAC/CID
+   * and a WiFi AP list).  The alarm-status bitmask lives at index 15
+   * and uses the same bit definitions:
+   *
+   *   bit 16 (0x00010000) → SOS
+   *   bit 21 (0x00200000) → Fall-down
+   *
+   * Protocol:
+   *   Device send : [CS*YYYYYYYYYY*LEN*AL_LTE,<position data>]
+   *   Server reply: [CS*YYYYYYYYYY*LEN*AL_LTE]
+   *
+   * The server MUST reply — otherwise the device keeps alarming
+   * until it receives confirmation.
+   */
+  private handleAlarmLte(client: TcpClient, packet: ParsedPacket): void {
+    const tag = `[AL_LTE:${packet.deviceId}]`;
+    Logging.info(
+      `${tag} step 1: AL_LTE alarm packet received: ${packet.payload}`
+    );
+
+    // Reply to the device so it stops constant alarming.
+    // Protocol: [CS*YYYYYYYYYY*LEN*AL_LTE]
+    const content = "AL_LTE";
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const reply = `[${packet.manufacturer}*${packet.deviceId}*${length}*${content}]`;
+    this.send(client, reply);
+    Logging.info(`${tag} step 2: reply sent: ${reply}`);
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from AL_LTE: ${error.message}`
+      )
+    );
+
+    this.saveAlarm(packet.deviceId, packet.payload).catch((error: Error) =>
+      Logging.error(
+        `Failed to save alarm for device ${packet.deviceId}: ${error.message}`
+      )
+    );
+
+    // Parse alarm status and dispatch notifications.
+    this.processAlarmStatus(packet.deviceId, packet.payload).catch(
+      (error: Error) =>
+        Logging.error(`${tag} Failed to process alarm status: ${error.message}`)
+    );
+  }
+
+  /**
+   * Bitmask constants for the alarm-status field (index 15 of the
+   * AL / AL_LTE payload).
+   *
+   * Bits are counted from right to left (LSB = bit 0):
+   *   bit 16 → 0x00010000 → SOS
+   *   bit 21 → 0x00200000 → Fall-down
+   */
+  private static readonly ALARM_BIT_SOS = 0x00010000;
+  private static readonly ALARM_BIT_FALL_DOWN = 0x00200000;
+
+  /**
+   * Parse the alarm-status bitmask from an AL / AL_LTE payload and
+   * dispatch the appropriate notifications (SOS, fall-down) to the
+   * device owner via FCM.
+   *
+   * The alarm-status field is the 16th comma-separated value
+   * (index 15) and is a hex string, e.g. "00010000" for SOS or
+   * "00200000" for fall-down.
+   */
+  private async processAlarmStatus(
+    deviceId: string,
+    payload: string
+  ): Promise<void> {
+    const tag = `[processAlarmStatus:${deviceId}]`;
+    const parts = payload.split(",");
+
+    if (parts.length < 16) {
+      Logging.warn(
+        `${tag} payload too short to contain alarm status (got ${parts.length} fields)`
+      );
+      return;
+    }
+
+    const alarmStatusHex = parts[15] || "0";
+    const alarmStatus = parseInt(alarmStatusHex, 16);
+
+    if (isNaN(alarmStatus)) {
+      Logging.warn(
+        `${tag} could not parse alarm status "${alarmStatusHex}" as hex`
+      );
+      return;
+    }
+
+    Logging.info(
+      `${tag} alarm status = ${alarmStatusHex} (0x${alarmStatus
+        .toString(16)
+        .padStart(8, "0")})`
+    );
+
+    const isSos = (alarmStatus & TcpServer.ALARM_BIT_SOS) !== 0;
+    const isFallDown = (alarmStatus & TcpServer.ALARM_BIT_FALL_DOWN) !== 0;
+
+    if (!isSos && !isFallDown) {
+      Logging.info(`${tag} no recognised alarm bits set`);
+      return;
+    }
+
+    const device = await this.findDevice(deviceId);
+
+    if (!device) {
+      Logging.warn(`${tag} device not found, skipping notifications`);
+      return;
+    }
+
+    const ownerId = device.owner_id;
+
+    if (isSos) {
+      Logging.info(
+        `${tag} SOS alarm detected — sending SOS notification to owner`
+      );
+      const notificationPayload = buildSosNotification(device.id, "SOS");
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(`${tag} SOS notification created for device ${device.id}`);
+    }
+
+    if (isFallDown) {
+      Logging.info(
+        `${tag} Fall-down alarm detected — sending fall-detection notification to owner`
+      );
+      const notificationPayload = buildFallDetectionNotification(device.id);
+      await createNotification({
+        ...notificationPayload,
+        user_id: ownerId,
+      });
+      Logging.info(
+        `${tag} Fall-detection notification created for device ${device.id}`
+      );
+    }
   }
 
   // ───────────────────────────────────────────────────────────
