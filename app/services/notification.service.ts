@@ -212,13 +212,14 @@ const handleInvalidTokens = async (
  */
 export const buildGeoFenceNotification = (
   deviceId: string,
+  deviceName: string,
   geofenceName: string,
   event: "in" | "out"
 ): NotificationPayload => {
   const type: NotificationType =
     event === "in" ? "geo_fence_in" : "geo_fence_out";
   const title = event === "in" ? "Entered geofence" : "Left geofence";
-  const body = `Device ${deviceId} ${
+  const body = `${deviceName} ${
     event === "in" ? "entered" : "left"
   } ${geofenceName}`;
 
@@ -232,6 +233,7 @@ export const buildGeoFenceNotification = (
       geofenceName,
       event,
       deviceId,
+      deviceName,
     },
   };
 };

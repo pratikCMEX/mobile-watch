@@ -1338,6 +1338,7 @@ class TcpServer {
       );
       const notificationPayload = buildGeoFenceNotification(
         deviceIdDb,
+        deviceName || deviceId,
         "Unknown",
         "out"
       );
@@ -1357,6 +1358,7 @@ class TcpServer {
       );
       const notificationPayload = buildGeoFenceNotification(
         deviceIdDb,
+        deviceName || deviceId,
         "Unknown",
         "in"
       );
@@ -3383,9 +3385,12 @@ class TcpServer {
       );
 
       const geofenceName = matchedGeofence?.name || "the safe zone";
+      const deviceName =
+        device.device_name || device.serial_number || deviceLabel;
 
       const notificationPayload = buildGeoFenceNotification(
         device.id,
+        deviceName,
         geofenceName,
         newStatus
       );
