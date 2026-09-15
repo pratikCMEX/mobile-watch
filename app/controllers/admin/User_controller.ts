@@ -152,7 +152,10 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
     if (!id) {
       return errorMessage(res, "User ID is required");
     }
-    const user = await db.User.findOne({ where: { id } });
+    const user = await db.User.findOne({
+      where: { id },
+      attributes: { exclude: ["password"] },
+    });
     if (!user) {
       return errorMessage(res, "User not found");
     }
