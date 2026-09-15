@@ -1338,6 +1338,7 @@ class TcpServer {
       );
       const notificationPayload = buildGeoFenceNotification(
         deviceIdDb,
+        deviceName || deviceId,
         "Unknown",
         "out"
       );
@@ -1357,6 +1358,7 @@ class TcpServer {
       );
       const notificationPayload = buildGeoFenceNotification(
         deviceIdDb,
+        deviceName || deviceId,
         "Unknown",
         "in"
       );
@@ -1410,7 +1412,10 @@ class TcpServer {
           `${tag} Fall-down alert is disabled for device ${deviceIdDb} — skipping notification`
         );
       } else {
-        const notificationPayload = buildFallDownNotification(deviceIdDb);
+        const notificationPayload = buildFallDownNotification(
+          deviceIdDb,
+          deviceName || deviceId
+        );
         await createNotification({
           ...notificationPayload,
           user_id: ownerId,
@@ -3382,10 +3387,21 @@ class TcpServer {
         `${tag} step 4 OK: Device.geofence_status updated to "${newStatus}"`
       );
 
-      const geofenceName = matchedGeofence?.name || "the safe zone";
+      // When exiting, matchedGeofence is null by definition (that's
+      // what "out" means — outside every active geofence), so we
+      // can't say which specific one was left when there's more than
+      // one. With exactly one active geofence it's unambiguous, so
+      // name it; otherwise fall back to a generic label.
+      const geofenceName =
+        matchedGeofence?.name ||
+        (geofences.length === 1 ? geofences[0].name : null) ||
+        "the safe zone";
+      const deviceName =
+        device.device_name || device.serial_number || deviceLabel;
 
       const notificationPayload = buildGeoFenceNotification(
         device.id,
+        deviceName,
         geofenceName,
         newStatus
       );

@@ -212,13 +212,14 @@ const handleInvalidTokens = async (
  */
 export const buildGeoFenceNotification = (
   deviceId: string,
+  deviceName: string,
   geofenceName: string,
   event: "in" | "out"
 ): NotificationPayload => {
   const type: NotificationType =
     event === "in" ? "geo_fence_in" : "geo_fence_out";
   const title = event === "in" ? "Entered geofence" : "Left geofence";
-  const body = `Device ${deviceId} ${
+  const body = `${deviceName} ${
     event === "in" ? "entered" : "left"
   } ${geofenceName}`;
 
@@ -232,6 +233,7 @@ export const buildGeoFenceNotification = (
       geofenceName,
       event,
       deviceId,
+      deviceName,
     },
   };
 };
@@ -286,16 +288,18 @@ export const buildLowBatteryNotification = (
  * Helper: build a fall-down / fall-detection notification payload.
  */
 export const buildFallDownNotification = (
-  deviceId: string
+  deviceId: string,
+  deviceName: string
 ): NotificationPayload => {
   return {
     device_id: deviceId,
     type: "fall_detection",
     title: "Fall-down Alert",
-    body: `Fall-down detected from device ${deviceId}`,
+    body: `Fall-down detected from ${deviceName}`,
     metadata: {
       kind: "fall_down",
       deviceId,
+      deviceName,
     },
   };
 };
