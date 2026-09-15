@@ -778,46 +778,49 @@ const changeServerPortal = async function (
       return errorMessage(res, `Device with imei '${serial_number}' not found`);
     }
 
+    /**
+     * Store the pending server portal change on the device record.
+     * This is used both when the device is currently offline (the
+     * command is applied on next TCP connect) and when it is online
+     * (command is sent immediately and the stored value is cleared
+     * by the TCP server after a successful send).
+     */
+    await device.update({
+      server_host: host as string,
+      server_port: Number(port),
+    });
+
     const tcpClient = tcpServer.getDevice(serial_number as string);
-    if (!tcpClient) {
-      return errorMessage(
-        res,
-        "Device is offline. Please ensure the device is connected to the TCP server."
-      );
-    }
+    let commandSent = false;
 
-    const commandSent = tcpServer.sendServerPortalCommand(
-      serial_number as string,
-      host as string,
-      Number(port)
-    );
-
-    if (!commandSent) {
-      return errorMessage(
-        res,
-        "Failed to send server portal command. Device may be disconnected."
+    if (tcpClient) {
+      commandSent = tcpServer.sendServerPortalCommand(
+        serial_number as string,
+        host as string,
+        Number(port)
       );
     }
 
     Logging.info(
-      `Server portal change command sent to device ${serial_number}: ` +
-        `host=${host}, port=${port}`
+      `Server portal change ${
+        commandSent ? "command sent" : "stored as pending"
+      } ` + `for device ${serial_number}: host=${host}, port=${port}`
     );
 
     return successMessage(
       res,
-      "Server portal change command sent successfully",
+      "Server portal change request saved successfully",
       {
         serial_number,
         device_id: device.id,
         device_name: device.device_name,
-        host,
-        port,
-        command_sent: true,
+        host: host as string,
+        port: Number(port),
+        command_sent: commandSent,
         command_protocol: `[3G*${serial_number}*IP,${host},${port}]`,
-        note:
-          "Device will disconnect and reconnect to the new server after 5-8 minutes. " +
-          "Restart the device to expedite the switch. Verify the connection on the new server portal.",
+        note: commandSent
+          ? "Device will disconnect and reconnect to the new server after 5-8 minutes. Restart the device to expedite the switch. Verify the connection on the new server portal."
+          : "Device is currently offline. The server portal change will be applied when the device reconnects to the TCP server. Verify the connection on the new server portal after reconnection.",
         timestamp: new Date().toISOString(),
       }
     );
