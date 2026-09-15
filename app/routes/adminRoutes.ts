@@ -6,15 +6,28 @@ import Geofence_controller from "../controllers/admin/Geofence_controller";
 import Snapshot_controller from "../controllers/admin/Snapshot_controller";
 import Monitor_controller from "../controllers/admin/Monitor_controller";
 import Health_controller from "../controllers/admin/Health_controller";
+import User_controller from "../controllers/admin/User_controller";
+import Dashboard_controller from "../controllers/admin/Dashboard_controller";
 const router = express.Router();
 
 
+
+// Dashboard stats
+router.get("/dashboard_stats", checkAdmin, Dashboard_controller.getDashboardStats);
+
+// Create geofence
+router.post(
+    "/create_geofence",
+    checkAdmin,
+    ValidateJoi(Schemas.geofence.create),
+    Geofence_controller.createGeofence
+);
 
 // List geofences with pagination/filter
 router.post(
     "/list_geofence",
     checkAdmin,
-
+    ValidateJoi(Schemas.geofence.list),
     Geofence_controller.listGeofences
 );
 
@@ -38,6 +51,19 @@ router.post("/get_all_snapshots", checkAdmin, ValidateJoi(Schemas.getAllSnapshot
 router.post("/get_device_location", checkAdmin, ValidateJoi(Schemas.getDeviceLocation), Monitor_controller.getDeviceLocation);
 router.get("/get_all_imei", checkAdmin, Device_controller.getAllDeviceImei);
 router.delete("/delete_snapshot/:id", checkAdmin, Snapshot_controller.deleteSnapshot);
+router.post("/delete_multiple_snapshots", checkAdmin, ValidateJoi(Schemas.deleteMultipleSnapshots), Snapshot_controller.deleteMultipleSnapshots);
 router.post("/get_all_health", checkAdmin, ValidateJoi(Schemas.getAllHealthMetrics), Health_controller.getAllHealthMetrics);
 router.delete("/delete_health_metric/:id", checkAdmin, ValidateJoi(Schemas.deleteHealthMetric, "params"), Health_controller.deleteHealthMetric);
+router.post("/delete_multiple_health_metrics", checkAdmin, ValidateJoi(Schemas.deleteMultipleHealthMetrics), Health_controller.deleteMultipleHealthMetrics);
+router.post("/delete_multiple_devices", checkAdmin, ValidateJoi(Schemas.deleteMultipleDevices), Device_controller.deleteMultipleDevices);
+// router.post("/delete_multiple", checkAdmin, ValidateJoi(Schemas.deleteMultipleItems), Delete_controller.deleteMultipleItems);
+
+// User management routes
+router.post("/create_user", checkAdmin, ValidateJoi(Schemas.admin.createUser), User_controller.createUser);
+router.post("/update_user", checkAdmin, ValidateJoi(Schemas.admin.updateUser), User_controller.updateUser);
+router.post("/all_users", checkAdmin, ValidateJoi(Schemas.admin.allUsers), User_controller.allUsers);
+router.post("/get_user_detail", checkAdmin, ValidateJoi(Schemas.admin.getUserDetail), User_controller.getUserDetail);
+router.delete("/delete_user", checkAdmin, ValidateJoi(Schemas.admin.deleteUser), User_controller.deleteUser);
+router.get("/get_current_admin", checkAdmin, User_controller.getCurrentAdmin);
+
 module.exports = router;

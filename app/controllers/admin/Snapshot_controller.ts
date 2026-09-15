@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
+import { Op } from "sequelize";
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 
@@ -220,8 +221,44 @@ async function deleteSnapshot(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+// Delete multiple snapshots by IDs
+async function deleteMultipleSnapshots(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return errorMessage(res, "Snapshot IDs array is required");
+    }
+
+    const snapshots = await db.Snapshot.findAll({
+      where: { id: { [Op.in]: ids } },
+    });
+
+    if (snapshots.length === 0) {
+      return errorMessage(res, "No snapshots found with the provided IDs");
+    }
+
+    // Delete image files
+    const { deleteFile } = require("../../helper/Helper");
+    for (const snapshot of snapshots) {
+      if (snapshot.image_url) {
+        const imagePath = snapshot.image_url.replace("/uploads/", "");
+        deleteFile("snapshot", imagePath);
+      }
+    }
+
+    await db.Snapshot.destroy({ where: { id: { [Op.in]: ids } } });
+
+    return successMessage(res, `${snapshots.length} snapshots deleted successfully`);
+  } catch (err) {
+    console.error("deleteMultipleSnapshots error:", err);
+    return errorMessage(res, "Error deleting snapshots");
+  }
+}
+
 export default {
   searchSnapshot,
   getAllSnapshots,
   deleteSnapshot,
+  deleteMultipleSnapshots,
 };
