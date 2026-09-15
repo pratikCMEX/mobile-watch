@@ -806,6 +806,10 @@ class TcpServer {
         this.handleRemoveResponse(client, parsed);
         break;
 
+      case "REMOVESMS":
+        this.handleRemoveSmsResponse(client, parsed);
+        break;
+
       case "SOS1":
       case "SOS2":
       case "SOS3":
@@ -1246,7 +1250,9 @@ class TcpServer {
     networkType: string
   ): Promise<void> {
     const tag = `[saveLteLocation:${deviceId}]`;
-    Logging.info(`${tag} step 1: looking up device (networkType=${networkType})`);
+    Logging.info(
+      `${tag} step 1: looking up device (networkType=${networkType})`
+    );
 
     const device = await this.findDevice(deviceId);
 
@@ -1274,12 +1280,16 @@ class TcpServer {
 
       return;
     }
-    Logging.info(`${tag} step 2 OK: latitude=${latitude} longitude=${longitude}`);
+    Logging.info(
+      `${tag} step 2 OK: latitude=${latitude} longitude=${longitude}`
+    );
 
     const recordedAt = this.parseRecordedAt(location.date, location.time);
     const isValidFix = location.gpsStatus === "A";
     Logging.info(
-      `${tag} step 3: recordedAt=${recordedAt.toISOString()} isValidFix=${isValidFix} (gpsStatus="${location.gpsStatus}")`
+      `${tag} step 3: recordedAt=${recordedAt.toISOString()} isValidFix=${isValidFix} (gpsStatus="${
+        location.gpsStatus
+      }")`
     );
 
     await db.Location.create({
@@ -2900,7 +2910,9 @@ class TcpServer {
     recordedAt: Date,
     isValidFix: boolean
   ): Promise<void> {
-    const tag = `[cacheLatestLocationOnDevice:${device.serial_number || device.id}]`;
+    const tag = `[cacheLatestLocationOnDevice:${
+      device.serial_number || device.id
+    }]`;
     Logging.info(
       `${tag} step 1: caching latest_lat=${latitude} latest_lng=${longitude} ` +
         `isValidFix=${isValidFix}`
@@ -2960,7 +2972,9 @@ class TcpServer {
         where: { device_id: device.id, is_active: true },
       });
 
-      Logging.info(`${tag} step 1 OK: found ${geofences.length} active geofence(s)`);
+      Logging.info(
+        `${tag} step 1 OK: found ${geofences.length} active geofence(s)`
+      );
 
       if (geofences.length === 0) {
         Logging.info(
@@ -2982,7 +2996,11 @@ class TcpServer {
           `${tag} step 2: geofence "${geofence.name || geofence.id}" ` +
             `center=(${geofence.latitude},${geofence.longitude}) radius=${geofence.radius_meters}m ` +
             `-> distance=${distance.toFixed(1)}m ` +
-            `(${distance <= parseFloat(geofence.radius_meters as any) ? "INSIDE" : "outside"})`
+            `(${
+              distance <= parseFloat(geofence.radius_meters as any)
+                ? "INSIDE"
+                : "outside"
+            })`
         );
 
         if (distance <= parseFloat(geofence.radius_meters as any)) {
@@ -2999,7 +3017,9 @@ class TcpServer {
         | undefined;
 
       Logging.info(
-        `${tag} step 3: previousStatus=${previousStatus ?? "null"} newStatus=${newStatus}`
+        `${tag} step 3: previousStatus=${
+          previousStatus ?? "null"
+        } newStatus=${newStatus}`
       );
 
       if (previousStatus === newStatus) {
@@ -3008,7 +3028,9 @@ class TcpServer {
       }
 
       await device.update({ geofence_status: newStatus });
-      Logging.info(`${tag} step 4 OK: Device.geofence_status updated to "${newStatus}"`);
+      Logging.info(
+        `${tag} step 4 OK: Device.geofence_status updated to "${newStatus}"`
+      );
 
       const geofenceName = matchedGeofence?.name || "the safe zone";
 
@@ -3019,7 +3041,9 @@ class TcpServer {
       );
 
       Logging.info(
-        `${tag} step 5: device.owner_id=${device.owner_id ?? "null"} -> calling createNotification()`
+        `${tag} step 5: device.owner_id=${
+          device.owner_id ?? "null"
+        } -> calling createNotification()`
       );
 
       const notification = await createNotification({
@@ -3028,8 +3052,9 @@ class TcpServer {
       });
 
       Logging.info(
-        `${tag} step 5 OK: Notification row id=${notification?.id} type=${newStatus === "in" ? "geo_fence_in" : "geo_fence_out"} ` +
-          `| ${newStatus === "in" ? "ENTER" : "EXIT"} "${geofenceName}"`
+        `${tag} step 5 OK: Notification row id=${notification?.id} type=${
+          newStatus === "in" ? "geo_fence_in" : "geo_fence_out"
+        } ` + `| ${newStatus === "in" ? "ENTER" : "EXIT"} "${geofenceName}"`
       );
     } catch (err: any) {
       Logging.error(
@@ -3067,7 +3092,9 @@ class TcpServer {
     networkType: string
   ): Promise<void> {
     const tag = `[saveLocation:${deviceId}]`;
-    Logging.info(`${tag} step 1: looking up device (networkType=${networkType})`);
+    Logging.info(
+      `${tag} step 1: looking up device (networkType=${networkType})`
+    );
 
     const device = await this.findDevice(deviceId);
 
@@ -3095,12 +3122,16 @@ class TcpServer {
 
       return;
     }
-    Logging.info(`${tag} step 2 OK: latitude=${latitude} longitude=${longitude}`);
+    Logging.info(
+      `${tag} step 2 OK: latitude=${latitude} longitude=${longitude}`
+    );
 
     const recordedAt = this.parseRecordedAt(location.date, location.time);
     const isValidFix = location.gpsStatus === "A";
     Logging.info(
-      `${tag} step 3: recordedAt=${recordedAt.toISOString()} isValidFix=${isValidFix} (gpsStatus="${location.gpsStatus}")`
+      `${tag} step 3: recordedAt=${recordedAt.toISOString()} isValidFix=${isValidFix} (gpsStatus="${
+        location.gpsStatus
+      }")`
     );
 
     await db.Location.create({
@@ -5615,6 +5646,46 @@ class TcpServer {
   }
 
   /**
+   * Toggle the watch's "take-off SMS alarm" switch.
+   *
+   * Per the protocol spec:
+   *
+   *   Server send : [CS*<id>*0008*REMOVESMS,0]  (off, do NOT send SMS alarm on take-off)
+   *                 [CS*<id>*0008*REMOVESMS,1]  (on, send SMS alarm on take-off)
+   *
+   *   Device reply: [CS*<id>*0006*REMOVESMS]    (bare ack = success)
+   *
+   * NOTE: This feature depends on the device firmware supporting SMS alerts
+   * on take-off. If the device does not support it, this command may not be acknowledged.
+   *
+   * @param deviceId  The device ID (e.g. 8800000015)
+   * @param enabled   true = send SMS alarm on take-off, false = do NOT send
+   * @returns true if command was sent, false if device not connected
+   */
+  public sendRemoveSmsCommand(deviceId: string, enabled: boolean): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send REMOVESMS command.`
+      );
+      return false;
+    }
+
+    // Content is exactly "REMOVESMS,0" or "REMOVESMS,1" — 12 chars.
+    const flag = enabled ? "1" : "0";
+    const command = `[CS*${deviceId}*0008*REMOVESMS,${flag}]`;
+
+    Logging.info(
+      `Sending take-off SMS alarm (REMOVESMS) command to device ${deviceId} ` +
+        `(enabled=${enabled}): ${command}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
    * Handle a REMOVE reply from the device.
    *
    * Reply shapes:
@@ -5653,6 +5724,55 @@ class TcpServer {
         .catch((error: Error) =>
           Logging.error(
             `Failed to save take-off notification for device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  /**
+   * Handle a REMOVESMS reply from the device.
+   *
+   * Reply shapes:
+   *   [CS*<id>*0006*REMOVESMS]        bare ack → success
+   *   [CS*<id>*0008*REMOVESMS,0]     failure (some firmwares)
+   *   [CS*<id>*0008*REMOVESMS,1]     explicit success (some firmwares)
+   */
+  private handleRemoveSmsResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `REMOVESMS response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from REMOVESMS: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return;
+          return db.Notification.create({
+            device_id: device.id,
+            user_id: null,
+            type: "general",
+            title: "Take-off SMS alarm updated",
+            body: `Device ${packet.deviceId} acknowledged take-off SMS alarm command.`,
+            metadata: { kind: "take_off_sms", deviceId: packet.deviceId },
+            is_read: "0",
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to save take-off SMS notification for device ${packet.deviceId}: ${error.message}`
           )
         );
     }

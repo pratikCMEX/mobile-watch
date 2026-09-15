@@ -1387,13 +1387,6 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
       Boolean(enabled)
     );
 
-    if (!commandSent) {
-      return errorMessage(
-        res,
-        "Failed to send SOSSMS command. Device may be disconnected."
-      );
-    }
-
     const flag = enabled ? "1" : "0";
 
     const [affectedRows] = await db.DeviceSetting.update(
@@ -1410,6 +1403,14 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     if (affectedRows === 0) {
       return errorMessage(res, "Device setting not found for this device");
     }
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send SOSSMS command. Device may be disconnected."
+      );
+    }
+
     const commandProtocol = `[3G*${serial_number}*0008*SOSSMS,${flag}]`;
 
     Logging.info(
@@ -1665,6 +1666,116 @@ const setTakeOffAlert = async (
   } catch (err) {
     console.error("setTakeOffAlert error:", err);
     return errorMessage(res, "Error sending take-off alarm command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// Take-Off Watch Alarm SMS (REMOVESMS) — toggle the watch's
+// take-off SMS alarm switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*REMOVESMS,0]  (off, do NOT send SMS alarm on take-off)
+//                 [CS*<id>*0008*REMOVESMS,1]  (on, send SMS alarm on take-off)
+//   Device reply: [CS*<id>*0006*REMOVESMS]    (bare ack = success)
+//
+// NOTE: This feature depends on the device firmware supporting
+// SMS alerts on take-off. If the device does not support it,
+// this command may not be acknowledged.
+//
+// Server-side mirror: DeviceSetting.take_off_device_alert
+// ────────────────────────────────────────────────────────────
+
+const setRemoveSmsAlert = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, enabled } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendRemoveSmsCommand(
+      serial_number,
+      Boolean(enabled)
+    );
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send REMOVESMS command. Device may be disconnected."
+      );
+    }
+
+    // Mirror to the server-side DeviceSetting table.
+    let deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+
+    if (!deviceSetting) {
+      deviceSetting = await db.DeviceSetting.create({
+        device_id: device.id,
+        sms_alert_enabled: "0",
+        take_off_device_alert: enabled ? "1" : "0",
+        safe_mode: "0",
+        talking_clock: "0",
+        night_power_saving: "0",
+        volume: 50,
+        brightness: 50,
+        fall_down_alert_enabled: "0",
+        fall_down_reminder_call: "0",
+        fall_down_level: 5,
+        scene_mode: 1,
+      });
+    } else {
+      deviceSetting.take_off_device_alert = enabled ? "1" : "0";
+      await deviceSetting.save();
+    }
+
+    const flag = enabled ? "1" : "0";
+    const commandProtocol = `[CS*${serial_number}*0008*REMOVESMS,${flag}]`;
+
+    Logging.info(
+      `Take-off SMS alarm (REMOVESMS) command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, enabled=${Boolean(enabled)})`
+    );
+
+    return successMessage(res, "Take-off SMS alarm command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      enabled: Boolean(enabled),
+      command_sent: true,
+      command_message: enabled
+        ? "REMOVESMS ON command sent. Device will send an SMS alarm when the watch is taken off."
+        : "REMOVESMS OFF command sent. Device will NOT send an SMS alarm when the watch is taken off.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*0006*REMOVESMS] (bare ack = success).",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setRemoveSmsAlert error:", err);
+    return errorMessage(res, "Error sending take-off SMS alarm command");
   }
 };
 
@@ -3910,6 +4021,7 @@ export default {
   setLowBatteryAlert,
   setCenterNumber,
   setTakeOffAlert,
+  setRemoveSmsAlert,
   setFallDownSensitivity,
   setLanguageTimezone,
   setSilenceTime,

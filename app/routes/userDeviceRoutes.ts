@@ -257,6 +257,20 @@ router.post(
   Device_controller.setTakeOffAlert
 );
 
+// Take-Off Watch Alarm SMS (REMOVESMS) API — toggle the watch's
+// take-off SMS alarm switch.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*0008*REMOVESMS,0]  (off, do NOT send SMS alarm on take-off)
+//                 [CS*<id>*0008*REMOVESMS,1]  (on, send SMS alarm on take-off)
+//   Device reply: [CS*<id>*0006*REMOVESMS]    (bare ack = success)
+router.post(
+  "/remove_sms_alert",
+  checkToken,
+  ValidateJoi(Schemas.removeSmsAlert.set),
+  Device_controller.setRemoveSmsAlert
+);
+
 // Voice Monitor / Listen In (MONITOR command) - OPTIONAL FEATURE
 // The device will auto-dial a monitor number for voice monitoring
 // Note: Remove this feature if it is illegal in your region

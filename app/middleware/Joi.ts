@@ -687,6 +687,38 @@ export const Schemas = {
   },
 
   /**
+   * Set the watch's take-off SMS alarm switch (REMOVESMS command).
+   *
+   * Per the protocol spec:
+   *   Server send : [CS*<id>*0008*REMOVESMS,0]  (off, do NOT send SMS alarm on take-off)
+   *                 [CS*<id>*0008*REMOVESMS,1]  (on, send SMS alarm on take-off)
+   *   Device reply: [CS*<id>*0006*REMOVESMS]    (bare ack = success)
+   *
+   * NOTE: This feature depends on the device firmware supporting
+   * SMS alerts on take-off. If the device does not support it,
+   * this command may not be acknowledged.
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "enabled":       true
+   *   }
+   */
+  removeSmsAlert: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      enabled: Joi.boolean().required().messages({
+        "boolean.base": "enabled must be a boolean (true or false)",
+        "any.required":
+          "enabled is required (true = send SMS alarm on take-off, false = do not send SMS alarm)",
+      }),
+    }),
+  },
+
+  /**
    * Set the watch's center phone number for SMS alarm alerts (CENTER command).
    *
    * Per the protocol spec:
