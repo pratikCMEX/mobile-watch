@@ -1605,4 +1605,27 @@ export const Schemas = {
       weight_kg: Joi.number().integer().optional().allow(null),
     }).or("imei", "serial_number"),
   },
+  appUpdate: {
+    create: Joi.object({
+      apk_version: Joi.string().required(),
+      type: Joi.string().valid("ios", "android").required(),
+      force_update: Joi.boolean().optional().default(false),
+    }),
+    update: Joi.object({
+      id: Joi.string().required(),
+      apk_version: Joi.string().optional(),
+      type: Joi.string().valid("ios", "android").optional(),
+      force_update: Joi.boolean().optional(),
+    }),
+    list: Joi.object({
+      search: Joi.string().optional().allow(""),
+      page: Joi.number().integer().min(1).optional().default(1),
+      sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
+      limit: Joi.number().integer().min(1).optional().default(10),
+      type: Joi.string().valid("ios", "android").optional().allow(null, ""),
+    }),
+    delete: Joi.object({
+      id: Joi.string().required(),
+    }),
+  },
 };

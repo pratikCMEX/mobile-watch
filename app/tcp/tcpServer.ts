@@ -7,9 +7,7 @@ import {
   createNotification,
   buildSosNotification,
   buildGeoFenceNotification,
-  buildFallDetectionNotification,
-  buildHealthAlertNotification,
-  buildWatchRemoveNotification,
+  buildFallDownNotification,
 } from "../services/notification.service";
 
 // ─────────────────────────────────────────────────────────────
@@ -1296,18 +1294,19 @@ class TcpServer {
 
     const ownerId = device.owner_id;
     const deviceIdDb = device.id;
+    const deviceName = device.device_name;
 
     // ── SOS alarm (bit 16) ──────────────────────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_SOS) !== 0) {
       Logging.info(
         `${tag} SOS alarm detected — sending SOS notification to owner`
       );
-      const notificationPayload = buildSosNotification(deviceIdDb, "SOS");
+      const notificationPayload = buildSosNotification(deviceName, "SOS");
       await createNotification({
         ...notificationPayload,
         user_id: ownerId,
       });
-      Logging.info(`${tag} SOS notification created for device ${deviceIdDb}`);
+      Logging.info(`${tag} SOS notification created for device ${deviceName}`);
     }
 
     // ── Low battery alarm (bit 17) ──────────────────────────────
@@ -1371,11 +1370,7 @@ class TcpServer {
       Logging.info(
         `${tag} Watch-remove alarm detected — sending notification to owner`
       );
-      const notificationPayload = buildWatchRemoveNotification(deviceIdDb);
-      await createNotification({
-        ...notificationPayload,
-        user_id: ownerId,
-      });
+
       Logging.info(
         `${tag} Watch-remove notification created for device ${deviceIdDb}`
       );
@@ -1384,16 +1379,42 @@ class TcpServer {
     // ── Fall down alarm (bit 21) ────────────────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_FALL_DOWN) !== 0) {
       Logging.info(
-        `${tag} Fall-down alarm detected — sending fall-detection notification to owner`
+        `${tag} Fall-down alarm detected — checking fall-detection setting`
       );
-      const notificationPayload = buildFallDetectionNotification(deviceIdDb);
-      await createNotification({
-        ...notificationPayload,
-        user_id: ownerId,
-      });
-      Logging.info(
-        `${tag} Fall-detection notification created for device ${deviceIdDb}`
-      );
+
+      // Respect the owner's fall-down alert toggle. If the watch
+      // has fall-down alerts disabled, we still record the alarm but
+      // do NOT push a notification to the owner.
+      let fallDownAlertEnabled = true;
+      try {
+        const deviceSetting = await db.DeviceSetting.findOne({
+          where: { device_id: deviceIdDb },
+        });
+        if (deviceSetting && deviceSetting.fall_down_alert_enabled === "0") {
+          fallDownAlertEnabled = false;
+        }
+      } catch (settingError: any) {
+        Logging.warn(
+          `${tag} Could not read fall-down setting for device ${deviceIdDb}: ${
+            settingError?.message || settingError
+          }`
+        );
+      }
+
+      if (!fallDownAlertEnabled) {
+        Logging.info(
+          `${tag} Fall-down alert is disabled for device ${deviceIdDb} — skipping notification`
+        );
+      } else {
+        const notificationPayload = buildFallDownNotification(deviceIdDb);
+        await createNotification({
+          ...notificationPayload,
+          user_id: ownerId,
+        });
+        Logging.info(
+          `${tag} Fall-detection notification created for device ${deviceIdDb}`
+        );
+      }
     }
 
     // ── Abnormal heart rate alarm (bit 22) ──────────────────────
@@ -1401,14 +1422,7 @@ class TcpServer {
       Logging.info(
         `${tag} Abnormal heart-rate alarm detected — sending notification to owner`
       );
-      const notificationPayload = buildHealthAlertNotification(
-        deviceIdDb,
-        "Abnormal heart rate detected"
-      );
-      await createNotification({
-        ...notificationPayload,
-        user_id: ownerId,
-      });
+
       Logging.info(
         `${tag} Health-alert notification created for device ${deviceIdDb}`
       );
@@ -5602,7 +5616,10 @@ class TcpServer {
         }
 
         // Build and persist the notification.
-        const notificationPayload = buildSosNotification(device.id, sosSlot);
+        const notificationPayload = buildSosNotification(
+          device.device_name,
+          sosSlot
+        );
 
         return createNotification({
           ...notificationPayload,

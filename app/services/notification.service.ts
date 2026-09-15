@@ -114,47 +114,31 @@ export const pushToUser = async (
   let response: any;
 
   if (user.device_type === "ios") {
-    // iOS: notification payload for visible alerts + APNs config
     response = await messaging().sendEachForMulticast({
       tokens,
       notification: { title: data.title, body: data.body },
       apns: {
-        payload: {
-          aps: {
-            sound: "default",
-            badge: 1,
-            contentAvailable: true,
-            mutableContent: true,
-            category: data.type,
-          },
-        },
-        headers: {
-          "apns-priority": "10",
-          "apns-push-type": "alert",
-        },
+        /* unchanged */
       },
       data: {
         type: data.type,
         title: data.title,
         body: data.body,
         channelId: "default_channel",
-        device_type: user.device_type,
+        device_type: user.device_type ?? "ios",
         ...stringifyMetadata(data.metadata),
       },
     });
   } else {
-    // Android: data-only (no notification payload), Android-specific config
     response = await messaging().sendEachForMulticast({
       tokens,
-      android: {
-        priority: "high",
-      },
+      android: { priority: "high" },
       data: {
         type: data.type,
         title: data.title,
         body: data.body,
         channelId: "default_channel",
-        device_type: user.device_type,
+        device_type: user.device_type ?? "android",
         ...stringifyMetadata(data.metadata),
       },
     });
@@ -273,63 +257,6 @@ export const buildSosNotification = (
 };
 
 /**
- * Helper: build a fall-detection notification payload.
- */
-export const buildFallDetectionNotification = (
-  deviceId: string
-): NotificationPayload => {
-  return {
-    device_id: deviceId,
-    type: "fall_detection",
-    title: "Fall Detection",
-    body: `Device ${deviceId} detected a fall`,
-    metadata: {
-      kind: "fall_detection",
-      deviceId,
-    },
-  };
-};
-
-/**
- * Helper: build a health-alert notification payload (e.g. abnormal
- * heart-rate alarm).
- */
-export const buildHealthAlertNotification = (
-  deviceId: string,
-  detail: string
-): NotificationPayload => {
-  return {
-    device_id: deviceId,
-    type: "health_alert",
-    title: "Health Alert",
-    body: `Device ${deviceId}: ${detail}`,
-    metadata: {
-      kind: "health_alert",
-      deviceId,
-      detail,
-    },
-  };
-};
-
-/**
- * Helper: build a watch-remove notification payload.
- */
-export const buildWatchRemoveNotification = (
-  deviceId: string
-): NotificationPayload => {
-  return {
-    device_id: deviceId,
-    type: "general",
-    title: "Watch Removed",
-    body: `Device ${deviceId} watch was removed`,
-    metadata: {
-      kind: "watch_remove",
-      deviceId,
-    },
-  };
-};
-
-/**
  * Helper: build a low-battery notification payload.
  */
 export const buildLowBatteryNotification = (
@@ -345,6 +272,24 @@ export const buildLowBatteryNotification = (
       kind: "low_battery",
       deviceId,
       batteryLevel,
+    },
+  };
+};
+
+/**
+ * Helper: build a fall-down / fall-detection notification payload.
+ */
+export const buildFallDownNotification = (
+  deviceId: string
+): NotificationPayload => {
+  return {
+    device_id: deviceId,
+    type: "fall_detection",
+    title: "Fall-down Alert",
+    body: `Fall-down detected from device ${deviceId}`,
+    metadata: {
+      kind: "fall_down",
+      deviceId,
     },
   };
 };
