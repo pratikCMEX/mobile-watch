@@ -5462,20 +5462,36 @@ class TcpServer {
       return false;
     }
 
+    // Defensive: strip the ".amr" file magic header if the caller
+    // passed the raw file bytes instead of already-stripped frames
+    // (same convention as the TAKEPILLS reminder-voice path below —
+    // the watch firmware expects raw AMR frames, not the file header).
+    const AMR_HEADER = Buffer.from("#!AMR\n");
+    let rawAmr = amrBuffer;
+    if (
+      rawAmr.length >= AMR_HEADER.length &&
+      rawAmr.subarray(0, AMR_HEADER.length).equals(AMR_HEADER)
+    ) {
+      Logging.info(
+        `Stripping AMR file header (6 bytes) from voice message data for device ${deviceId}.`
+      );
+      rawAmr = rawAmr.subarray(AMR_HEADER.length);
+    }
+
     // Validate max duration: AMR is typically 8kHz or 16kHz, ~12.2 kbps
     // 15 seconds ≈ 23 KB at 12.2 kbps. We allow up to 64 KB as a safe
     // upper bound to avoid flooding the TCP socket.
     const MAX_AMR_BYTES = 64 * 1024;
-    if (amrBuffer.length > MAX_AMR_BYTES) {
+    if (rawAmr.length > MAX_AMR_BYTES) {
       Logging.error(
-        `Refusing to send TK to device ${deviceId}: AMR data is ${amrBuffer.length} bytes, max ${MAX_AMR_BYTES} allowed (≈15 seconds).`
+        `Refusing to send TK to device ${deviceId}: AMR data is ${rawAmr.length} bytes, max ${MAX_AMR_BYTES} allowed (≈15 seconds).`
       );
       return false;
     }
 
     // Escape the raw AMR bytes so special protocol bytes can travel
     // through the [ … ] delimited packet format.
-    const escapedAmr = escape(amrBuffer);
+    const escapedAmr = escape(rawAmr);
 
     // Build the content: "TK," + escaped AMR data
     const header = Buffer.from("TK,", "ascii");
@@ -5491,7 +5507,7 @@ class TcpServer {
 
     Logging.info(
       `Sending voice message (TK) to device ${deviceId} ` +
-        `(raw=${amrBuffer.length}B, escaped=${escapedAmr.length}B, total=${packet.length}B)`
+        `(raw=${rawAmr.length}B, escaped=${escapedAmr.length}B, total=${packet.length}B)`
     );
 
     this.send(client, packet);

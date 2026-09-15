@@ -5,6 +5,7 @@ import Logging from "../../library/Logging";
 import { deleteFile, unlinkUploadedFiles } from "../../helper/Helper";
 import { Op } from "sequelize";
 import { tcpServer } from "../../app";
+import { ensureAmrNarrowband } from "../../library/AudioConverter";
 
 const createDevice = async function (
   req: Request,
@@ -277,8 +278,24 @@ const sendVoiceMessage = async function (
       );
     }
 
-    // Read the uploaded AMR file as a Buffer
-    const amrBuffer = require("fs").readFileSync(voiceFile.path);
+    // Normalize to raw AMR-NB frames. iOS clients upload .m4a (AAC),
+    // not .amr — the watch firmware can't play that, so anything that
+    // isn't already narrowband AMR gets transcoded here.
+    let amrBuffer: Buffer;
+    try {
+      amrBuffer = await ensureAmrNarrowband(voiceFile.path);
+    } catch (conversionError: any) {
+      Logging.error(
+        `Voice message AMR conversion failed for device ${serial_number} ` +
+          `(file=${voiceFile.originalname}): ${
+            conversionError?.message || conversionError
+          }`
+      );
+      return errorMessage(
+        res,
+        "Could not process the uploaded audio file (unsupported format or conversion failure)"
+      );
+    }
 
     const commandSent = tcpServer.sendVoiceMessageCommand(
       serial_number as string,
