@@ -6,14 +6,16 @@ import Logging from "./Logging";
 // ─────────────────────────────────────────────────────────────
 // Ensure watch-bound voice audio is narrowband AMR.
 //
-// The watch firmware only understands raw AMR-NB frames (no file
-// header) per the TK / TAKEPILLS protocol. iOS clients record and
-// upload .m4a (AAC) instead of .amr, which — sent as-is — the watch
-// cannot play at all. Rather than trust the client's file extension
-// (which can be wrong or missing), we sniff the actual file magic:
-// if it's already narrowband AMR we just strip the header and use
-// it directly (no re-encode, no quality loss); anything else (m4a,
-// mp3, wav, wideband AMR, ...) is transcoded via ffmpeg.
+// iOS clients record and upload .m4a (AAC) instead of .amr, which —
+// sent as-is — the watch cannot play at all. Rather than trust the
+// client's file extension (which can be wrong or missing), we sniff
+// the actual file magic: if it's already narrowband AMR we use it
+// directly, header and all (no re-encode, no quality loss, and
+// matching exactly how genuine AMR uploads were sent before this
+// module existed — sending the raw file bytes unmodified); anything
+// else (m4a, mp3, wav, wideband AMR, 3GP-wrapped AMR, ...) is
+// transcoded via ffmpeg, whose own output already includes the same
+// "#!AMR\n" header, kept for the same reason.
 // ─────────────────────────────────────────────────────────────
 
 const AMR_NB_MAGIC = Buffer.from("#!AMR\n");
@@ -23,9 +25,10 @@ const isAmrNarrowband = (buf: Buffer): boolean =>
   buf.subarray(0, AMR_NB_MAGIC.length).equals(AMR_NB_MAGIC);
 
 /**
- * Returns raw, header-stripped AMR-NB frame bytes ready to send to
- * the watch over TK/TAKEPILLS. Converts via ffmpeg (libopencore_amrnb,
- * 8kHz mono, 12.2kbps — the highest AMR-NB mode) if the input isn't
+ * Returns a complete narrowband-AMR file buffer (magic header
+ * included) ready to send to the watch, matching exactly how genuine
+ * AMR uploads were transmitted before this module existed. Converts
+ * via ffmpeg (libopencore_amrnb, 8kHz mono) if the input isn't
  * already narrowband AMR.
  *
  * Throws if ffmpeg is missing/fails or the input can't be decoded —
@@ -41,7 +44,7 @@ export async function ensureAmrNarrowband(filePath: string): Promise<Buffer> {
         filePath
       )}" is already narrowband AMR (${original.length} bytes) — no conversion needed.`
     );
-    return original.subarray(AMR_NB_MAGIC.length);
+    return original;
   }
 
   Logging.info(
@@ -116,5 +119,5 @@ export async function ensureAmrNarrowband(filePath: string): Promise<Buffer> {
       `"${path.basename(outputPath)}" (${converted.length} bytes)`
   );
 
-  return converted.subarray(AMR_NB_MAGIC.length);
+  return converted;
 }
