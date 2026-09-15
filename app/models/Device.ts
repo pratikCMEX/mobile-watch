@@ -44,6 +44,8 @@ export interface DeviceAttributes {
   latest_location_is_valid?: boolean | null;
   center_number?: string | null;
   geofence_status?: string | null;
+  server_host?: string | null;
+  server_port?: number | null;
   force_update?: boolean | null;
   apk_version?: string | null;
   type?: "ios" | "android" | null;
@@ -318,6 +320,20 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         comment:
           "Last known geofence state ('in' / 'out') used to detect " +
           "IN<->OUT transitions so alerts fire once per transition.",
+      },
+      server_host: {
+        type: DataTypes.STRING(253),
+        allowNull: true,
+        defaultValue: null,
+        comment:
+          "Pending server portal host (IP or URL) — applied via TCP when device reconnects",
+      },
+      server_port: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+        comment:
+          "Pending server portal port — applied via TCP when device reconnects",
       },
       force_update: {
         type: DataTypes.BOOLEAN,

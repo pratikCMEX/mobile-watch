@@ -675,7 +675,9 @@ class TcpServer {
      */
     switch (parsed.command) {
       case "LK":
-        this.handleHeartbeat(client, parsed);
+        this.handleHeartbeat(client, parsed).catch((error: Error) =>
+          Logging.error(`handleHeartbeat error: ${error.message}`)
+        );
         break;
 
       case "UD":
@@ -904,7 +906,10 @@ class TcpServer {
   // LK - Heartbeat
   // ───────────────────────────────────────────────────────────
 
-  private handleHeartbeat(client: TcpClient, packet: ParsedPacket): void {
+  private async handleHeartbeat(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): Promise<void> {
     Logging.info(
       `LK heartbeat received from device ${packet.deviceId}: ${packet.payload}`
     );
@@ -939,6 +944,50 @@ class TcpServer {
      * contributes to the device's health history.
      */
     const parts = packet.payload.split(",");
+
+    /**
+     * Check for a pending server portal change stored on the device
+     * record (set via the /admin/changeServerPortal API while the
+     * device was offline). If found, send the command and clear
+     * the pending fields.
+     */
+    try {
+      const device = await db.Device.findOne({
+        where: { imei: packet.deviceId },
+      });
+
+      if (device && device.server_host && device.server_port) {
+        const host = device.server_host;
+        const port = device.server_port;
+
+        Logging.info(
+          `[SERVER PORTAL] Pending server portal change found for device ${packet.deviceId}: host=${host}, port=${port}`
+        );
+
+        const command = buildServerPortalCommand(packet.deviceId, host, port);
+
+        if (command) {
+          this.send(client, command.packet);
+          Logging.info(
+            `[SERVER PORTAL] Pending command sent to device ${packet.deviceId}: ${command.packet}`
+          );
+
+          await device.update({
+            server_host: null,
+            server_port: null,
+          });
+          Logging.info(
+            `[SERVER PORTAL] Cleared pending server portal for device ${packet.deviceId}`
+          );
+        }
+      }
+    } catch (error: Error | any) {
+      Logging.error(
+        `[SERVER PORTAL] Failed to apply pending server portal for device ${
+          packet.deviceId
+        }: ${error?.message || error}`
+      );
+    }
   }
 
   // ───────────────────────────────────────────────────────────
