@@ -85,6 +85,7 @@ export const Schemas = {
     email: Joi.string().email().required(),
     password: Joi.string().required(),
     fcm_token: Joi.string().optional().allow(""),
+    device_type: Joi.string().optional().allow(""),
   }),
   user: {
     create: Joi.object({
@@ -1626,6 +1627,9 @@ export const Schemas = {
     }),
     delete: Joi.object({
       id: Joi.string().required(),
+    }),
+    check: Joi.object({
+      type: Joi.string().valid("ios", "android").optional().allow(null, ""),
     }),
   },
 };

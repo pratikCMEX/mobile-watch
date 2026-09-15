@@ -171,10 +171,70 @@ async function getAppUpdate(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+/**
+ * Check whether an update is available for the mobile app.
+ *
+ * This is a PUBLIC endpoint (no admin auth) — the mobile app calls it
+ * on launch to decide whether to prompt the user to upgrade.
+ *
+ * Body: { type?: "ios"|"android", current_version?: string }
+ *
+ * Returns the latest matching AppUpdate record (or null if none).
+ */
+async function checkAppUpdate(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { type } = req.body || {};
+
+    const whereCondition: any = {};
+    if (type) {
+      whereCondition.type = type;
+    }
+
+    const latest = await db.AppUpdate.findOne({
+      where: whereCondition,
+      order: [["createdAt", "DESC"]],
+    });
+
+    if (!latest) {
+      return successMessage(res, "No app update found", null);
+    }
+
+    // Determine whether the installed version is behind the latest.
+    let updateAvailable = false;
+
+    return successMessage(res, "App update checked successfully", {
+      update_available: updateAvailable,
+      force_update: latest.force_update,
+      latest_version: latest.apk_version,
+      type: latest.type,
+      created_at: latest.createdAt,
+    });
+  } catch (err) {
+    console.error("checkAppUpdate error:", err);
+    return errorMessage(res, "Error checking app update");
+  }
+}
+
+/**
+ * Simple semver-ish comparison: returns -1 if a < b, 0 if a == b, 1 if a > b.
+ */
+function compareVersions(a: string, b: string): number {
+  const pa = String(a).split(".").map(Number);
+  const pb = String(b).split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na < nb) return -1;
+    if (na > nb) return 1;
+  }
+  return 0;
+}
+
 export default {
   createAppUpdate,
   listAppUpdates,
   updateAppUpdate,
   deleteAppUpdate,
   getAppUpdate,
+  checkAppUpdate,
 };

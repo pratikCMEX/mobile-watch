@@ -157,7 +157,6 @@ router.delete(
 );
 router.get("/get_current_admin", checkAdmin, User_controller.getCurrentAdmin);
 
-// App update management routes
 router.post(
   "/create_app_update",
   checkAdmin,

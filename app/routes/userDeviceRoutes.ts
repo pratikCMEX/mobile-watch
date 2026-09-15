@@ -4,8 +4,17 @@ import { ValidateJoi, Schemas } from "../middleware/Joi";
 import Device_controller from "../controllers/user/Device_controller";
 import Family_controller from "../controllers/user/Family_controller";
 import Notification_controller from "../controllers/user/Notification_controller";
+import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
 
 const router = express.Router();
+
+// PUBLIC endpoint — the mobile app calls this on launch (before/at
+// login) to decide whether to prompt the user to upgrade.
+router.post(
+  "/check_app_update",
+  ValidateJoi(Schemas.appUpdate.check),
+  AppUpdate_controller.checkAppUpdate
+);
 
 router.post(
   "/update_device_settings",

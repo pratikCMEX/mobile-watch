@@ -928,6 +928,142 @@ Wire protocol:
 
 ---
 
+## 34. Create App Update
+
+Create a new app version record (admin only).
+
+**POST** `/admin/create_app_update`
+
+Authorization: `Bearer <admin JWT>`
+
+```json
+{
+  "apk_version": "1.2.3",
+  "type": "android",
+  "force_update": true
+}
+```
+
+**Response fields:**
+
+| Field          | Type    | Description                              |
+| -------------- | ------- | ---------------------------------------- |
+| `id`           | string  | App update UUID                          |
+| `apk_version`  | string  | App version string                       |
+| `type`         | string  | `"ios"` or `"android"`                   |
+| `force_update` | boolean | Whether the app should force the update  |
+| `createdAt`    | date    | Creation timestamp                       |
+| `updatedAt`    | date    | Last update timestamp                    |
+
+---
+
+## 35. List App Updates
+
+List app updates with optional search / filter / pagination (admin only).
+
+**POST** `/admin/list_app_updates`
+
+Authorization: `Bearer <admin JWT>`
+
+```json
+{
+  "search": "",
+  "page": 1,
+  "sorting": "DESC",
+  "limit": 10,
+  "type": "android"
+}
+```
+
+**Response fields:**
+
+| Field     | Type    | Description                              |
+| --------- | ------- | ---------------------------------------- |
+| `rows`    | array   | Array of app update objects              |
+| `page`    | number  | Current page                             |
+| `limit`   | number  | Page size                                |
+| `total`   | number  | Total record count                       |
+
+---
+
+## 36. Update App Update
+
+Update an existing app update record (admin only).
+
+**POST** `/admin/update_app_update`
+
+Authorization: `Bearer <admin JWT>`
+
+```json
+{
+  "id": "<app-update-uuid>",
+  "apk_version": "1.2.4",
+  "force_update": true
+}
+```
+
+---
+
+## 37. Get App Update
+
+Fetch a single app update by ID (admin only).
+
+**POST** `/admin/get_app_update`
+
+Authorization: `Bearer <admin JWT>`
+
+```json
+{
+  "id": "<app-update-uuid>"
+}
+```
+
+---
+
+## 38. Delete App Update
+
+Delete an app update record (admin only).
+
+**DELETE** `/admin/delete_app_update`
+
+Authorization: `Bearer <admin JWT>`
+
+```json
+{
+  "id": "<app-update-uuid>"
+}
+```
+
+---
+
+## 39. Check App Update (Mobile App)
+
+Public endpoint — the mobile app calls this on launch (before/at login)
+to decide whether to prompt the user to upgrade.
+
+**POST** `/user/device/check_app_update`
+
+Authorization: none (public)
+
+```json
+{
+  "type": "android",
+  "current_version": "1.2.2"
+}
+```
+
+**Response fields:**
+
+| Field            | Type    | Description                                              |
+| ---------------- | ------- | -------------------------------------------------------- |
+| `update_available` | boolean | Whether a newer version exists than the installed one  |
+| `force_update`   | boolean | Whether the app should force the update                 |
+| `latest_version` | string  | The latest available app version                        |
+| `type`           | string  | `"ios"` or `"android"`                                  |
+| `created_at`     | date    | When this update record was created                      |
+
+---
+
 ## Notes
 
 - Replace `DEVICE_UUID`, `USER_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs

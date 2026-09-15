@@ -44,6 +44,9 @@ export interface DeviceAttributes {
   latest_location_is_valid?: boolean | null;
   center_number?: string | null;
   geofence_status?: string | null;
+  force_update?: boolean | null;
+  apk_version?: string | null;
+  type?: "ios" | "android" | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -315,6 +318,24 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         comment:
           "Last known geofence state ('in' / 'out') used to detect " +
           "IN<->OUT transitions so alerts fire once per transition.",
+      },
+      force_update: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        defaultValue: false,
+        comment: "Whether the mobile app should be force-updated (true/false)",
+      },
+      apk_version: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: null,
+        comment: "Minimum required APK/app version for the device",
+      },
+      type: {
+        type: DataTypes.ENUM("ios", "android"),
+        allowNull: true,
+        defaultValue: null,
+        comment: "App platform type: ios or android",
       },
 
       createdAt: {

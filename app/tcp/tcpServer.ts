@@ -1301,12 +1301,16 @@ class TcpServer {
       Logging.info(
         `${tag} SOS alarm detected — sending SOS notification to owner`
       );
-      const notificationPayload = buildSosNotification(deviceName, "SOS");
+      const notificationPayload = buildSosNotification(
+        deviceIdDb,
+        deviceName || deviceId,
+        "SOS"
+      );
       await createNotification({
         ...notificationPayload,
         user_id: ownerId,
       });
-      Logging.info(`${tag} SOS notification created for device ${deviceName}`);
+      Logging.info(`${tag} SOS notification created for device ${deviceIdDb}`);
     }
 
     // ── Low battery alarm (bit 17) ──────────────────────────────
@@ -5617,7 +5621,8 @@ class TcpServer {
 
         // Build and persist the notification.
         const notificationPayload = buildSosNotification(
-          device.device_name,
+          device.id,
+          device.device_name || device.id,
           sosSlot
         );
 

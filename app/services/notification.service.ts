@@ -238,19 +238,25 @@ export const buildGeoFenceNotification = (
 
 /**
  * Helper: build an SOS notification payload.
+ *
+ * @param deviceId   The device UUID (used for the FK `device_id` column).
+ * @param deviceName The human-readable device name (used in the body text).
+ * @param phoneNumber The SOS phone number / slot label.
  */
 export const buildSosNotification = (
   deviceId: string,
+  deviceName: string,
   phoneNumber: string
 ): NotificationPayload => {
   return {
     device_id: deviceId,
     type: "sos",
     title: "SOS Alert",
-    body: `SOS triggered from device ${deviceId} (${phoneNumber})`,
+    body: `SOS triggered from device ${deviceName} (${phoneNumber})`,
     metadata: {
       kind: "sos",
       deviceId,
+      deviceName,
       phoneNumber,
     },
   };
