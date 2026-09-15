@@ -47,6 +47,7 @@ router.delete(
     ValidateJoi(Schemas.geofence.delete, "params"),
     Geofence_controller.deleteGeofence
 );
+
 router.post("/deviceList", checkAdmin, ValidateJoi(Schemas.listDevices), Device_controller.listDevices);
 router.post("/get_all_snapshots", checkAdmin, ValidateJoi(Schemas.getAllSnapshots), Snapshot_controller.getAllSnapshots);
 router.post("/get_device_location", checkAdmin, ValidateJoi(Schemas.getDeviceLocation), Monitor_controller.getDeviceLocation);
