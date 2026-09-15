@@ -79,7 +79,7 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
       total: count,
     });
   } catch (error) {
-    // console.error("SQL Error:", error);
+    console.error("SQL Error:", error);
     return errorMessage(res, "Error fetching users");
   }
 };
