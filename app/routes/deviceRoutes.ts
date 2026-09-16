@@ -84,11 +84,4 @@ router.post(
   Device_controller.updateDeviceIdentity
 );
 
-router.post(
-  "/device_command",
-  checkToken,
-  ValidateJoi(Schemas.deviceCommand.send),
-  Device_controller.sendDeviceCommand
-);
-
 module.exports = router;
