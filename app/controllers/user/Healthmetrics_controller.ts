@@ -294,6 +294,7 @@ const getHealthOverview = async (
     const metricTypes = [
       "heart_rate",
       "blood_pressure",
+      "steps_cumulative",
       "sleep",
       "spo2",
       "calories",
