@@ -226,6 +226,21 @@ const getAnalytics = async (
     let chart;
 
     if (dbMetricType === "steps_cumulative") {
+      // Baseline: last cumulative reading before this window started
+      const baseline = await db.HealthMetric.findOne({
+        where: {
+          device_id,
+          metric_type: dbMetricType,
+          recorded_at: { [Op.lt]: start },
+        },
+        order: [["recorded_at", "DESC"]],
+        attributes: ["value_primary"],
+      });
+
+      let prevCumulative: number | null = baseline
+        ? Number(baseline.value_primary)
+        : null;
+
       // Last cumulative reading per bucket
       const stepBuckets: any[] = await db.sequelize.query(
         `
@@ -252,8 +267,6 @@ const getAnalytics = async (
         }
       );
 
-      // steps taken in this bucket = this bucket's cumulative value - previous bucket's
-      let prevCumulative: number | null = null;
       chart = stepBuckets.map((r: any) => {
         const current = Number(r.value_primary);
         const steps = prevCumulative !== null ? current - prevCumulative : 0;
