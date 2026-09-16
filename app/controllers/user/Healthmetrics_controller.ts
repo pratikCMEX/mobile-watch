@@ -226,18 +226,24 @@ const getAnalytics = async (
     let chart;
 
     if (dbMetricType === "steps_cumulative") {
-      // Cumulative counter — chart the steps taken WITHIN each bucket
-      // (max - min of the running total in that bucket), not the raw value.
+      // Last cumulative reading per bucket
       const stepBuckets: any[] = await db.sequelize.query(
         `
-        SELECT date_trunc(:truncUnit, recorded_at) AS bucket,
-               (MAX(value_primary) - MIN(value_primary)) AS steps,
-               MAX(unit) AS unit
-        FROM "HealthMetrics"
-        WHERE device_id = :device_id
-          AND metric_type = :dbMetricType
-          AND recorded_at BETWEEN :start AND :end
-        GROUP BY bucket
+        SELECT bucket, value_primary, unit
+        FROM (
+          SELECT date_trunc(:truncUnit, recorded_at) AS bucket,
+                 value_primary,
+                 unit,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY date_trunc(:truncUnit, recorded_at)
+                   ORDER BY recorded_at DESC
+                 ) AS rn
+          FROM "HealthMetrics"
+          WHERE device_id = :device_id
+            AND metric_type = :dbMetricType
+            AND recorded_at BETWEEN :start AND :end
+        ) t
+        WHERE rn = 1
         ORDER BY bucket ASC
         `,
         {
@@ -246,12 +252,19 @@ const getAnalytics = async (
         }
       );
 
-      chart = stepBuckets.map((r: any) => ({
-        value_primary: Number(r.steps) || 0,
-        value_secondary: null,
-        unit: r.unit,
-        bucket: r.bucket,
-      }));
+      // steps taken in this bucket = this bucket's cumulative value - previous bucket's
+      let prevCumulative: number | null = null;
+      chart = stepBuckets.map((r: any) => {
+        const current = Number(r.value_primary);
+        const steps = prevCumulative !== null ? current - prevCumulative : 0;
+        prevCumulative = current;
+        return {
+          value_primary: steps < 0 ? 0 : steps, // guard against counter resets
+          value_secondary: null,
+          unit: r.unit,
+          bucket: r.bucket,
+        };
+      });
     } else {
       chart = readings.map((r: any) => ({
         value_primary: Number(r.value_primary),
