@@ -297,9 +297,7 @@ const getHealthOverview = async (
       "steps_cumulative",
       "sleep",
       "spo2",
-      "calories",
       "temperature",
-      "distance",
     ];
 
     const overview: any = {};
@@ -361,44 +359,20 @@ const getHealthOverview = async (
       };
     }
 
-    // Total distance and calories burnt for today
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    // Distance (km) and calories, derived from today's step count
+    const stepsToday = overview["steps"]?.latest || 0;
 
-    const todayDistanceMetrics = await db.HealthMetric.findAll({
-      where: {
-        device_id: device_id,
-        metric_type: "distance",
-        recorded_at: { [Op.gte]: todayStart },
-      },
-    });
+    const totalDistanceKm = Number((stepsToday * 0.000762).toFixed(2));
+    const totalCalories = Number((stepsToday * 0.04).toFixed(2));
 
-    const todayCaloriesMetrics = await db.HealthMetric.findAll({
-      where: {
-        device_id: device_id,
-        metric_type: "calories",
-        recorded_at: { [Op.gte]: todayStart },
-      },
-    });
-
-    const totalDistance = todayDistanceMetrics.reduce(
-      (sum: number, m: any) => sum + (Number(m.value_primary) || 0),
-      0
-    );
-
-    const totalCalories = todayCaloriesMetrics.reduce(
-      (sum: number, m: any) => sum + (Number(m.value_primary) || 0),
-      0
-    );
-
-    overview["total_distance"] = {
-      value: totalDistance,
-      unit: todayDistanceMetrics[0]?.unit || null,
+    overview["distance"] = {
+      value: totalDistanceKm,
+      unit: "km",
     };
 
-    overview["total_calories"] = {
+    overview["calories"] = {
       value: totalCalories,
-      unit: todayCaloriesMetrics[0]?.unit || null,
+      unit: "kcal",
     };
 
     return successMessage(
