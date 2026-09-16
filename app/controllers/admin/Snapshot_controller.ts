@@ -76,18 +76,12 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
 // Also supports search by id or imei in body
 async function getAllSnapshots(req: Request, res: Response, next: NextFunction) {
   try {
-
-
-    const alldata = await db.Snapshot.findAll();
-    console.log("alldata:", alldata);
-
-
     const body = req.body || {};
-    const { id, imei } = body;
+    const { id, imei, page = 1, limit = 20 } = body;
 
-    console.log("getAllSnapshots request body:", { id, imei });
+    console.log("getAllSnapshots request body:", { id, imei, page, limit });
 
-    // const offset = (Number(page) - 1) * Number(limit);
+    const offset = (Number(page) - 1) * Number(limit);
 
     // If id or imei is provided, use search logic
     if (id || imei) {
@@ -144,16 +138,6 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
     }
 
     // Otherwise, return all snapshots with pagination
-    // First try without include to see if we get data
-    const snapshotsWithoutInclude = await db.Snapshot.findAll({
-      attributes: ["id", "device_id", "image_url", "captured_at", "createdAt", "updatedAt"],
-      order: [["captured_at", "DESC"]],
-      // limit: Number(limit),
-      // offset,
-    });
-
-    console.log("Snapshots without include:", snapshotsWithoutInclude.length);
-
     const { count, rows } = await db.Snapshot.findAndCountAll({
       include: [
         {
@@ -165,8 +149,8 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
       ],
       attributes: ["id", "device_id", "image_url", "captured_at", "createdAt", "updatedAt"],
       order: [["captured_at", "DESC"]],
-      // limit: Number(limit),
-      // offset,
+      limit: Number(limit),
+      offset,
     });
 
     // Add base URL to image URLs
@@ -179,9 +163,9 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
       snapshots: snapshotsWithFullUrl,
       pagination: {
         total: count,
-        // page: Number(page),
-        // limit: Number(limit),
-        // totalPages: Math.ceil(count / Number(limit)),
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(count / Number(limit)),
       },
     });
   } catch (err) {

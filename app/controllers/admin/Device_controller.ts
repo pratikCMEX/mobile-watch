@@ -643,7 +643,12 @@ const listDevices = async function (
     const where: any = {};
 
     if (search) {
-      where.serial_number = { [Op.like]: `%${search}%` };
+      where[Op.or] = [
+        { serial_number: { [Op.like]: `%${search}%` } },
+        { imei: { [Op.like]: `%${search}%` } },
+        { device_name: { [Op.like]: `%${search}%` } },
+        { "$DeviceOwner.name$": { [Op.like]: `%${search}%` } },
+      ];
     }
 
     if (connection_status) {
