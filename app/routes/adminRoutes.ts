@@ -1,5 +1,5 @@
 import express from "express";
-import { checkToken, checkAdmin } from "../config/jwt";
+import { checkToken, checkAdmin, adminOnly } from "../config/jwt";
 import { Schemas, ValidateJoi } from "../middleware/Joi";
 import Device_controller from "../controllers/admin/Device_controller";
 import Geofence_controller from "../controllers/admin/Geofence_controller";
@@ -11,6 +11,7 @@ import Dashboard_controller from "../controllers/admin/Dashboard_controller";
 import Admin_Auth_controller from "../controllers/admin/Auth_controller";
 import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
 import Notification_controller from "../controllers/admin/Notification_controller";
+import Staff_controller from "../controllers/admin/Staff_controller";
 const router = express.Router();
 
 // Dashboard stats
@@ -221,6 +222,55 @@ router.delete(
   AppUpdate_controller.deleteAppUpdate
 );
 
-
+// Staff management routes (admin only — staff are blocked)
+router.post(
+  "/create_staff",
+  checkAdmin,
+  adminOnly,
+  ValidateJoi(Schemas.staff.create),
+  Staff_controller.createStaff
+);
+router.post(
+  "/update_staff",
+  checkAdmin,
+  adminOnly,
+  ValidateJoi(Schemas.staff.update),
+  Staff_controller.updateStaff
+);
+router.post(
+  "/update_staff_status",
+  checkAdmin,
+  adminOnly,
+  ValidateJoi(Schemas.staff.updateStatus),
+  Staff_controller.updateStaffStatus
+);
+router.delete(
+  "/delete_staff",
+  checkAdmin,
+  adminOnly,
+  ValidateJoi(Schemas.staff.byId),
+  Staff_controller.deleteStaff
+);
+router.post(
+  "/list_staff",
+  checkAdmin,
+  adminOnly,
+  ValidateJoi(Schemas.staff.list),
+  Staff_controller.listStaff
+);
+router.post(
+  "/get_staff_detail",
+  checkAdmin,
+  adminOnly,
+  ValidateJoi(Schemas.staff.byId),
+  Staff_controller.getStaffDetail
+);
+router.post(
+  "/staff_login_logs",
+  checkAdmin,
+  adminOnly,
+  ValidateJoi(Schemas.staff.loginLogs),
+  Staff_controller.staffLoginLogs
+);
 
 module.exports = router;

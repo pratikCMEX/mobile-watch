@@ -4,15 +4,26 @@ import {
   errorMessage,
   successMessage,
 } from "../../library/Response";
+import {
+  deviceIdScope,
+  getAccessibleUserIds,
+} from "../../helper/WatchAccess";
 
 async function getDashboardStats(req: Request, res: Response, next: NextFunction) {
   try {
+    // Staff only see watches assigned to them (and those watches' owners)
+    const deviceScope = await deviceIdScope(req);
+    const deviceWhere: any = deviceScope ? { id: deviceScope } : {};
+    const userIds = await getAccessibleUserIds(req);
+    const userWhere: any = userIds ? { id: { [db.Sequelize.Op.in]: userIds } } : {};
+
     // Get total user count
-    const totalUsers = await db.User.count();
+    const totalUsers = await db.User.count({ where: userWhere });
 
     // Get active users (users with non-empty session_token - currently logged in)
     const activeUsers = await db.User.count({
       where: {
+        ...userWhere,
         session_token: {
           [db.Sequelize.Op.ne]: "",
         },
@@ -23,11 +34,12 @@ async function getDashboardStats(req: Request, res: Response, next: NextFunction
     const inactiveUsers = totalUsers - activeUsers;
 
     // Get total device count
-    const totalDevices = await db.Device.count();
+    const totalDevices = await db.Device.count({ where: deviceWhere });
 
     // Get online devices count
     const onlineDevices = await db.Device.count({
       where: {
+        ...deviceWhere,
         is_online: true,
       },
     });
@@ -53,6 +65,7 @@ async function getDashboardStats(req: Request, res: Response, next: NextFunction
         "last_updated_at",
       ],
       where: {
+        ...deviceWhere,
         latest_lat: {
           [db.Sequelize.Op.ne]: null,
         },

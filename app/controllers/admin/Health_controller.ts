@@ -2,6 +2,11 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { Op } from "sequelize";
+import {
+  canAccessAllDevices,
+  canAccessDevice,
+  deviceIdScope,
+} from "../../helper/WatchAccess";
 
 // Get all health metrics (admin view) - also supports search by IMEI and ID
 async function getAllHealthMetrics(req: Request, res: Response, next: NextFunction) {
@@ -34,7 +39,7 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
         ],
       });
 
-      if (!metric) {
+      if (!metric || !(await canAccessDevice(req, metric.device_id))) {
         return errorMessage(res, "Health metric not found");
       }
 
@@ -48,7 +53,7 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
         attributes: ["id", "imei", "device_name"],
       });
 
-      if (!device) {
+      if (!device || !(await canAccessDevice(req, device.id))) {
         return errorMessage(res, "Device not found with this IMEI");
       }
 
@@ -86,7 +91,12 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
     }
 
     // Otherwise, return all health metrics with pagination
+    const listWhere: any = {};
+    const scope = await deviceIdScope(req);
+    if (scope) listWhere.device_id = scope;
+
     const { count, rows } = await db.HealthMetric.findAndCountAll({
+      where: listWhere,
       attributes: [
         "id",
         "device_id",
@@ -170,7 +180,7 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
         attributes: ["id", "imei", "device_name"],
       });
 
-      if (!device) {
+      if (!device || !(await canAccessDevice(req, device.id))) {
         return errorMessage(res, "Device not found with this IMEI");
       }
 
@@ -212,6 +222,9 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
     }
 
     // Otherwise, get all devices' graph data for the period
+    const scope = await deviceIdScope(req);
+    if (scope) where.device_id = scope;
+
     const metrics = await db.HealthMetric.findAll({
       where,
       include: [
@@ -259,7 +272,7 @@ async function deleteHealthMetric(req: Request, res: Response, next: NextFunctio
     }
 
     const healthMetric = await db.HealthMetric.findOne({ where: { id } });
-    if (!healthMetric) {
+    if (!healthMetric || !(await canAccessDevice(req, healthMetric.device_id))) {
       return errorMessage(res, "Health metric not found");
     }
 
@@ -287,6 +300,15 @@ async function deleteMultipleHealthMetrics(req: Request, res: Response, next: Ne
 
     if (healthMetrics.length === 0) {
       return errorMessage(res, "No health metrics found with the provided IDs");
+    }
+
+    if (
+      !(await canAccessAllDevices(
+        req,
+        healthMetrics.map((m: any) => m.device_id)
+      ))
+    ) {
+      return errorMessage(res, "You do not have access to one or more of these health metrics");
     }
 
     await db.HealthMetric.destroy({ where: { id: { [Op.in]: ids } } });

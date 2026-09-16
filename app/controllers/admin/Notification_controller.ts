@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successPagination } from "../../library/Response";
 import { Op } from "sequelize";
+import { canAccessDevice, deviceIdScope } from "../../helper/WatchAccess";
 
 // Get all notifications (admin view) - supports search by device_id and imei with pagination
 async function getAllNotifications(req: Request, res: Response, next: NextFunction) {
@@ -19,14 +20,20 @@ async function getAllNotifications(req: Request, res: Response, next: NextFuncti
         attributes: ["id", "imei", "device_name"],
       });
 
-      if (!device) {
+      if (!device || !(await canAccessDevice(req, device.id))) {
         return errorMessage(res, "Device not found with this IMEI");
       }
 
       where.device_id = device.id;
     } else if (device_id) {
       // If device_id is provided directly
+      if (!(await canAccessDevice(req, device_id))) {
+        return errorMessage(res, "Device not found");
+      }
       where.device_id = device_id;
+    } else {
+      const scope = await deviceIdScope(req);
+      if (scope) where.device_id = scope;
     }
 
     // Optional filters

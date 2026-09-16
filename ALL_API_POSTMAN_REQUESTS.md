@@ -1064,9 +1064,146 @@ Authorization: none (public)
 
 ---
 
+## 40. Create Staff
+
+**POST** `/admin/create_staff`
+
+Authorization: admin token (staff get 403)
+
+```json
+{
+  "name": "Staff One",
+  "email": "staff1@example.com",
+  "username": "staff1",
+  "password": "secret123",
+  "all_watches": false,
+  "device_ids": ["DEVICE_UUID"]
+}
+```
+
+- `all_watches: true` gives access to every current and future watch; `device_ids` is then ignored.
+- `device_ids` is required (at least one) when `all_watches` is false.
+
+---
+
+## 41. Update Staff
+
+**POST** `/admin/update_staff`
+
+Authorization: admin token (staff get 403)
+
+```json
+{
+  "id": "STAFF_UUID",
+  "name": "Staff One",
+  "email": "staff1@example.com",
+  "username": "staff1",
+  "password": "",
+  "all_watches": false,
+  "device_ids": ["DEVICE_UUID"]
+}
+```
+
+- All fields except `id` are optional. An empty `password` leaves it unchanged.
+- `device_ids` replaces the current assignment list. Setting `all_watches: true` clears it.
+
+---
+
+## 42. Update Staff Status
+
+**POST** `/admin/update_staff_status`
+
+Authorization: admin token (staff get 403)
+
+```json
+{
+  "id": "STAFF_UUID",
+  "status": "inactive"
+}
+```
+
+- `status`: `active` or `inactive`. Inactive staff cannot log in, and their existing token stops working.
+
+---
+
+## 43. Delete Staff (soft delete)
+
+**DELETE** `/admin/delete_staff`
+
+Authorization: admin token (staff get 403)
+
+```json
+{
+  "id": "STAFF_UUID"
+}
+```
+
+- The username stays reserved after deletion.
+
+---
+
+## 44. List Staff
+
+**POST** `/admin/list_staff`
+
+Authorization: admin token (staff get 403)
+
+```json
+{
+  "search": "",
+  "page": 1,
+  "sorting": "DESC",
+  "limit": 10,
+  "status": ""
+}
+```
+
+---
+
+## 45. Get Staff Detail
+
+**POST** `/admin/get_staff_detail`
+
+Authorization: admin token (staff get 403)
+
+```json
+{
+  "id": "STAFF_UUID"
+}
+```
+
+---
+
+## 46. Staff Login Logs
+
+**POST** `/admin/staff_login_logs`
+
+Authorization: admin token (staff get 403)
+
+```json
+{
+  "staff_id": "",
+  "search": "",
+  "ip_address": "",
+  "from_date": "2026-09-01",
+  "to_date": "2026-09-16",
+  "page": 1,
+  "sorting": "DESC",
+  "limit": 20
+}
+```
+
+- Every staff login records `ip_address`, `user_agent`, and `login_at`. Logs of deleted staff are still returned.
+
+---
+
+> **Staff access:** staff log in with `/admin/login`. The response includes `role` and `all_watches`. Every existing `/admin/*` endpoint returns only data for the staff member's assigned watches: devices, dashboard, locations, geofences, snapshots, health, notifications, and users who own those watches.
+
+---
+
 ## Notes
 
-- Replace `DEVICE_UUID`, `USER_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs
+- Replace `DEVICE_UUID`, `USER_UUID`, `STAFF_UUID`, `GEOFENCE_UUID`, `CONTACT_UUID` with actual IDs
 - `type` valid values: `sos`, `geo_fence_out`, `geo_fence_in`, `low_battery`, `sim_remove`, `network`, `fall_detection`, `device_offline`, `general`
 - `is_read` valid values: `"1"` (read) or `"0"` (unread)
 - `metric_type` valid values: `heart_rate`, `blood_pressure`, `sleep`, `spo2`, `calories`, `temperature`, `distance`, `steps_daily`, `steps_cumulative`

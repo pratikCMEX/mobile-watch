@@ -116,7 +116,7 @@ export const checkAdmin = async (
 
     const admin = await db.Admin.findOne({
       where: { id: adminId },
-      attributes: ["id", "username", "status"],
+      attributes: ["id", "username", "status", "role", "all_watches"],
     });
 
     if (!admin) {
@@ -127,7 +127,12 @@ export const checkAdmin = async (
       return errorMessage(res, "Admin account is inactive");
     }
 
-    (req as any).user = { id: admin.id, username: admin.username };
+    (req as any).user = {
+      id: admin.id,
+      username: admin.username,
+      role: admin.role,
+      all_watches: admin.all_watches,
+    };
     (req as any).userinfo = decoded;
     next();
   } catch (error: any) {
@@ -141,6 +146,19 @@ export const checkAdmin = async (
     }
     return errorMessage(res, "Invalid or expired token. Please login again.");
   }
+};
+
+// ─── Admin Only (blocks staff) ─────────────────────────────────
+// Must run after checkAdmin.
+export const adminOnly = (req: Request, res: Response, next: NextFunction) => {
+  if ((req as any).user?.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "You do not have permission to access this resource",
+      data: {},
+    });
+  }
+  next();
 };
 
 // ─── Optional Token (no error if missing) ─────────────────────
