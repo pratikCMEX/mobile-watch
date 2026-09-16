@@ -1615,7 +1615,7 @@ class TcpServer {
   private parseLteLocation(payload: string): GpsLocation | null {
     const parts = payload.split(",");
 
-    if (parts.length < 13) {
+    if (parts.length < 15) {
       return null;
     }
 
@@ -1641,6 +1641,13 @@ class TcpServer {
       // the authoritative values.
       gsmSignal: parts[11],
       battery: parts[12],
+
+      // Pedometer (cumulative step count) and tumbling count.
+      // Confirmed from real device traffic:
+      //   13 = pedometer (cumulative steps)
+      //   14 = tumbling count
+      steps: parts[13],
+      tumbling: parts[14],
 
       rawFields: parts,
     };
@@ -1738,6 +1745,12 @@ class TcpServer {
     Logging.info(`${tag} step 7: calling updateFirebaseLiveLocation()`);
     await this.updateFirebaseLiveLocation(device.id, latitude, longitude);
     Logging.info(`${tag} step 7 OK: updateFirebaseLiveLocation() completed`);
+
+    // Save pedometer (cumulative step count) and tumbling count as
+    // HealthMetric rows so they can be queried via the health API.
+    Logging.info(`${tag} step 8: saving step count to HealthMetric`);
+    await this.saveStepCount(device.id, location, recordedAt);
+    Logging.info(`${tag} step 8 OK: step count saved`);
   }
 
   // ───────────────────────────────────────────────────────────
@@ -3539,6 +3552,52 @@ class TcpServer {
 
       Logging.info(
         `${tag} step OK: liveLocation updated | lat=${latitude} lng=${longitude}`
+      );
+    } catch (error: any) {
+      Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
+    }
+  }
+
+  /**
+   * Persist the pedometer (cumulative step count) and tumbling count
+   * from a UD_LTE packet as HealthMetric rows.
+   *
+   * The pedometer value is cumulative (keeps increasing), so we store
+   * it as metric_type "steps_cumulative". The tumbling count is stored
+   * in value_secondary.
+   *
+   * Errors are caught and logged — a failure to save steps must never
+   * break the location pipeline.
+   */
+  private async saveStepCount(
+    deviceId: string,
+    location: GpsLocation,
+    recordedAt: Date
+  ): Promise<void> {
+    const tag = `[saveStepCount:${deviceId}]`;
+
+    try {
+      const steps = parseInt(location.steps || "", 10);
+      const tumbling = parseInt(location.tumbling || "", 10);
+
+      if (isNaN(steps)) {
+        Logging.info(`${tag} SKIPPED: no valid step count in payload`);
+        return;
+      }
+
+      await db.HealthMetric.create({
+        device_id: deviceId,
+        metric_type: "steps_cumulative",
+        value_primary: steps,
+        value_secondary: !isNaN(tumbling) ? tumbling : null,
+        unit: "steps",
+        recorded_at: recordedAt,
+      });
+
+      Logging.info(
+        `${tag} OK: steps_cumulative=${steps} tumbling=${
+          !isNaN(tumbling) ? tumbling : "n/a"
+        }`
       );
     } catch (error: any) {
       Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
@@ -6872,6 +6931,19 @@ interface GpsLocation {
 
   battery?: string;
   gsmSignal?: string;
+
+  /**
+   * UD_LTE-only fields (pedometer / step counter and tumbling count).
+   *
+   * Payload layout (confirmed from real device traffic):
+   *   11 = GSM signal
+   *   12 = battery %
+   *   13 = pedometer (cumulative step count)
+   *   14 = tumbling count
+   *   15 = ? (e.g. 00000001)
+   */
+  steps?: string;
+  tumbling?: string;
 
   rawFields: string[];
 }
