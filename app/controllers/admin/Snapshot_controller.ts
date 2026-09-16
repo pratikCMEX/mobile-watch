@@ -73,13 +73,13 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
 }
 
 // Get all snapshots (admin view) - all devices with pagination
-// Also supports search by id or imei in body
+// Also supports search by id, imei, or search parameter (searches both id and imei)
 async function getAllSnapshots(req: Request, res: Response, next: NextFunction) {
   try {
     const body = req.body || {};
-    const { id, imei, page = 1, limit = 20 } = body;
+    const { id, imei, search, page = 1, limit = 20 } = body;
 
-    console.log("getAllSnapshots request body:", { id, imei, page, limit });
+    console.log("getAllSnapshots request body:", { id, imei, search, page, limit });
 
     const offset = (Number(page) - 1) * Number(limit);
 
@@ -137,7 +137,17 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
     }
 
     // Otherwise, return all snapshots with pagination
+    // If search parameter is provided, search by both id and imei
+    const where: any = {};
+    if (search && search !== "") {
+      where[Op.or] = [
+        { id: { [Op.like]: `%${search}%` } },
+        { "$DeviceSnapshot.imei$": { [Op.like]: `%${search}%` } },
+      ];
+    }
+
     const { count, rows } = await db.Snapshot.findAndCountAll({
+      where,
       include: [
         {
           model: db.Device,
