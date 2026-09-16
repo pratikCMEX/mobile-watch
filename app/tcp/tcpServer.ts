@@ -3534,6 +3534,7 @@ class TcpServer {
       await dbRef.set({
         latitude,
         longitude,
+        recorded_at: new Date().toISOString(),
       });
 
       Logging.info(
