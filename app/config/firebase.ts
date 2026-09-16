@@ -1,5 +1,6 @@
 const admin = require("firebase-admin");
 const { getMessaging } = require("firebase-admin/messaging");
+const { getDatabase } = require("firebase-admin/database");
 import path from "path";
 import Logging from "../library/Logging";
 
@@ -19,6 +20,7 @@ const serviceAccount = require(path.join(
 if (!firebase.getApps().length) {
   firebase.initializeApp({
     credential: firebase.cert(serviceAccount),
+    databaseURL: `https://${serviceAccount.project_id}-default-rtdb.firebaseio.com`,
   });
   /**
    * Surface the credential's project_id in the logs at startup.
@@ -39,5 +41,12 @@ if (!firebase.getApps().length) {
  */
 const messaging = () => getMessaging();
 
-export { getMessaging, messaging };
+/**
+ * firebase-admin v14 moved `database()` off the main namespace into the
+ * `firebase-admin/database` sub-module.  This wrapper keeps the rest of the
+ * codebase calling `database()` as before while using the correct v14 API.
+ */
+const database = () => getDatabase();
+
+export { getMessaging, messaging, getDatabase, database };
 export default firebase;

@@ -4,6 +4,7 @@ import fs from "fs";
 import Logging from "../library/Logging";
 import { buildServerPortalCommand } from "./protocol";
 import db from "../models";
+import { database } from "../config/firebase";
 import {
   createNotification,
   buildSosNotification,
@@ -1731,6 +1732,12 @@ class TcpServer {
       isValidFix
     );
     Logging.info(`${tag} step 6 OK: cacheLatestLocationOnDevice() completed`);
+
+    // Push the live location to Firebase Realtime Database so mobile
+    // apps can subscribe to real-time position updates.
+    Logging.info(`${tag} step 7: calling updateFirebaseLiveLocation()`);
+    await this.updateFirebaseLiveLocation(device.id, latitude, longitude);
+    Logging.info(`${tag} step 7 OK: updateFirebaseLiveLocation() completed`);
   }
 
   // ───────────────────────────────────────────────────────────
@@ -3498,6 +3505,45 @@ class TcpServer {
     return EARTH_RADIUS_METERS * c;
   }
 
+  /**
+   * Push the latest lat/lng to the Firebase Realtime Database so that
+   * mobile apps can subscribe to live location updates in real time.
+   *
+   * Firebase structure:
+   *
+   *   monitorimi
+   *   └── liveLocation
+   *       └── <device.id (UUID)>
+   *           ├── latitude
+   *           └── longitude
+   *
+   * This is a fire-and-forget call: any Firebase error is logged but
+   * never thrown, so a transient RTDB outage can never break the TCP
+   * location pipeline.
+   */
+  private async updateFirebaseLiveLocation(
+    deviceId: string,
+    latitude: number,
+    longitude: number
+  ): Promise<void> {
+    const tag = `[Firebase:${deviceId}]`;
+
+    try {
+      const dbRef = database().ref(`monitorimi/liveLocation/${deviceId}`);
+
+      await dbRef.set({
+        latitude,
+        longitude,
+      });
+
+      Logging.info(
+        `${tag} step OK: liveLocation updated | lat=${latitude} lng=${longitude}`
+      );
+    } catch (error: any) {
+      Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
+    }
+  }
+
   private async saveLocation(
     deviceId: string,
     location: GpsLocation,
@@ -3576,6 +3622,12 @@ class TcpServer {
       isValidFix
     );
     Logging.info(`${tag} step 6 OK: cacheLatestLocationOnDevice() completed`);
+
+    // Push the live location to Firebase Realtime Database so mobile
+    // apps can subscribe to real-time position updates.
+    Logging.info(`${tag} step 7: calling updateFirebaseLiveLocation()`);
+    await this.updateFirebaseLiveLocation(device.id, latitude, longitude);
+    Logging.info(`${tag} step 7 OK: updateFirebaseLiveLocation() completed`);
   }
 
   private async saveHeartRate(
