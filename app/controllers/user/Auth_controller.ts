@@ -6,7 +6,13 @@ import { Op } from "sequelize";
 import { generateAuthToken, deleteFile } from "../../helper/Helper";
 const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password, fcm_token, device_type } = req.body;
+    const {
+      email,
+      password,
+      fcm_token,
+      device_type,
+      force_login = true,
+    } = req.body;
 
     if (!email || !password) {
       return errorMessage(res, "Email and password are required", null);
