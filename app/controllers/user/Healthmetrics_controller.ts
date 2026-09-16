@@ -124,6 +124,9 @@ const getAnalytics = async (
       return errorMessage(res, "range must be one of: daily, weekly, monthly");
     }
 
+    const dbMetricType =
+      metric_type === "steps" ? "steps_cumulative" : metric_type;
+
     const device = await db.Device.findByPk(device_id);
     if (!device) {
       return errorMessage(res, "device_id does not match any existing device");
@@ -149,30 +152,11 @@ const getAnalytics = async (
       truncUnit = "week"; // one point per week across the month
     }
 
-    // Bucketed chart points (avg per bucket)
-    const chartRows: any[] = await db.sequelize.query(
-      `
-      SELECT date_trunc(:truncUnit, recorded_at) AS bucket,
-             AVG(value_primary) AS avg_primary,
-             AVG(value_secondary) AS avg_secondary
-      FROM "HealthMetrics"
-      WHERE device_id = :device_id
-        AND metric_type = :metric_type
-        AND recorded_at BETWEEN :start AND :end
-      GROUP BY bucket
-      ORDER BY bucket ASC
-      `,
-      {
-        replacements: { truncUnit, device_id, metric_type, start, end },
-        type: QueryTypes.SELECT,
-      }
-    );
-
     console.log(
       "device_id:",
       device_id,
       "metric_type:",
-      metric_type,
+      dbMetricType,
       "start:",
       start,
       "end:",
@@ -183,8 +167,8 @@ const getAnalytics = async (
     const readings = await db.HealthMetric.findAll({
       where: {
         device_id,
-        metric_type,
-        createdAt: { [Op.between]: [start, end] },
+        metric_type: dbMetricType,
+        recorded_at: { [Op.between]: [start, end] },
       },
       attributes: ["value_primary", "value_secondary", "unit", "recorded_at"],
       order: [["recorded_at", "DESC"]],
@@ -239,32 +223,54 @@ const getAnalytics = async (
       };
     }
 
-    // Last synced — most recent reading ever recorded, not limited to the window
-    const latest = await db.HealthMetric.findOne({
-      where: { device_id, metric_type },
-      order: [["recorded_at", "DESC"]],
-    });
+    let chart;
 
-    return successMessage(res, "Analytics fetched successfully", {
-      range,
-      // chart: chartRows.map((r) => ({
-      //   bucket: r.bucket,
-      //   value_primary:
-      //     r.avg_primary !== null
-      //       ? Math.round(Number(r.avg_primary) * 100) / 100
-      //       : null,
-      //   value_secondary:
-      //     r.avg_secondary !== null
-      //       ? Math.round(Number(r.avg_secondary) * 100) / 100
-      //       : null,
-      // })),
-      chart: readings.map((r: any) => ({
+    if (dbMetricType === "steps_cumulative") {
+      // Cumulative counter — chart the steps taken WITHIN each bucket
+      // (max - min of the running total in that bucket), not the raw value.
+      const stepBuckets: any[] = await db.sequelize.query(
+        `
+        SELECT date_trunc(:truncUnit, recorded_at) AS bucket,
+               (MAX(value_primary) - MIN(value_primary)) AS steps,
+               MAX(unit) AS unit
+        FROM "HealthMetrics"
+        WHERE device_id = :device_id
+          AND metric_type = :dbMetricType
+          AND recorded_at BETWEEN :start AND :end
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        `,
+        {
+          replacements: { truncUnit, device_id, dbMetricType, start, end },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      chart = stepBuckets.map((r: any) => ({
+        value_primary: Number(r.steps) || 0,
+        value_secondary: null,
+        unit: r.unit,
+        bucket: r.bucket,
+      }));
+    } else {
+      chart = readings.map((r: any) => ({
         value_primary: Number(r.value_primary),
         value_secondary:
           r.value_secondary !== null ? Number(r.value_secondary) : null,
         unit: r.unit,
         bucket: r.recorded_at,
-      })),
+      }));
+    }
+
+    // Last synced — most recent reading ever recorded, not limited to the window
+    const latest = await db.HealthMetric.findOne({
+      where: { device_id, metric_type: dbMetricType },
+      order: [["recorded_at", "DESC"]],
+    });
+
+    return successMessage(res, "Analytics fetched successfully", {
+      range,
+      chart,
       summary,
       last_synced: latest?.recorded_at ?? null,
     });
