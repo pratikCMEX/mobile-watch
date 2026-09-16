@@ -12,6 +12,7 @@ import Admin_Auth_controller from "../controllers/admin/Auth_controller";
 import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
 import Notification_controller from "../controllers/admin/Notification_controller";
 import Staff_controller from "../controllers/admin/Staff_controller";
+import Contact_controller from "../controllers/admin/Contact_controller";
 const router = express.Router();
 
 // Dashboard stats
@@ -271,6 +272,20 @@ router.post(
   adminOnly,
   ValidateJoi(Schemas.staff.loginLogs),
   Staff_controller.staffLoginLogs
+);
+
+// Emergency contacts and device phonebook routes
+router.post(
+  "/get_all_emergency_contacts",
+  checkAdmin,
+  ValidateJoi(Schemas.getAllEmergencyContacts),
+  Contact_controller.getAllEmergencyContacts
+);
+router.post(
+  "/get_all_device_phonebook",
+  checkAdmin,
+  ValidateJoi(Schemas.getAllDevicePhonebook),
+  Contact_controller.getAllDevicePhonebook
 );
 
 module.exports = router;
