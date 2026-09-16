@@ -216,6 +216,7 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
       last_location: formatLocation(lastLocation),
       health_overview: healthOverview,
       all_devices: firstDevice,
+      overview,
     });
   } catch (err) {
     console.error("getHome error:", err);
