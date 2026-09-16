@@ -45,8 +45,8 @@ export const Schemas = {
       .messages({ "any.only": "Passwords do not match" }),
   }),
   getAllSnapshots: Joi.object({
-    page: Joi.number().integer().min(1).optional(),
-    limit: Joi.number().integer().min(1).optional(),
+    page: Joi.number().integer().min(1).optional().default(1),
+    limit: Joi.number().integer().min(1).optional().default(20),
     id: Joi.string().optional().allow(null),
     imei: Joi.string().optional().allow(null),
   }),

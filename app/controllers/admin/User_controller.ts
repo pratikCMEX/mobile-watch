@@ -16,7 +16,9 @@ async function createUser(req: Request, res: Response, next: NextFunction) {
     if (!name || !email || !password) {
       return errorMessage(res, "Name, email and password are required");
     }
-    const existing = await db.User.findOne({ where: { email } });
+    const existing = await db.User.findOne({ 
+      where: { email, deletedAt: null } 
+    });
     if (existing) {
       return errorMessage(res, "A user with this email already exists");
     }
@@ -61,6 +63,7 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
       whereCondition[Op.or] = [
         { name: { [Op.iLike]: `%${search}%` } },
         { email: { [Op.iLike]: `%${search}%` } },
+        { phone_number: { [Op.iLike]: `%${search}%` } },
       ];
     }
 
