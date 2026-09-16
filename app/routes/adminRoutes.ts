@@ -65,7 +65,7 @@ router.post(
 router.delete(
   "/delete_geofence",
   checkAdmin,
-  ValidateJoi(Schemas.geofence.delete, "params"),
+  ValidateJoi(Schemas.geofence.delete),
   Geofence_controller.deleteGeofence
 );
 
