@@ -76,7 +76,7 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
 // Delete health metric by ID
 async function deleteHealthMetric(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const { id } = req.body;
 
     if (!id) {
       return errorMessage(res, "Health metric ID is required");

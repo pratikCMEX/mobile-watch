@@ -103,9 +103,9 @@ router.post(
   Health_controller.getAllHealthMetrics
 );
 router.delete(
-  "/delete_health_metric/:id",
+  "/delete_health_metric",
   checkAdmin,
-  ValidateJoi(Schemas.deleteHealthMetric, "params"),
+  ValidateJoi(Schemas.deleteHealthMetric),
   Health_controller.deleteHealthMetric
 );
 router.post(
