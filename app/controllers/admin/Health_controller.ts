@@ -149,8 +149,9 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
       where.id = id;
     }
 
-    // If metric_type is provided and not empty, filter by metric_type
-    if (metric_type && metric_type !== "") {
+    // If metric_type is provided and not empty/null, filter by metric_type
+    // If metric_type is null or empty string, return all metric types
+    if (metric_type && metric_type !== "" && metric_type !== null) {
       where.metric_type = metric_type;
     }
 
