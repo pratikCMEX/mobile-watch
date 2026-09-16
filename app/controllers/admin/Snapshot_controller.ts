@@ -83,58 +83,57 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
 
     const offset = (Number(page) - 1) * Number(limit);
 
-    // If id or imei is provided, use search logic
-    if (id || imei) {
-      if (id) {
-        const snapshot = await db.Snapshot.findOne({
-          where: { id: id as string },
-          include: [
-            {
-              model: db.Device,
-              as: "DeviceSnapshot",
-              attributes: ["id", "imei", "device_name", "owner_id"],
-            },
-          ],
-        });
-
-        if (!snapshot) {
-          return errorMessage(res, "Snapshot not found");
-        }
-
-        return successMessage(res, "Snapshot retrieved successfully", snapshot);
-      }
-
-      if (imei) {
-        const device = await db.Device.findOne({
-          where: { imei: imei as string },
-          attributes: ["id", "imei", "device_name"],
-        });
-
-        if (!device) {
-          return errorMessage(res, "Device not found with this IMEI");
-        }
-
-        const snapshots = await db.Snapshot.findAll({
-          where: { device_id: device.id },
-          attributes: ["id", "device_id", "image_url", "captured_at", "createdAt", "updatedAt"],
-          order: [["captured_at", "DESC"]],
-        });
-
-        // Add base URL to image URLs
-        const snapshotsWithFullUrl = snapshots.map((snap: any) => ({
-          ...snap.toJSON(),
-          image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
-        }));
-
-        return successMessage(res, "Snapshots retrieved successfully", {
-          device: {
-            id: device.id,
-            imei: device.imei,
-            device_name: device.device_name,
+    // If id is provided, use search logic
+    if (id) {
+      const snapshot = await db.Snapshot.findOne({
+        where: { id: id as string },
+        include: [
+          {
+            model: db.Device,
+            as: "DeviceSnapshot",
+            attributes: ["id", "imei", "device_name", "owner_id"],
           },
-          snapshots: snapshotsWithFullUrl,
-        });
+        ],
+      });
+
+      if (!snapshot) {
+        return errorMessage(res, "Snapshot not found");
       }
+
+      return successMessage(res, "Snapshot retrieved successfully", snapshot);
+    }
+
+    // If imei is provided, use search logic
+    if (imei && imei !== "") {
+      const device = await db.Device.findOne({
+        where: { imei: imei as string },
+        attributes: ["id", "imei", "device_name"],
+      });
+
+      if (!device) {
+        return errorMessage(res, "Device not found with this IMEI");
+      }
+
+      const snapshots = await db.Snapshot.findAll({
+        where: { device_id: device.id },
+        attributes: ["id", "device_id", "image_url", "captured_at", "createdAt", "updatedAt"],
+        order: [["captured_at", "DESC"]],
+      });
+
+      // Add base URL to image URLs
+      const snapshotsWithFullUrl = snapshots.map((snap: any) => ({
+        ...snap.toJSON(),
+        image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
+      }));
+
+      return successMessage(res, "Snapshots retrieved successfully", {
+        device: {
+          id: device.id,
+          imei: device.imei,
+          device_name: device.device_name,
+        },
+        snapshots: snapshotsWithFullUrl,
+      });
     }
 
     // Otherwise, return all snapshots with pagination
