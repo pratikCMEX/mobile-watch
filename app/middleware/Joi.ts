@@ -47,8 +47,9 @@ export const Schemas = {
   getAllSnapshots: Joi.object({
     page: Joi.number().integer().min(1).optional().default(1),
     limit: Joi.number().integer().min(1).optional().default(20),
-    id: Joi.string().optional().allow(null),
-    imei: Joi.string().optional().allow(null),
+    id: Joi.string().optional().allow(null, ""),
+    imei: Joi.string().optional().allow(null, ""),
+    search: Joi.string().optional().allow(null, ""),
   }),
   getDeviceLocation: Joi.object({
     imei: Joi.string().required(),
