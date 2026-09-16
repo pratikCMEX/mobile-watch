@@ -103,7 +103,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
       return successMessage(res, "Snapshot retrieved successfully", snapshot);
     }
 
-    // If imei is provided, use search logic
+    // If imei is provided, use search logic with pagination
     if (imei && imei !== "") {
       const device = await db.Device.findOne({
         where: { imei: imei as string },
@@ -114,25 +114,37 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
         return errorMessage(res, "Device not found with this IMEI");
       }
 
-      const snapshots = await db.Snapshot.findAll({
-        where: { device_id: device.id },
+      const where: any = { device_id: device.id };
+
+      const { count, rows } = await db.Snapshot.findAndCountAll({
+        where,
+        include: [
+          {
+            model: db.Device,
+            as: "DeviceSnapshot",
+            attributes: ["id", "imei", "device_name"],
+          },
+        ],
         attributes: ["id", "device_id", "image_url", "captured_at", "createdAt", "updatedAt"],
         order: [["captured_at", "DESC"]],
+        limit: Number(limit),
+        offset,
       });
 
       // Add base URL to image URLs
-      const snapshotsWithFullUrl = snapshots.map((snap: any) => ({
+      const snapshotsWithFullUrl = rows.map((snap: any) => ({
         ...snap.toJSON(),
         image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
       }));
 
       return successMessage(res, "Snapshots retrieved successfully", {
-        device: {
-          id: device.id,
-          imei: device.imei,
-          device_name: device.device_name,
-        },
         snapshots: snapshotsWithFullUrl,
+        pagination: {
+          total: count,
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: Math.ceil(count / Number(limit)),
+        },
       });
     }
 
