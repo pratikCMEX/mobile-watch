@@ -62,7 +62,20 @@ const limiter = rateLimit({
 });
 app.use("/api", limiter);
 
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+// helmet() defaults to Cross-Origin-Resource-Policy: same-origin, which
+// blocks the admin frontend (served from a different origin/port) from
+// loading these images at all — the browser reports it as
+// net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin. CORS above already allows
+// any origin, so relax this specifically for uploaded assets, which are
+// meant to be publicly embeddable.
+app.use(
+  "/uploads",
+  (_req, res, next) => {
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    next();
+  },
+  express.static(path.join(__dirname, "../uploads"))
+);
 
 // ─── HTTP Request Logger (Morgan → File) ────────────────────────
 const logsDir = path.join(__dirname, "../logs");
