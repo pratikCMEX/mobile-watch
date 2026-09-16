@@ -1053,6 +1053,63 @@ const sendDeviceCommand = async (
     return errorMessage(res, "Error sending command to device");
   }
 };
+const findDevice = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { serial_number } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const tcpClient = tcpServer.getDevice(serial_number);
+
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendFindCommand(serial_number);
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send find device command. Device may be disconnected."
+      );
+    }
+
+    const commandProtocol = `[3G*${serial_number}*0004*FIND]`;
+
+    Logging.info(
+      `Find device command sent to device ${serial_number} (device_id: ${device.id})`
+    );
+
+    return successMessage(res, "Find device command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      command_sent: true,
+      command_message:
+        "FIND command sent to device. The device will respond with its location or alert.",
+      command_protocol: commandProtocol,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("findDevice error:", err);
+    return errorMessage(res, "Error sending find device command");
+  }
+};
 export default {
   createDevice,
   updateDevice,
@@ -1069,4 +1126,5 @@ export default {
   deleteMultipleDevices,
   changeServerPortal,
   sendDeviceCommand,
+  findDevice,
 };
