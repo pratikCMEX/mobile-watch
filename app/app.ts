@@ -62,21 +62,7 @@ const limiter = rateLimit({
 });
 app.use("/api", limiter);
 
-// app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
-
-app.use(
-  "/uploads",
-  (req, res, next) => {
-    const filePath = path.join(__dirname, "uploads", req.path);
-    // ✅ Dynamically determine MIME type
-    // const contentType = mime.lookup(filePath) || "application/octet-stream";
-
-    // res.setHeader("Cache-Control", "public, max-age=86400"); // ✅ Cache for 24 hours
-    // res.setHeader("Content-Type", contentType); // ✅ Set correct Content-Type
-    next();
-  },
-  express.static(path.join(__dirname, "uploads"))
-);
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // ─── HTTP Request Logger (Morgan → File) ────────────────────────
 const logsDir = path.join(__dirname, "../logs");
