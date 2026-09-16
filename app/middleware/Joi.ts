@@ -63,7 +63,10 @@ export const Schemas = {
   getHealthMetricsGraph: Joi.object({
     imei: Joi.string().optional().allow(null, ""),
     id: Joi.string().optional().allow(null, ""),
-    period: Joi.string().valid("daily", "weekly", "monthly").optional().allow(null, ""),
+    period: Joi.string()
+      .valid("daily", "weekly", "monthly")
+      .optional()
+      .allow(null, ""),
     date: Joi.date().optional().allow(null),
   }),
   getAllNotifications: Joi.object({
@@ -96,13 +99,14 @@ export const Schemas = {
   assignDeviceToUser: Joi.object({
     device_id: Joi.string().required(),
     user_id: Joi.string().required(),
-    device_name: Joi.string().required(), 
+    device_name: Joi.string().required(),
   }),
   login: Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().required(),
     fcm_token: Joi.string().optional().allow(""),
     device_type: Joi.string().optional().allow(""),
+    force_login: Joi.boolean().optional().allow(false),
   }),
   user: {
     create: Joi.object({
