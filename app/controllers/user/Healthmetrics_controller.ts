@@ -269,10 +269,11 @@ const getAnalytics = async (
 
       chart = stepBuckets.map((r: any) => {
         const current = Number(r.value_primary);
-        const steps = prevCumulative !== null ? current - prevCumulative : 0;
+        const steps =
+          prevCumulative !== null ? current - prevCumulative : current;
         prevCumulative = current;
         return {
-          value_primary: steps < 0 ? 0 : steps, // guard against counter resets
+          value_primary: steps < 0 ? 0 : steps,
           value_secondary: null,
           unit: r.unit,
           bucket: r.bucket,
