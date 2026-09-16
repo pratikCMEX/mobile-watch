@@ -32,10 +32,9 @@ async function adminLogin(req: Request, res: Response, next: NextFunction) {
       name: admin.username,
     });
 
-    admin.session_token = token;
+    admin.session_token = "DSDSDWWEWASASASASASASASASASASA";
     await admin.save();
 
-    
     res.setHeader("Authorization", `Bearer ${token}`);
     res.setHeader("Access-Control-Expose-Headers", "Authorization");
 
