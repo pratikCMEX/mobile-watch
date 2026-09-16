@@ -395,28 +395,49 @@ const getTodaySteps = async (
     const start = startOfDay(now);
     const end = endOfDay(now);
 
-    // All cumulative step readings recorded today, oldest first.
-    const readings = await db.HealthMetric.findAll({
+    // With the upsert logic in the TCP server, there is at most one
+    // steps_cumulative row per device per calendar date. Fetch today's
+    // row (if any) and the most recent row from before today so we can
+    // compute the delta (total steps walked today).
+    const todayRecord = await db.HealthMetric.findOne({
       where: {
         device_id,
         metric_type: "steps_cumulative",
         recorded_at: { [Op.between]: [start, end] },
       },
       attributes: ["value_primary", "recorded_at"],
-      order: [["recorded_at", "ASC"]],
+      order: [["recorded_at", "DESC"]],
+    });
+
+    // Latest cumulative reading from before today (yesterday's tail).
+    const previousRecord = await db.HealthMetric.findOne({
+      where: {
+        device_id,
+        metric_type: "steps_cumulative",
+        recorded_at: { [Op.lt]: start },
+      },
+      attributes: ["value_primary", "recorded_at"],
+      order: [["recorded_at", "DESC"]],
     });
 
     let totalSteps = 0;
     let lastRecordedAt: Date | null = null;
 
-    if (readings.length > 0) {
-      const firstValue = Number(readings[0].value_primary);
-      const lastValue = Number(readings[readings.length - 1].value_primary);
-      lastRecordedAt = readings[readings.length - 1].recorded_at;
+    if (todayRecord) {
+      const todayValue = Number(todayRecord.value_primary);
+      lastRecordedAt = todayRecord.recorded_at;
 
-      // If the pedometer reset (last < first), the total for today is
-      // just the latest value. Otherwise it's the delta.
-      totalSteps = lastValue < firstValue ? lastValue : lastValue - firstValue;
+      if (previousRecord) {
+        const prevValue = Number(previousRecord.value_primary);
+        // If the pedometer reset (today < previous), the total for
+        // today is just today's value. Otherwise it's the delta.
+        totalSteps =
+          todayValue < prevValue ? todayValue : todayValue - prevValue;
+      } else {
+        // No previous record — assume the watch reset at midnight,
+        // so today's cumulative value IS the daily total.
+        totalSteps = todayValue;
+      }
     }
 
     return successMessage(res, "Today's step count fetched successfully", {

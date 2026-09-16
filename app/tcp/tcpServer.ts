@@ -3560,11 +3560,16 @@ class TcpServer {
 
   /**
    * Persist the pedometer (cumulative step count) and tumbling count
-   * from a UD_LTE packet as HealthMetric rows.
+   * from a UD_LTE packet as a HealthMetric row.
    *
    * The pedometer value is cumulative (keeps increasing), so we store
    * it as metric_type "steps_cumulative". The tumbling count is stored
    * in value_secondary.
+   *
+   * Upsert logic: if a steps_cumulative record already exists for the
+   * same device and the same calendar date, update that row in place
+   * (the pedometer only goes up, so the latest value is always the
+   * most accurate). If the date is different, insert a new row.
    *
    * Errors are caught and logged — a failure to save steps must never
    * break the location pipeline.
@@ -3585,20 +3590,55 @@ class TcpServer {
         return;
       }
 
-      await db.HealthMetric.create({
-        device_id: deviceId,
-        metric_type: "steps_cumulative",
-        value_primary: steps,
-        value_secondary: !isNaN(tumbling) ? tumbling : null,
-        unit: "steps",
-        recorded_at: recordedAt,
+      const dateStr = recordedAt.toISOString().split("T")[0];
+
+      // Look for an existing steps_cumulative row for the same device
+      // and the same calendar date.
+      const existing = await db.HealthMetric.findOne({
+        where: {
+          device_id: deviceId,
+          metric_type: "steps_cumulative",
+          [db.Sequelize.Op.and]: db.sequelize.where(
+            db.sequelize.fn("DATE", db.sequelize.col("recorded_at")),
+            "=",
+            dateStr
+          ),
+        },
       });
 
-      Logging.info(
-        `${tag} OK: steps_cumulative=${steps} tumbling=${
-          !isNaN(tumbling) ? tumbling : "n/a"
-        }`
-      );
+      if (existing) {
+        // Same date — update the existing row with the latest cumulative
+        // value (the pedometer only increases, so the newest reading is
+        // always the highest for that day).
+        await existing.update({
+          value_primary: steps,
+          value_secondary: !isNaN(tumbling) ? tumbling : null,
+          unit: "steps",
+          recorded_at: recordedAt,
+        });
+
+        Logging.info(
+          `${tag} OK (updated): steps_cumulative=${steps} tumbling=${
+            !isNaN(tumbling) ? tumbling : "n/a"
+          }`
+        );
+      } else {
+        // Different date — insert a new row.
+        await db.HealthMetric.create({
+          device_id: deviceId,
+          metric_type: "steps_cumulative",
+          value_primary: steps,
+          value_secondary: !isNaN(tumbling) ? tumbling : null,
+          unit: "steps",
+          recorded_at: recordedAt,
+        });
+
+        Logging.info(
+          `${tag} OK (created): steps_cumulative=${steps} tumbling=${
+            !isNaN(tumbling) ? tumbling : "n/a"
+          }`
+        );
+      }
     } catch (error: any) {
       Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
     }
