@@ -366,12 +366,12 @@ const getHealthOverview = async (
     const totalCalories = Number((stepsToday * 0.04).toFixed(2));
 
     overview["distance"] = {
-      value: totalDistanceKm,
+      latest: totalDistanceKm,
       unit: "km",
     };
 
     overview["calories"] = {
-      value: totalCalories,
+      latest: totalCalories,
       unit: "kcal",
     };
 
