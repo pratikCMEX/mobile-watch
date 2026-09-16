@@ -85,7 +85,7 @@ router.post(
   Monitor_controller.getDeviceLocation
 );
 router.get("/get_all_imei", checkAdmin, Device_controller.getAllDeviceImei);
-router.delete(
+router.post(
   "/delete_snapshot",
   checkAdmin,
   Snapshot_controller.deleteSnapshot
@@ -102,7 +102,7 @@ router.post(
   ValidateJoi(Schemas.getAllHealthMetrics),
   Health_controller.getAllHealthMetrics
 );
-router.delete(
+router.post(
   "/delete_health_metric",
   checkAdmin,
   ValidateJoi(Schemas.deleteHealthMetric),
