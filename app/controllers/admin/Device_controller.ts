@@ -753,10 +753,13 @@ const assignDeviceToUser = async function (
   next: NextFunction
 ) {
   try {
-    const { device_id, user_id,device_name } = req.body;
+    const { device_id, user_id, device_name } = req.body;
 
     if (!device_id || !user_id || !device_name) {
-      return errorMessage(res, "device_id, user_id and device_name are required");
+      return errorMessage(
+        res,
+        "device_id, user_id and device_name are required"
+      );
     }
 
     const device = await db.Device.findOne({ where: { id: device_id } });
@@ -852,6 +855,204 @@ const changeServerPortal = async function (
   }
 };
 
+const COMMAND_TYPES = {
+  RESTART: 1,
+  SHUTDOWN: 2,
+  FACTORY_RESET: 3,
+} as const;
+
+const COMMAND_NAMES: Record<number, string> = {
+  [COMMAND_TYPES.RESTART]: "restart",
+  [COMMAND_TYPES.SHUTDOWN]: "shutdown",
+  [COMMAND_TYPES.FACTORY_RESET]: "factory_reset",
+};
+const sendDeviceCommand = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, command } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (command === undefined || command === null) {
+      return errorMessage(res, "command is required");
+    }
+
+    // Validate command type
+    const validCommands = [
+      COMMAND_TYPES.RESTART,
+      COMMAND_TYPES.SHUTDOWN,
+      COMMAND_TYPES.FACTORY_RESET,
+    ];
+    if (!validCommands.includes(command)) {
+      return errorMessage(
+        res,
+        "Invalid command. Must be 1 (restart), 2 (shutdown), or 3 (factory_reset)"
+      );
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    const tcpClient = tcpServer.getDevice(serial_number);
+
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    let commandSent = false;
+    let commandMessage = "";
+    let commandProtocol = "";
+
+    // Send appropriate command based on type
+    switch (command) {
+      case COMMAND_TYPES.RESTART:
+        commandSent = tcpServer.sendRestartCommand(serial_number);
+        commandMessage =
+          "RESET command sent to device. The device will restart and reconnect.";
+        commandProtocol = `[3G*${serial_number}*0005*RESET]`;
+        break;
+
+      case COMMAND_TYPES.SHUTDOWN:
+        commandSent = tcpServer.sendShutdownCommand(serial_number);
+        commandMessage =
+          "POWEROFF command sent to device. The device will shut down.";
+        commandProtocol = `[CS*${serial_number}*0008*POWEROFF]`;
+        break;
+
+      case COMMAND_TYPES.FACTORY_RESET:
+        commandSent = tcpServer.sendFactoryCommand(serial_number);
+        commandMessage =
+          "FACTORY command sent to device. The device will perform a factory reset.";
+        commandProtocol = `[CS*${serial_number}*0007*FACTORY]`;
+
+        // ── Remove all device data from the database ──────────
+        // A factory reset wipes the watch clean; mirror that on the
+        // server so stale data does not linger.
+        try {
+          Logging.info(
+            `Factory reset: removing all data for device ${serial_number} (device_id: ${device.id})`
+          );
+
+          await db.DeviceSetting.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.DeviceMember.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Location.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Geofence.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.EmergencyContact.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.HealthMetric.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Snapshot.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Notification.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.DeviceSilenceTime.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.DevicePhonebook.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.DeviceAutoAnswer.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.Reminder.destroy({
+            where: { device_id: device.id },
+          });
+
+          await db.FamilyMember.destroy({
+            where: { device_id: device.id },
+          });
+
+          // Finally remove the device row itself.
+          await db.Device.destroy({
+            where: { id: device.id },
+          });
+
+          Logging.info(
+            `Factory reset: all data removed for device ${serial_number}`
+          );
+        } catch (cleanupErr) {
+          console.error(
+            `Factory reset cleanup error for device ${serial_number}:`,
+            cleanupErr
+          );
+          Logging.error(
+            `Failed to cleanup device data for ${serial_number}: ${
+              (cleanupErr as Error).message
+            }`
+          );
+        }
+        break;
+    }
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send command. Device may be disconnected."
+      );
+    }
+
+    Logging.info(
+      `${COMMAND_NAMES[command]} command sent to device ${serial_number} (device_id: ${device.id})`
+    );
+
+    return successMessage(
+      res,
+      `${COMMAND_NAMES[command]} command sent successfully`,
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        command,
+        command_name: COMMAND_NAMES[command],
+        command_sent: true,
+        command_message: commandMessage,
+        command_protocol: commandProtocol,
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err) {
+    console.error("sendDeviceCommand error:", err);
+    return errorMessage(res, "Error sending command to device");
+  }
+};
 export default {
   createDevice,
   updateDevice,
@@ -867,4 +1068,5 @@ export default {
   getAllDeviceImei,
   deleteMultipleDevices,
   changeServerPortal,
+  sendDeviceCommand,
 };
