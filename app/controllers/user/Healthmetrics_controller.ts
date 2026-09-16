@@ -300,7 +300,7 @@ const getHealthOverview = async (
       "calories",
       "temperature",
       "distance",
-      "steps_daily",
+      // "steps_daily",
     ];
 
     const overview: any = {};
