@@ -98,20 +98,12 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
 };
 async function updateUser(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id, name, email, password, phone_number, country_code } = req.body;
-    if (!email) {
-      return errorMessage(res, "Email is required");
-    }
-    const existing = await db.User.findOne({
-      where: { email, id: { [Op.ne]: id } },
-    });
-    if (existing) {
-      return errorMessage(res, "A user with this email already exists");
+    const { id, name, password, phone_number, country_code } = req.body;
+    if (!id) {
+      return errorMessage(res, "User ID is required");
     }
 
-    const updateData: any = {
-      email,
-    };
+    const updateData: any = {};
 
     if (name) updateData.name = name;
     if (phone_number) updateData.phone_number = phone_number;
