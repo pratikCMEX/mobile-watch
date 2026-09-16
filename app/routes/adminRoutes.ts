@@ -86,11 +86,7 @@ router.post(
   Monitor_controller.getDeviceLocation
 );
 router.get("/get_all_imei", checkAdmin, Device_controller.getAllDeviceImei);
-router.post(
-  "/delete_snapshot",
-  checkAdmin,
-  Snapshot_controller.deleteSnapshot
-);
+router.post("/delete_snapshot", checkAdmin, Snapshot_controller.deleteSnapshot);
 router.post(
   "/delete_multiple_snapshots",
   checkAdmin,
@@ -147,6 +143,12 @@ router.post(
 );
 // router.post("/delete_multiple", checkAdmin, ValidateJoi(Schemas.deleteMultipleItems), Delete_controller.deleteMultipleItems);
 
+router.post(
+  "/device_command",
+  checkAdmin,
+  ValidateJoi(Schemas.deviceCommand.send),
+  Device_controller.sendDeviceCommand
+);
 // User management routes
 router.post(
   "/create_user",
