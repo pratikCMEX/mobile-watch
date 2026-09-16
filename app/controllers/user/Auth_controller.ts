@@ -37,7 +37,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
       where: { owner_id: user.id },
       order: [["createdAt", "ASC"]],
     });
-    if (!firstDevice) {
+    if (firstDevice.length === 0) {
       return errorMessage(res, "Device not registered", 200);
     }
     const token = await generateAuthToken(user);
