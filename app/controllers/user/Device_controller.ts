@@ -8,6 +8,7 @@ import {
 } from "../../library/Response";
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
+import { buildServerPortalCommand } from "../../tcp/protocol";
 import Device from "../../models/Device";
 import DeviceSetting from "../../models/DeviceSetting";
 

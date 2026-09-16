@@ -79,16 +79,38 @@ const voice = multer.diskStorage({
 });
 
 const audioOnlyFilter = (req: any, file: any, cb: any) => {
-  const allowed = [
+  // The server transcodes whatever it receives to AMR-NB before
+  // sending it to the watch (see AudioConverter.ensureAmrNarrowband),
+  // so any real audio format is acceptable here — this filter only
+  // exists to reject obviously-wrong uploads (images, PDFs, etc).
+  // iOS records .m4a (AAC) by default, hence the extra extensions/
+  // mimetypes beyond plain AMR.
+  const allowedMimetypes = [
     "audio/amr",
     "audio/mpeg",
     "audio/mp3",
+    "audio/mp4",
+    "audio/x-m4a",
+    "audio/m4a",
+    "audio/aac",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/3gpp",
     "application/octet-stream",
   ];
-  if (
-    allowed.includes(file.mimetype) ||
-    file.originalname.toLowerCase().endsWith(".amr")
-  ) {
+  const allowedExtensions = [
+    ".amr",
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".aac",
+    ".wav",
+    ".3gp",
+    ".caf",
+  ];
+  const ext = path.extname(file.originalname).toLowerCase();
+
+  if (allowedMimetypes.includes(file.mimetype) || allowedExtensions.includes(ext)) {
     return cb(null, true);
   }
   return cb(new Error("Only AMR/audio files are allowed"));

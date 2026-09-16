@@ -5,6 +5,7 @@ import Logging from "../../library/Logging";
 import { deleteFile, unlinkUploadedFiles } from "../../helper/Helper";
 import { Op } from "sequelize";
 import { tcpServer } from "../../app";
+import { ensureAmrNarrowband } from "../../library/AudioConverter";
 
 const createDevice = async function (
   req: Request,
@@ -277,8 +278,24 @@ const sendVoiceMessage = async function (
       );
     }
 
-    // Read the uploaded AMR file as a Buffer
-    const amrBuffer = require("fs").readFileSync(voiceFile.path);
+    // Normalize to raw AMR-NB frames. iOS clients upload .m4a (AAC),
+    // not .amr — the watch firmware can't play that, so anything that
+    // isn't already narrowband AMR gets transcoded here.
+    let amrBuffer: Buffer;
+    try {
+      amrBuffer = await ensureAmrNarrowband(voiceFile.path);
+    } catch (conversionError: any) {
+      Logging.error(
+        `Voice message AMR conversion failed for device ${serial_number} ` +
+          `(file=${voiceFile.originalname}): ${
+            conversionError?.message || conversionError
+          }`
+      );
+      return errorMessage(
+        res,
+        "Could not process the uploaded audio file (unsupported format or conversion failure)"
+      );
+    }
 
     const commandSent = tcpServer.sendVoiceMessageCommand(
       serial_number as string,
@@ -294,15 +311,16 @@ const sendVoiceMessage = async function (
 
     Logging.info(
       `Voice message (TK) sent to device ${serial_number} ` +
-        `(file=${voiceFile.originalname}, size=${amrBuffer.length} bytes)`
+        `(uploaded_as=${voiceFile.originalname}, sent_as=AMR, sent_size=${amrBuffer.length} bytes)`
     );
 
     return successMessage(res, "Voice message sent successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
-      file_name: voiceFile.originalname,
-      file_size: amrBuffer.length,
+      uploaded_file_name: voiceFile.originalname,
+      sent_format: "amr (narrowband)",
+      sent_file_size: amrBuffer.length,
       command_sent: true,
       command_message:
         "TK command sent to device. The device will play the voice message.",
@@ -379,10 +397,25 @@ const sendReminder = async function (
         .toUpperCase();
     }
 
-    // Read voice file if provided
+    // Normalize voice file if provided. iOS clients upload .m4a (AAC),
+    // not .amr — same fix as sendVoiceMessage: convert to AMR-NB
+    // unless the upload is already narrowband AMR.
     let voiceBuffer: Buffer | null = null;
     if (voiceFile) {
-      voiceBuffer = require("fs").readFileSync(voiceFile.path);
+      try {
+        voiceBuffer = await ensureAmrNarrowband(voiceFile.path);
+      } catch (conversionError: any) {
+        Logging.error(
+          `Reminder voice AMR conversion failed for device ${serial_number} ` +
+            `(file=${voiceFile.originalname}): ${
+              conversionError?.message || conversionError
+            }`
+        );
+        return errorMessage(
+          res,
+          "Could not process the uploaded audio file (unsupported format or conversion failure)"
+        );
+      }
     }
 
     const commandSent = tcpServer.sendTakePillsCommand(
@@ -597,7 +630,13 @@ const listDevices = async function (
   next: NextFunction
 ) {
   try {
-    const { search = "", page = 1, limit = 20, connection_status, id } = req.body;
+    const {
+      search = "",
+      page = 1,
+      limit = 20,
+      connection_status,
+      id,
+    } = req.body;
 
     const offset = (page - 1) * limit;
 
@@ -735,6 +774,78 @@ const assignDeviceToUser = async function (
   }
 };
 
+const changeServerPortal = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, host, port } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number: serial_number },
+    });
+
+    if (!device) {
+      return errorMessage(res, `Device with imei '${serial_number}' not found`);
+    }
+
+    /**
+     * Store the pending server portal change on the device record.
+     * This is used both when the device is currently offline (the
+     * command is applied on next TCP connect) and when it is online
+     * (command is sent immediately and the stored value is cleared
+     * by the TCP server after a successful send).
+     */
+    await device.update({
+      server_host: host as string,
+      server_port: Number(port),
+    });
+
+    const tcpClient = tcpServer.getDevice(serial_number as string);
+    let commandSent = false;
+
+    if (tcpClient) {
+      commandSent = tcpServer.sendServerPortalCommand(
+        serial_number as string,
+        host as string,
+        Number(port)
+      );
+    }
+
+    Logging.info(
+      `Server portal change ${
+        commandSent ? "command sent" : "stored as pending"
+      } ` + `for device ${serial_number}: host=${host}, port=${port}`
+    );
+
+    return successMessage(
+      res,
+      "Server portal change request saved successfully",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        host: host as string,
+        port: Number(port),
+        command_sent: commandSent,
+        command_protocol: `[3G*${serial_number}*IP,${host},${port}]`,
+        note: commandSent
+          ? "Device will disconnect and reconnect to the new server after 5-8 minutes. Restart the device to expedite the switch. Verify the connection on the new server portal."
+          : "Device is currently offline. The server portal change will be applied when the device reconnects to the TCP server. Verify the connection on the new server portal after reconnection.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err) {
+    console.error("changeServerPortal error:", err);
+    return errorMessage(res, "Error changing server portal");
+  }
+};
+
 export default {
   createDevice,
   updateDevice,
@@ -749,4 +860,5 @@ export default {
   listDevices,
   getAllDeviceImei,
   deleteMultipleDevices,
+  changeServerPortal,
 };

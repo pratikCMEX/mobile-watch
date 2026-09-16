@@ -2,6 +2,7 @@ import net from "net";
 import path from "path";
 import fs from "fs";
 import Logging from "../library/Logging";
+import { buildServerPortalCommand } from "./protocol";
 import db from "../models";
 import {
   createNotification,
@@ -610,9 +611,7 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   private handleMessage(client: TcpClient, message: string): void {
-    Logging.info(
-      `GPS packet from ${client.id}: ${message.substring(0, 80)}...`
-    );
+    Logging.info(`GPS packet from ${client.id}: ${message}`);
 
     // Check if this is an image packet (contains binary JPEG data)
     // Image packets start with [3G*DEVICEID*LENGTH*img,
@@ -643,9 +642,7 @@ class TcpServer {
     const parsed = this.parsePacket(message);
 
     if (!parsed) {
-      Logging.error(
-        `Invalid GPS packet from ${client.id}: ${message.substring(0, 80)}`
-      );
+      Logging.error(`Invalid GPS packet from ${client.id}: ${message}`);
 
       return;
     }
@@ -678,7 +675,9 @@ class TcpServer {
      */
     switch (parsed.command) {
       case "LK":
-        this.handleHeartbeat(client, parsed);
+        this.handleHeartbeat(client, parsed).catch((error: Error) =>
+          Logging.error(`handleHeartbeat error: ${error.message}`)
+        );
         break;
 
       case "UD":
@@ -907,7 +906,10 @@ class TcpServer {
   // LK - Heartbeat
   // ───────────────────────────────────────────────────────────
 
-  private handleHeartbeat(client: TcpClient, packet: ParsedPacket): void {
+  private async handleHeartbeat(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): Promise<void> {
     Logging.info(
       `LK heartbeat received from device ${packet.deviceId}: ${packet.payload}`
     );
@@ -942,6 +944,50 @@ class TcpServer {
      * contributes to the device's health history.
      */
     const parts = packet.payload.split(",");
+
+    /**
+     * Check for a pending server portal change stored on the device
+     * record (set via the /admin/changeServerPortal API while the
+     * device was offline). If found, send the command and clear
+     * the pending fields.
+     */
+    try {
+      const device = await db.Device.findOne({
+        where: { imei: packet.deviceId },
+      });
+
+      if (device && device.server_host && device.server_port) {
+        const host = device.server_host;
+        const port = device.server_port;
+
+        Logging.info(
+          `[SERVER PORTAL] Pending server portal change found for device ${packet.deviceId}: host=${host}, port=${port}`
+        );
+
+        const command = buildServerPortalCommand(packet.deviceId, host, port);
+
+        if (command) {
+          this.send(client, command.packet);
+          Logging.info(
+            `[SERVER PORTAL] Pending command sent to device ${packet.deviceId}: ${command.packet}`
+          );
+
+          await device.update({
+            server_host: null,
+            server_port: null,
+          });
+          Logging.info(
+            `[SERVER PORTAL] Cleared pending server portal for device ${packet.deviceId}`
+          );
+        }
+      }
+    } catch (error: Error | any) {
+      Logging.error(
+        `[SERVER PORTAL] Failed to apply pending server portal for device ${
+          packet.deviceId
+        }: ${error?.message || error}`
+      );
+    }
   }
 
   // ───────────────────────────────────────────────────────────
@@ -3641,6 +3687,51 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Change reporting server (server portal)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send the vendor server-portal command.
+   *
+   * The watch does not acknowledge this command. It closes the current
+   * TCP session and reconnects to the requested host/port after its
+   * internal delay. Do not destroy the socket here: the write must be allowed
+   * to flush before the device performs the reconnect.
+   *
+   * @param deviceId Protocol device ID (serial number)
+   * @param host IP address or DNS name
+   * @param port TCP port number (1-65535)
+   */
+  public sendServerPortalCommand(
+    deviceId: string,
+    host: string,
+    port: number
+  ): boolean {
+    const command = buildServerPortalCommand(deviceId, host, port);
+    if (!command) {
+      Logging.error(
+        `Invalid server portal command for device ${deviceId}: host=${host}, port=${port}`
+      );
+      return false;
+    }
+
+    const client = this.devices.get(deviceId);
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot change server portal.`
+      );
+      return false;
+    }
+
+    Logging.info(
+      `Sending server portal command to device ${deviceId}: ${command.packet}`
+    );
+    this.send(client, command.packet);
+
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
   // Send Scene Mode command to device
   // ───────────────────────────────────────────────────────────
   // Request real-time body temperature from device
@@ -5466,20 +5557,29 @@ class TcpServer {
       return false;
     }
 
+    // NOTE: unlike the TAKEPILLS reminder-voice path below, TK does
+    // NOT strip the "#!AMR\n" file header — send the buffer exactly
+    // as given (matching the original, confirmed-working behavior
+    // for genuine AMR uploads from before AudioConverter existed).
+    // An earlier version of this code stripped it here defensively,
+    // which silently broke previously-working Android voice messages
+    // that the firmware apparently expects to include the header.
+    const rawAmr = amrBuffer;
+
     // Validate max duration: AMR is typically 8kHz or 16kHz, ~12.2 kbps
     // 15 seconds ≈ 23 KB at 12.2 kbps. We allow up to 64 KB as a safe
     // upper bound to avoid flooding the TCP socket.
     const MAX_AMR_BYTES = 64 * 1024;
-    if (amrBuffer.length > MAX_AMR_BYTES) {
+    if (rawAmr.length > MAX_AMR_BYTES) {
       Logging.error(
-        `Refusing to send TK to device ${deviceId}: AMR data is ${amrBuffer.length} bytes, max ${MAX_AMR_BYTES} allowed (≈15 seconds).`
+        `Refusing to send TK to device ${deviceId}: AMR data is ${rawAmr.length} bytes, max ${MAX_AMR_BYTES} allowed (≈15 seconds).`
       );
       return false;
     }
 
     // Escape the raw AMR bytes so special protocol bytes can travel
     // through the [ … ] delimited packet format.
-    const escapedAmr = escape(amrBuffer);
+    const escapedAmr = escape(rawAmr);
 
     // Build the content: "TK," + escaped AMR data
     const header = Buffer.from("TK,", "ascii");
@@ -5495,7 +5595,7 @@ class TcpServer {
 
     Logging.info(
       `Sending voice message (TK) to device ${deviceId} ` +
-        `(raw=${amrBuffer.length}B, escaped=${escapedAmr.length}B, total=${packet.length}B)`
+        `(raw=${rawAmr.length}B, escaped=${escapedAmr.length}B, total=${packet.length}B)`
     );
 
     this.send(client, packet);
