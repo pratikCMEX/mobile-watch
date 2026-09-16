@@ -24,4 +24,10 @@ router.get(
   Healthmetrics_controller.getHealthOverview
 );
 
+router.get(
+  "/today_steps/:device_id",
+  checkToken,
+  Healthmetrics_controller.getTodaySteps
+);
+
 module.exports = router;
