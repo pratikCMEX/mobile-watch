@@ -91,6 +91,20 @@ export const Schemas = {
 
     search: Joi.string().optional().allow(null, ""),
   }),
+  getAllEmergencyContacts: Joi.object({
+    device_id: Joi.string().optional().allow(null, ""),
+    imei: Joi.string().optional().allow(null, ""),
+    page: Joi.number().integer().min(1).optional().default(1),
+    limit: Joi.number().integer().min(1).optional().default(20),
+    search: Joi.string().optional().allow(null, ""),
+  }),
+  getAllDevicePhonebook: Joi.object({
+    device_id: Joi.string().optional().allow(null, ""),
+    imei: Joi.string().optional().allow(null, ""),
+    page: Joi.number().integer().min(1).optional().default(1),
+    limit: Joi.number().integer().min(1).optional().default(20),
+    search: Joi.string().optional().allow(null, ""),
+  }),
   deleteHealthMetric: Joi.object({
     id: Joi.string().required(),
   }),
