@@ -69,6 +69,14 @@ export const Schemas = {
       .allow(null, ""),
     date: Joi.date().optional().allow(null),
   }),
+  getAllNotifications: Joi.object({
+    device_id: Joi.string().optional().allow(null, ""),
+    imei: Joi.string().optional().allow(null, ""),
+    page: Joi.number().integer().min(1).optional().default(1),
+    limit: Joi.number().integer().min(1).optional().default(20),
+    type: Joi.string().optional().allow(null, ""),
+    is_read: Joi.boolean().optional().allow(null),
+  }),
   deleteHealthMetric: Joi.object({
     id: Joi.string().required(),
   }),
