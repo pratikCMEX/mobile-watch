@@ -32,9 +32,6 @@ async function adminLogin(req: Request, res: Response, next: NextFunction) {
       name: admin.username,
     });
 
-    admin.session_token = "DSDSDWWEWASASASASASASASASASASA";
-    await admin.save();
-
     res.setHeader("Authorization", `Bearer ${token}`);
     res.setHeader("Access-Control-Expose-Headers", "Authorization");
 
@@ -93,16 +90,6 @@ async function updatePassword(req: Request, res: Response, next: NextFunction) {
 
 async function logout(req: Request, res: Response, next: NextFunction) {
   try {
-    const adminId = (req as any).user?.id;
-
-    if (adminId) {
-      const admin = await db.Admin.findOne({ where: { id: adminId } });
-      if (admin) {
-        admin.session_token = "";
-        await admin.save();
-      }
-    }
-
     const allAdmins = await db.Admin.findAll({
       attributes: ["id", "username", "createdAt", "updatedAt"],
     });

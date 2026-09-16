@@ -14,7 +14,7 @@ if (!JWT_SECRET) {
   // verify" bugs when the env var name doesn't match between files.
   console.error(
     "FATAL: JWT_ENCRYPTION is not set in the environment. " +
-    "Token verification will always fail until this is fixed."
+      "Token verification will always fail until this is fixed."
   );
 }
 
@@ -97,7 +97,11 @@ export const checkToken = async (req: any, res: any, next: any) => {
 };
 
 // ─── Check Admin ───────────────────────────────────────────────
-export const checkAdmin = async (req: Request, res: Response, next: NextFunction) => {
+export const checkAdmin = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
     const token = extractToken(req);
 
@@ -112,7 +116,7 @@ export const checkAdmin = async (req: Request, res: Response, next: NextFunction
 
     const admin = await db.Admin.findOne({
       where: { id: adminId },
-      attributes: ["id", "username", "status", "session_token"],
+      attributes: ["id", "username", "status"],
     });
 
     if (!admin) {
@@ -121,14 +125,6 @@ export const checkAdmin = async (req: Request, res: Response, next: NextFunction
 
     if (admin.status !== "active") {
       return errorMessage(res, "Admin account is inactive");
-    }
-
-    if (!admin.session_token || admin.session_token !== token) {
-      return res.status(401).json({
-        success: false,
-        message: "Session expired. Please login again.",
-        data: {},
-      });
     }
 
     (req as any).user = { id: admin.id, username: admin.username };
