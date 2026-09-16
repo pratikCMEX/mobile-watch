@@ -90,6 +90,7 @@ export const Schemas = {
     limit: Joi.number().integer().min(1).optional().default(20),
     type: Joi.string().optional().allow(null, ""),
     is_read: Joi.boolean().optional().allow(null),
+    search: Joi.string().optional().allow(null, ""),
   }),
   deleteHealthMetric: Joi.object({
     id: Joi.string().required(),

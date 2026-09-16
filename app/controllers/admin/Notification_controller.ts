@@ -3,11 +3,11 @@ import db from "../../models";
 import { errorMessage, successPagination } from "../../library/Response";
 import { Op } from "sequelize";
 
-// Get all notifications (admin view) - supports search by device_id and imei with pagination
+// Get all notifications (admin view) - supports search by device_id, imei, type, is_read, and general search with pagination
 async function getAllNotifications(req: Request, res: Response, next: NextFunction) {
   try {
     const body = req.body || {};
-    const { device_id, imei, page = 1, limit = 20, type, is_read } = body;
+    const { device_id, imei, page = 1, limit = 20, search } = body;
     const offset = (Number(page) - 1) * Number(limit);
 
     const where: any = {};
@@ -30,12 +30,22 @@ async function getAllNotifications(req: Request, res: Response, next: NextFuncti
     }
 
     // Optional filters
-    if (type) {
-      where.type = type;
-    }
+    // if (type) {
+    //   where.type = type;
+    // }
 
-    if (is_read !== undefined) {
-      where.is_read = is_read;
+    // if (is_read !== undefined) {
+    //   where.is_read = is_read;
+    // }
+
+    // General search parameter - searches device_id, imei (through device), type, and is_read
+    if (search && search !== "") {
+      where[Op.or] = [
+        { device_id: { [Op.like]: `%${search}%` } },
+        { "$DeviceNotification.imei$": { [Op.like]: `%${search}%` } },
+        { type: { [Op.like]: `%${search}%` } },
+        { is_read: search === "true" ? true : search === "false" ? false : undefined },
+      ].filter((condition) => condition !== undefined);
     }
 
     const { count, rows } = await db.Notification.findAndCountAll({
