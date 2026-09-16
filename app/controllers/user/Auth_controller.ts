@@ -26,16 +26,6 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     //   return errorMessage(res, `Account is ${user.status}`, 403);
     // }
 
-    const token = await generateAuthToken(user);
-
-    user.session_token = token;
-    user.fcm_token = fcm_token;
-    user.device_type = device_type;
-    await user.save();
-
-    const userData = user.toJSON();
-    delete userData.password;
-
     const firstDevice = await db.Device.findAll({
       attributes: [
         "id",
@@ -50,6 +40,16 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     if (!firstDevice) {
       return errorMessage(res, "Device not registered", 200);
     }
+    const token = await generateAuthToken(user);
+
+    user.session_token = token;
+    user.fcm_token = fcm_token;
+    user.device_type = device_type;
+    await user.save();
+
+    const userData = user.toJSON();
+    delete userData.password;
+
     return successMessage(res, "Login successful", {
       token,
       user: userData,
