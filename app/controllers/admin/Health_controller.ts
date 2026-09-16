@@ -130,7 +130,7 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
 async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunction) {
   try {
     const body = req.body || {};
-    const { imei, period = "daily", id, date } = body;
+    const { imei, period = "daily", id, date, metric_type } = body;
 
     const where: any = {};
 
@@ -139,14 +139,19 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
       where.id = id;
     }
 
+    // If metric_type is provided and not empty, filter by metric_type
+    if (metric_type && metric_type !== "") {
+      where.metric_type = metric_type;
+    }
+
     // Apply date filter if provided (specific date)
     if (date && date !== "") {
       const targetDate = new Date(date);
       const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
       const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
       where.recorded_at = { [Op.between]: [startOfDay, endOfDay] };
-    } else {
-      // Otherwise, apply time period filter
+    } else if (period && period !== "") {
+      // Otherwise, apply time period filter if period is provided
       const now = new Date();
       if (period === "daily") {
         where.recorded_at = { [Op.gte]: new Date(now.setHours(0, 0, 0, 0)) };
@@ -158,8 +163,7 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
         where.recorded_at = { [Op.gte]: monthAgo };
       }
     }
-
-    // If IMEI is provided, filter by device
+    // If no date or period is provided, show all data (no time filter) by device
     if (imei && imei !== "") {
       const device = await db.Device.findOne({
         where: { imei: imei as string },
@@ -193,6 +197,7 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
         unit: m.unit,
         recorded_at: m.recorded_at,
         createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
       }));
 
       return successMessage(res, "Health metrics graph data retrieved successfully", {
@@ -231,6 +236,7 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
       unit: m.unit,
       recorded_at: m.recorded_at,
       createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
     }));
 
     return successMessage(res, "Health metrics graph data retrieved successfully", {
