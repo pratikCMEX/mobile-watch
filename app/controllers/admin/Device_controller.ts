@@ -753,10 +753,10 @@ const assignDeviceToUser = async function (
   next: NextFunction
 ) {
   try {
-    const { device_id, user_id } = req.body;
+    const { device_id, user_id,device_name } = req.body;
 
-    if (!device_id || !user_id) {
-      return errorMessage(res, "device_id and user_id are required");
+    if (!device_id || !user_id || !device_name) {
+      return errorMessage(res, "device_id, user_id and device_name are required");
     }
 
     const device = await db.Device.findOne({ where: { id: device_id } });
@@ -770,6 +770,7 @@ const assignDeviceToUser = async function (
     }
 
     device.owner_id = user_id;
+    device.device_name = device_name;
     await device.save();
 
     return successMessage(res, "Device assigned to user successfully", device);

@@ -81,6 +81,7 @@ export const Schemas = {
   assignDeviceToUser: Joi.object({
     device_id: Joi.string().required(),
     user_id: Joi.string().required(),
+    device_name: Joi.string().required(), 
   }),
   login: Joi.object({
     email: Joi.string().email().required(),
