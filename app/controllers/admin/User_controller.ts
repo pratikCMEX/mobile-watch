@@ -110,7 +110,7 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
 };
 async function updateUser(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id, name, password, phone_number, country_code } = req.body;
+    const { id, name, email, password, phone_number, country_code } = req.body;
     if (!id) {
       return errorMessage(res, "User ID is required");
     }
@@ -122,6 +122,20 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
     const updateData: any = {};
 
     if (name) updateData.name = name;
+    if (email) {
+      // Check if email is already used by another user
+      const existingUser = await db.User.findOne({
+        where: { 
+          email,
+          deletedAt: null,
+          id: { [Op.ne]: id }
+        }
+      });
+      if (existingUser) {
+        return errorMessage(res, "Email already in use by another user");
+      }
+      updateData.email = email;
+    }
     if (phone_number) updateData.phone_number = phone_number;
     if (country_code) updateData.country_code = country_code;
     if (password) {

@@ -169,6 +169,7 @@ export const Schemas = {
     updateUser: Joi.object({
       id: Joi.string().required(),
       name: Joi.string().optional(),
+      email: Joi.string().email().optional(),
       password: Joi.string().min(6).optional(),
       phone_number: Joi.string().optional().allow(null, ""),
       country_code: Joi.string().optional().allow(null, ""),
