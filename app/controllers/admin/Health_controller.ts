@@ -9,7 +9,11 @@ import {
 } from "../../helper/WatchAccess";
 
 // Get all health metrics (admin view) - also supports search by IMEI and ID
-async function getAllHealthMetrics(req: Request, res: Response, next: NextFunction) {
+async function getAllHealthMetrics(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const body = req.body || {};
     const { page = 1, limit = 10, imei, id } = body;
@@ -43,7 +47,11 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
         return errorMessage(res, "Health metric not found");
       }
 
-      return successMessage(res, "Health metric retrieved successfully", metric);
+      return successMessage(
+        res,
+        "Health metric retrieved successfully",
+        metric
+      );
     }
 
     // If IMEI is provided, search by device
@@ -137,29 +145,21 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
 }
 
 // Get health metrics graph data with time period filter or specific date
-async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunction) {
+async function getHealthMetricsGraph(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const body = req.body || {};
-    const { imei, period = "daily", id, date, metric_type } = body;
+    const { imei, period = "daily", date, metric_type } = body;
 
     const where: any = {};
 
-    // If ID is provided, filter by specific health metric ID
-    if (id) {
-      where.id = id;
-    }
-
-    // If metric_type is provided and not empty/null, filter by metric_type
-    // If metric_type is null or empty string, return all metric types (ignore ID filter)
+    // If metric_type is provided and not empty/null, filter by metric_type.
+    // If metric_type is null or empty string, return all metric types.
     if (metric_type && metric_type !== "" && metric_type !== null) {
       where.metric_type = metric_type;
-      // Only apply ID filter if metric_type is also specified
-      if (id) {
-        where.id = id;
-      }
-    } else {
-      // If metric_type is empty/null, ignore ID filter to return all data
-      // Don't add any metric_type filter
     }
 
     // Apply date filter if provided (specific date)
@@ -218,15 +218,19 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
         updatedAt: m.updatedAt,
       }));
 
-      return successMessage(res, "Health metrics graph data retrieved successfully", {
-        device: {
-          id: device.id,
-          imei: device.imei,
-          device_name: device.device_name,
-        },
-        graph_data: graphData,
-        period,
-      });
+      return successMessage(
+        res,
+        "Health metrics graph data retrieved successfully",
+        {
+          device: {
+            id: device.id,
+            imei: device.imei,
+            device_name: device.device_name,
+          },
+          graph_data: graphData,
+          period,
+        }
+      );
     }
 
     // Otherwise, get all devices' graph data for the period
@@ -260,10 +264,14 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
       updatedAt: m.updatedAt,
     }));
 
-    return successMessage(res, "Health metrics graph data retrieved successfully", {
-      graph_data: graphData,
-      period,
-    });
+    return successMessage(
+      res,
+      "Health metrics graph data retrieved successfully",
+      {
+        graph_data: graphData,
+        period,
+      }
+    );
   } catch (err) {
     console.error("getHealthMetricsGraph error:", err);
     return errorMessage(res, "Error retrieving health metrics graph data");
@@ -271,7 +279,11 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
 }
 
 // Delete health metric by ID
-async function deleteHealthMetric(req: Request, res: Response, next: NextFunction) {
+async function deleteHealthMetric(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const { id } = req.body;
 
@@ -280,7 +292,10 @@ async function deleteHealthMetric(req: Request, res: Response, next: NextFunctio
     }
 
     const healthMetric = await db.HealthMetric.findOne({ where: { id } });
-    if (!healthMetric || !(await canAccessDevice(req, healthMetric.device_id))) {
+    if (
+      !healthMetric ||
+      !(await canAccessDevice(req, healthMetric.device_id))
+    ) {
       return errorMessage(res, "Health metric not found");
     }
 
@@ -294,7 +309,11 @@ async function deleteHealthMetric(req: Request, res: Response, next: NextFunctio
 }
 
 // Delete multiple health metrics by IDs
-async function deleteMultipleHealthMetrics(req: Request, res: Response, next: NextFunction) {
+async function deleteMultipleHealthMetrics(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const { ids } = req.body;
 
@@ -316,12 +335,18 @@ async function deleteMultipleHealthMetrics(req: Request, res: Response, next: Ne
         healthMetrics.map((m: any) => m.device_id)
       ))
     ) {
-      return errorMessage(res, "You do not have access to one or more of these health metrics");
+      return errorMessage(
+        res,
+        "You do not have access to one or more of these health metrics"
+      );
     }
 
     await db.HealthMetric.destroy({ where: { id: { [Op.in]: ids } } });
 
-    return successMessage(res, `${healthMetrics.length} health metrics deleted successfully`);
+    return successMessage(
+      res,
+      `${healthMetrics.length} health metrics deleted successfully`
+    );
   } catch (err) {
     console.error("deleteMultipleHealthMetrics error:", err);
     return errorMessage(res, "Error deleting health metrics");
