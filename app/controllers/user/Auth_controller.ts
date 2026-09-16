@@ -4,6 +4,7 @@ import { errorMessage, successMessage } from "../../library/Response";
 import bcrypt from "bcrypt";
 import { Op } from "sequelize";
 import { generateAuthToken, deleteFile } from "../../helper/Helper";
+
 const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
@@ -11,26 +12,26 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
       password,
       fcm_token,
       device_type,
-      force_login = true,
+      force_login = false,
     } = req.body;
 
     if (!email || !password) {
       return errorMessage(res, "Email and password are required", null);
     }
 
-    const user = await db.User.findOne({ where: { email } });
+    const user = await db.User.findOne({
+      where: { email },
+    });
+
     if (!user) {
       return errorMessage(res, "Invalid email or password", null);
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
+
     if (!isMatch) {
       return errorMessage(res, "Invalid email or password", null);
     }
-
-    // if (user.status && user.status !== "active") {
-    //   return errorMessage(res, `Account is ${user.status}`, 403);
-    // }
 
     const firstDevice = await db.Device.findAll({
       attributes: [
@@ -46,15 +47,40 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     if (firstDevice.length === 0) {
       return errorMessage(res, "Device not registered", null);
     }
+
+    /*
+     * Check whether this device is already logged in.
+     *
+     * Assuming:
+     * device.session_token = current login session
+     */
+    if (user.session_token && !force_login) {
+      return errorMessage(res, "Device is already logged in", {
+        already_logged_in: true,
+      });
+    }
+
+    // Generate a new login token
     const token = await generateAuthToken(user);
 
+    /*
+     * If force_login = true:
+     * replace the existing device session with the new token.
+     *
+     * The old session/token will no longer be valid.
+     */
     user.session_token = token;
     user.fcm_token = fcm_token;
     user.device_type = device_type;
+
     await user.save();
 
     const userData = user.toJSON();
     delete userData.password;
+
+    /*
+     * Return all devices belonging to the user
+     */
 
     return successMessage(res, "Login successful", {
       token,
