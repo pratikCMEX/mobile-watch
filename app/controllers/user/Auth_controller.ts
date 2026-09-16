@@ -54,7 +54,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
      * Assuming:
      * device.session_token = current login session
      */
-    if (!force_login) {
+    if (!force_login && user.session_token) {
       return errorMessage(res, "Device is already logged in", {
         already_logged_in: true,
       });
