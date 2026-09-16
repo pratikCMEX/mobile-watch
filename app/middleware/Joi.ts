@@ -58,6 +58,12 @@ export const Schemas = {
     page: Joi.number().integer().min(1).optional().default(1),
     limit: Joi.number().integer().min(1).optional().default(10),
     imei: Joi.string().optional().allow(null, ""),
+    id: Joi.string().optional().allow(null, ""),
+  }),
+  getHealthMetricsGraph: Joi.object({
+    imei: Joi.string().optional().allow(null, ""),
+    id: Joi.string().optional().allow(null, ""),
+    period: Joi.string().valid("daily", "weekly", "monthly").optional().default("daily"),
   }),
   deleteHealthMetric: Joi.object({
     id: Joi.string().required(),
