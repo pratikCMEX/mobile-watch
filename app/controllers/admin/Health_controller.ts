@@ -3,17 +3,37 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { Op } from "sequelize";
 
-// Get all health metrics (admin view) - also supports search by IMEI
+// Get all health metrics (admin view) - also supports search by IMEI and ID
 async function getAllHealthMetrics(req: Request, res: Response, next: NextFunction) {
   try {
     const body = req.body || {};
-    const { page = 1, limit = 10, imei } = body;
+    const { page = 1, limit = 10, imei, id } = body;
     const offset = (Number(page) - 1) * Number(limit);
 
+    // If ID is provided, search by ID
+    if (id) {
+      const metric = await db.HealthMetric.findOne({
+        where: { id: id as string },
+        include: [
+          {
+            model: db.Device,
+            as: "DeviceHealthMetric",
+            attributes: ["id", "imei", "device_name"],
+          },
+        ],
+      });
+
+      if (!metric) {
+        return errorMessage(res, "Health metric not found");
+      }
+
+      return successMessage(res, "Health metric retrieved successfully", metric);
+    }
+
     // If IMEI is provided, search by device
-    if (imei) {
+    if (imei && imei !== "") {
       const device = await db.Device.findOne({
-        where: { imei },
+        where: { imei: imei as string },
         attributes: ["id", "imei", "device_name"],
       });
 
@@ -73,6 +93,116 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
   }
 }
 
+// Get health metrics graph data with time period filter
+async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = req.body || {};
+    const { imei, period = "daily", id } = body;
+
+    const where: any = {};
+
+    // If ID is provided, filter by specific health metric ID
+    if (id) {
+      where.id = id;
+    }
+
+    // Apply time period filter
+    const now = new Date();
+    if (period === "daily") {
+      where.recorded_at = { [Op.gte]: new Date(now.setHours(0, 0, 0, 0)) };
+    } else if (period === "weekly") {
+      const weekAgo = new Date(now.setDate(now.getDate() - 7));
+      where.recorded_at = { [Op.gte]: weekAgo };
+    } else if (period === "monthly") {
+      const monthAgo = new Date(now.setMonth(now.getMonth() - 1));
+      where.recorded_at = { [Op.gte]: monthAgo };
+    }
+
+    // If IMEI is provided, filter by device
+    if (imei && imei !== "") {
+      const device = await db.Device.findOne({
+        where: { imei: imei as string },
+        attributes: ["id", "imei", "device_name"],
+      });
+
+      if (!device) {
+        return errorMessage(res, "Device not found with this IMEI");
+      }
+
+      where.device_id = device.id;
+
+      const metrics = await db.HealthMetric.findAll({
+        where,
+        include: [
+          {
+            model: db.Device,
+            as: "DeviceHealthMetric",
+            attributes: ["id", "imei", "device_name"],
+          },
+        ],
+        order: [["recorded_at", "ASC"]],
+      });
+
+      const graphData = metrics.map((m: any) => ({
+        id: m.id,
+        recorded_at: m.recorded_at,
+        heart_rate: m.heart_rate,
+        blood_pressure_systolic: m.blood_pressure_systolic,
+        blood_pressure_diastolic: m.blood_pressure_diastolic,
+        steps: m.steps,
+        calories: m.calories,
+        distance: m.distance,
+      }));
+
+      return successMessage(res, "Health metrics graph data retrieved successfully", {
+        device: {
+          id: device.id,
+          imei: device.imei,
+          device_name: device.device_name,
+        },
+        graph_data: graphData,
+        period,
+      });
+    }
+
+    // Otherwise, get all devices' graph data for the period
+    const metrics = await db.HealthMetric.findAll({
+      where,
+      include: [
+        {
+          model: db.Device,
+          as: "DeviceHealthMetric",
+          attributes: ["id", "imei", "device_name"],
+          required: false,
+        },
+      ],
+      order: [["recorded_at", "ASC"]],
+    });
+
+    const graphData = metrics.map((m: any) => ({
+      id: m.id,
+      device_id: m.device_id,
+      imei: m.DeviceHealthMetric?.imei,
+      device_name: m.DeviceHealthMetric?.device_name,
+      recorded_at: m.recorded_at,
+      heart_rate: m.heart_rate,
+      blood_pressure_systolic: m.blood_pressure_systolic,
+      blood_pressure_diastolic: m.blood_pressure_diastolic,
+      steps: m.steps,
+      calories: m.calories,
+      distance: m.distance,
+    }));
+
+    return successMessage(res, "Health metrics graph data retrieved successfully", {
+      graph_data: graphData,
+      period,
+    });
+  } catch (err) {
+    console.error("getHealthMetricsGraph error:", err);
+    return errorMessage(res, "Error retrieving health metrics graph data");
+  }
+}
+
 // Delete health metric by ID
 async function deleteHealthMetric(req: Request, res: Response, next: NextFunction) {
   try {
@@ -124,6 +254,7 @@ async function deleteMultipleHealthMetrics(req: Request, res: Response, next: Ne
 
 export default {
   getAllHealthMetrics,
+  getHealthMetricsGraph,
   deleteHealthMetric,
   deleteMultipleHealthMetrics,
 };

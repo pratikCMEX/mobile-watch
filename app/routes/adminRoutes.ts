@@ -103,6 +103,12 @@ router.post(
   Health_controller.getAllHealthMetrics
 );
 router.post(
+  "/get_health_graph",
+  checkAdmin,
+  ValidateJoi(Schemas.getHealthMetricsGraph),
+  Health_controller.getHealthMetricsGraph
+);
+router.post(
   "/delete_health_metric",
   checkAdmin,
   ValidateJoi(Schemas.deleteHealthMetric),
