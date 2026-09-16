@@ -75,7 +75,7 @@ const listGeofences = async (
     }
 };
 
-const deleteGeofence = async function (
+const   deleteGeofence = async function (
     req: Request,
     res: Response,
     next: NextFunction

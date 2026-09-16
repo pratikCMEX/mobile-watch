@@ -14,6 +14,17 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
     if (id) {
       const metric = await db.HealthMetric.findOne({
         where: { id: id as string },
+        attributes: [
+          "id",
+          "device_id",
+          "metric_type",
+          "value_primary",
+          "value_secondary",
+          "unit",
+          "recorded_at",
+          "createdAt",
+          "updatedAt",
+        ],
         include: [
           {
             model: db.Device,
@@ -43,6 +54,17 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
 
       const metrics = await db.HealthMetric.findAll({
         where: { device_id: device.id },
+        attributes: [
+          "id",
+          "device_id",
+          "metric_type",
+          "value_primary",
+          "value_secondary",
+          "unit",
+          "recorded_at",
+          "createdAt",
+          "updatedAt",
+        ],
         include: [
           {
             model: db.Device,
@@ -65,6 +87,17 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
 
     // Otherwise, return all health metrics with pagination
     const { count, rows } = await db.HealthMetric.findAndCountAll({
+      attributes: [
+        "id",
+        "device_id",
+        "metric_type",
+        "value_primary",
+        "value_secondary",
+        "unit",
+        "recorded_at",
+        "createdAt",
+        "updatedAt",
+      ],
       include: [
         {
           model: db.Device,
@@ -153,13 +186,13 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
 
       const graphData = metrics.map((m: any) => ({
         id: m.id,
+        device_id: m.device_id,
+        metric_type: m.metric_type,
+        value_primary: m.value_primary,
+        value_secondary: m.value_secondary,
+        unit: m.unit,
         recorded_at: m.recorded_at,
-        heart_rate: m.heart_rate,
-        blood_pressure_systolic: m.blood_pressure_systolic,
-        blood_pressure_diastolic: m.blood_pressure_diastolic,
-        steps: m.steps,
-        calories: m.calories,
-        distance: m.distance,
+        createdAt: m.createdAt,
       }));
 
       return successMessage(res, "Health metrics graph data retrieved successfully", {
@@ -192,13 +225,12 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
       device_id: m.device_id,
       imei: m.DeviceHealthMetric?.imei,
       device_name: m.DeviceHealthMetric?.device_name,
+      metric_type: m.metric_type,
+      value_primary: m.value_primary,
+      value_secondary: m.value_secondary,
+      unit: m.unit,
       recorded_at: m.recorded_at,
-      heart_rate: m.heart_rate,
-      blood_pressure_systolic: m.blood_pressure_systolic,
-      blood_pressure_diastolic: m.blood_pressure_diastolic,
-      steps: m.steps,
-      calories: m.calories,
-      distance: m.distance,
+      createdAt: m.createdAt,
     }));
 
     return successMessage(res, "Health metrics graph data retrieved successfully", {
