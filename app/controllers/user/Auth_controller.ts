@@ -10,8 +10,8 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     const {
       email,
       password,
-      fcm_token,
-      device_type,
+      fcm_token = "",
+      device_type = "",
       force_login = false,
     } = req.body;
 
