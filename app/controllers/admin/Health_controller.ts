@@ -93,11 +93,11 @@ async function getAllHealthMetrics(req: Request, res: Response, next: NextFuncti
   }
 }
 
-// Get health metrics graph data with time period filter
+// Get health metrics graph data with time period filter or specific date
 async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunction) {
   try {
     const body = req.body || {};
-    const { imei, period = "daily", id } = body;
+    const { imei, period = "daily", id, date } = body;
 
     const where: any = {};
 
@@ -106,16 +106,24 @@ async function getHealthMetricsGraph(req: Request, res: Response, next: NextFunc
       where.id = id;
     }
 
-    // Apply time period filter
-    const now = new Date();
-    if (period === "daily") {
-      where.recorded_at = { [Op.gte]: new Date(now.setHours(0, 0, 0, 0)) };
-    } else if (period === "weekly") {
-      const weekAgo = new Date(now.setDate(now.getDate() - 7));
-      where.recorded_at = { [Op.gte]: weekAgo };
-    } else if (period === "monthly") {
-      const monthAgo = new Date(now.setMonth(now.getMonth() - 1));
-      where.recorded_at = { [Op.gte]: monthAgo };
+    // Apply date filter if provided (specific date)
+    if (date && date !== "") {
+      const targetDate = new Date(date);
+      const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+      const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+      where.recorded_at = { [Op.between]: [startOfDay, endOfDay] };
+    } else {
+      // Otherwise, apply time period filter
+      const now = new Date();
+      if (period === "daily") {
+        where.recorded_at = { [Op.gte]: new Date(now.setHours(0, 0, 0, 0)) };
+      } else if (period === "weekly") {
+        const weekAgo = new Date(now.setDate(now.getDate() - 7));
+        where.recorded_at = { [Op.gte]: weekAgo };
+      } else if (period === "monthly") {
+        const monthAgo = new Date(now.setMonth(now.getMonth() - 1));
+        where.recorded_at = { [Op.gte]: monthAgo };
+      }
     }
 
     // If IMEI is provided, filter by device
