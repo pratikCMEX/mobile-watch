@@ -4482,21 +4482,16 @@ class TcpServer {
     const num = Math.max(1, Math.min(3, Math.floor(Number(number) || 1)));
 
     // ── Process voice data ──────────────────────────────────────
-    // 1. Strip AMR file header if present (#!AMR\n = 6 bytes)
-    // 2. Enforce max size (64 KB raw ≈ 15 seconds at 12.2 kbps)
+    // Send the complete AMR file (header included) — same finding as
+    // the TK voice-message fix: this firmware expects the "#!AMR\n"
+    // magic header present, not stripped. This code previously
+    // stripped it based on an unverified assumption; every case where
+    // the header was stripped (TK before its fix, TAKEPILLS here)
+    // played silent, and every case where it was sent intact played
+    // correctly. Enforce max size (64 KB raw ≈ 15 seconds at 12.2kbps).
     let processedVoice: Buffer | null = null;
     if (voiceData && voiceData.length > 0) {
-      const AMR_HEADER = Buffer.from("#!AMR\n");
-      let raw = voiceData;
-      if (
-        raw.length >= AMR_HEADER.length &&
-        raw.subarray(0, AMR_HEADER.length).equals(AMR_HEADER)
-      ) {
-        Logging.info(
-          `Stripping AMR file header (6 bytes) from reminder voice data for device ${deviceId}.`
-        );
-        raw = raw.subarray(AMR_HEADER.length);
-      }
+      const raw = voiceData;
 
       const MAX_AMR_BYTES = 64 * 1024;
       if (raw.length > MAX_AMR_BYTES) {
@@ -4559,7 +4554,7 @@ class TcpServer {
     Logging.warn(
       `TAKEPILLS prerequisite: device CONFIG must have DD=2 (medication reminder enabled). ` +
         `If reminder does not fire, verify DD config and device time sync. ` +
-        `AMR must be raw frames (no #!AMR header), AMR-NB format, max 64KB.`
+        `AMR must be complete file (with #!AMR header), AMR-NB format, max 64KB.`
     );
 
     this.send(client, command);
