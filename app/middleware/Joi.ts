@@ -68,6 +68,20 @@ export const Schemas = {
       .optional()
       .allow(null, ""),
     date: Joi.date().optional().allow(null),
+    metric_type: Joi.string()
+      .valid(
+        "heart_rate",
+        "blood_pressure",
+        "sleep",
+        "spo2",
+        "calories",
+        "temperature",
+        "distance",
+        "steps_daily",
+        "steps_cumulative"
+      )
+      .optional()
+      .allow(null, ""),
   }),
   getAllNotifications: Joi.object({
     device_id: Joi.string().optional().allow(null, ""),
