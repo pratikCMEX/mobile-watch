@@ -361,6 +361,46 @@ const getHealthOverview = async (
       };
     }
 
+    // Total distance and calories burnt for today
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayDistanceMetrics = await db.HealthMetric.findAll({
+      where: {
+        device_id: device_id,
+        metric_type: "distance",
+        recorded_at: { [Op.gte]: todayStart },
+      },
+    });
+
+    const todayCaloriesMetrics = await db.HealthMetric.findAll({
+      where: {
+        device_id: device_id,
+        metric_type: "calories",
+        recorded_at: { [Op.gte]: todayStart },
+      },
+    });
+
+    const totalDistance = todayDistanceMetrics.reduce(
+      (sum: number, m: any) => sum + (Number(m.value_primary) || 0),
+      0
+    );
+
+    const totalCalories = todayCaloriesMetrics.reduce(
+      (sum: number, m: any) => sum + (Number(m.value_primary) || 0),
+      0
+    );
+
+    overview["total_distance"] = {
+      value: totalDistance,
+      unit: todayDistanceMetrics[0]?.unit || null,
+    };
+
+    overview["total_calories"] = {
+      value: totalCalories,
+      unit: todayCaloriesMetrics[0]?.unit || null,
+    };
+
     return successMessage(
       res,
       "Health overview fetched successfully",
