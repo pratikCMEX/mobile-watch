@@ -89,6 +89,22 @@ const getHealthOverview = async (deviceId: string) => {
     };
   }
 
+  // Distance (km) and calories, derived from today's step count
+  const stepsToday = overview["steps"]?.latest || 0;
+
+  const totalDistanceKm = Number((stepsToday * 0.000762).toFixed(2));
+  const totalCalories = Number((stepsToday * 0.04).toFixed(2));
+
+  overview["distance"] = {
+    value: totalDistanceKm,
+    unit: "km",
+  };
+
+  overview["calories"] = {
+    value: totalCalories,
+    unit: "kcal",
+  };
+
   return overview;
 };
 
@@ -127,96 +143,11 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
       order: [["createdAt", "ASC"]],
     });
 
-    const metricTypes = [
-      "heart_rate",
-      "blood_pressure",
-      "steps_cumulative",
-      "sleep",
-      "spo2",
-      "temperature",
-    ];
-
-    const overview: any = {};
-
-    for (const metricType of metricTypes) {
-      // Get latest reading
-      const latest = await db.HealthMetric.findOne({
-        where: { device_id: device.id, metric_type: metricType },
-        order: [["recorded_at", "DESC"]],
-      });
-
-      // Get previous day's reading (from 24-48 hours ago)
-      const now = new Date();
-      const previousDayStart = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-      const previousDayEnd = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
-      const previousDayMetric = await db.HealthMetric.findOne({
-        where: {
-          device_id: device.id,
-          metric_type: metricType,
-          recorded_at: {
-            [Op.between]: [previousDayStart, previousDayEnd],
-          },
-        },
-        order: [["recorded_at", "DESC"]],
-      });
-
-      const latestValue = latest ? Number(latest.value_primary) : null;
-      const previousValue = previousDayMetric
-        ? Number(previousDayMetric.value_primary)
-        : null;
-      const delta =
-        latestValue !== null && previousValue !== null
-          ? latestValue - previousValue
-          : null;
-      const direction =
-        delta !== null
-          ? delta > 0
-            ? "up"
-            : delta < 0
-            ? "down"
-            : "stable"
-          : null;
-
-      // Map steps_cumulative to steps in response
-      const responseKey =
-        metricType === "steps_cumulative" ? "steps" : metricType;
-
-      overview[responseKey] = {
-        latest: latestValue,
-        latest_secondary: latest
-          ? Number(latest.value_secondary) || null
-          : null,
-        unit: latest?.unit || null,
-        recorded_at: latest?.recorded_at || null,
-        previous_day_value: previousValue,
-        delta: delta,
-        direction: direction,
-      };
-    }
-
-    // Distance (km) and calories, derived from today's step count
-    const stepsToday = overview["steps"]?.latest || 0;
-
-    const totalDistanceKm = Number((stepsToday * 0.000762).toFixed(2));
-    const totalCalories = Number((stepsToday * 0.04).toFixed(2));
-
-    overview["distance"] = {
-      latest: totalDistanceKm,
-      unit: "km",
-    };
-
-    overview["calories"] = {
-      latest: totalCalories,
-      unit: "kcal",
-    };
-
     return successMessage(res, "Home data fetched successfully", {
       device: formatDevice(device),
       last_location: formatLocation(lastLocation),
       health_overview: healthOverview,
       all_devices: firstDevice,
-      overview,
     });
   } catch (err) {
     console.error("getHome error:", err);
