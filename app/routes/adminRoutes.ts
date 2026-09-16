@@ -82,7 +82,7 @@ router.post(
 );
 router.get("/get_all_imei", checkAdmin, Device_controller.getAllDeviceImei);
 router.delete(
-  "/delete_snapshot/:id",
+  "/delete_snapshot",
   checkAdmin,
   Snapshot_controller.deleteSnapshot
 );

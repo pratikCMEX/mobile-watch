@@ -194,7 +194,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
 // Delete snapshot by ID
 async function deleteSnapshot(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const { id } = req.body;
 
     if (!id) {
       return errorMessage(res, "Snapshot ID is required");
