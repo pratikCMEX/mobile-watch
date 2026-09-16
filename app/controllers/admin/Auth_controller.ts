@@ -2,6 +2,16 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { generateAuthToken } from "../../helper/Helper";
+import { getClientIp } from "../../helper/WatchAccess";
+
+// Staff only get their own record back, never the full account list.
+const listAdminsFor = (req: Request) => {
+  const user = (req as any).user;
+  return db.Admin.findAll({
+    where: user?.role === "admin" ? {} : { id: user?.id },
+    attributes: ["id", "username", "createdAt", "updatedAt"],
+  });
+};
 
 async function adminLogin(req: Request, res: Response, next: NextFunction) {
   try {
@@ -32,13 +42,29 @@ async function adminLogin(req: Request, res: Response, next: NextFunction) {
       name: admin.username,
     });
 
+    try {
+      await db.AdminLoginLog.create({
+        admin_id: admin.id,
+        ip_address: getClientIp(req),
+        user_agent: req.headers["user-agent"] || null,
+        login_at: new Date(),
+      });
+    } catch (logErr) {
+      // A failed audit write should not block login.
+      console.error("adminLogin log error:", logErr);
+    }
+
     res.setHeader("Authorization", `Bearer ${token}`);
     res.setHeader("Access-Control-Expose-Headers", "Authorization");
 
     return successMessage(res, "Login successful", {
       admin: {
         id: admin.id,
+        name: admin.name,
         username: admin.username,
+        email: admin.email,
+        role: admin.role,
+        all_watches: admin.all_watches,
         status: admin.status,
       },
       token,
@@ -77,9 +103,7 @@ async function updatePassword(req: Request, res: Response, next: NextFunction) {
     admin.password = newPassword;
     await admin.save();
 
-    const allAdmins = await db.Admin.findAll({
-      attributes: ["id", "username", "createdAt", "updatedAt"],
-    });
+    const allAdmins = await listAdminsFor(req);
 
     return successMessage(res, "Password updated successfully", allAdmins);
   } catch (err) {
@@ -90,9 +114,7 @@ async function updatePassword(req: Request, res: Response, next: NextFunction) {
 
 async function logout(req: Request, res: Response, next: NextFunction) {
   try {
-    const allAdmins = await db.Admin.findAll({
-      attributes: ["id", "username", "createdAt", "updatedAt"],
-    });
+    const allAdmins = await listAdminsFor(req);
 
     return successMessage(res, "Logout successful", allAdmins);
   } catch (err) {

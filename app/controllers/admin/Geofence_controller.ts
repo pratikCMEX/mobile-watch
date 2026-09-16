@@ -6,6 +6,7 @@ import {
     successPagination,
 } from "../../library/Response";
 import { Op } from "sequelize";
+import { canAccessDevice, deviceIdScope } from "../../helper/WatchAccess";
 
 
 
@@ -33,6 +34,9 @@ const listGeofences = async (
         if (search) {
             whereCondition.name = { [Op.iLike]: `%${search}%` };
         }
+
+        const scope = await deviceIdScope(req);
+        if (scope) whereCondition.device_id = scope;
 
         // if (is_active !== "") {
         //   whereCondition.is_active = is_active;
@@ -84,7 +88,7 @@ const   deleteGeofence = async function (
         const { id } = req.body;
 
         const geofence = await db.Geofence.findByPk(id);
-        if (!geofence) {
+        if (!geofence || !(await canAccessDevice(req, geofence.device_id))) {
             return errorMessage(res, "Geofence not found", 404);
         }
 
@@ -110,7 +114,7 @@ const toggleGeofenceStatus = async function (
         }
 
         const geofence = await db.Geofence.findByPk(id);
-        if (!geofence) {
+        if (!geofence || !(await canAccessDevice(req, geofence.device_id))) {
             return errorMessage(res, "Geofence not found", 404);
         }
 
@@ -150,7 +154,7 @@ const createGeofence = async function (
         }
 
         const device = await db.Device.findOne({ where: { imei } });
-        if (!device) {
+        if (!device || !(await canAccessDevice(req, device.id))) {
             return errorMessage(res, "Device not found with this IMEI");
         }
 

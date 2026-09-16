@@ -371,4 +371,64 @@ const getHealthOverview = async (
   }
 };
 
-export default { AddMetrics, getAnalytics, getHealthOverview };
+// GET /health/today_steps/:device_id
+// Returns the total step count for today based on cumulative pedometer
+// readings stored as HealthMetric rows (metric_type = "steps_cumulative").
+const getTodaySteps = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id } = req.params;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id as string);
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const now = new Date();
+    const start = startOfDay(now);
+    const end = endOfDay(now);
+
+    // All cumulative step readings recorded today, oldest first.
+    const readings = await db.HealthMetric.findAll({
+      where: {
+        device_id,
+        metric_type: "steps_cumulative",
+        recorded_at: { [Op.between]: [start, end] },
+      },
+      attributes: ["value_primary", "recorded_at"],
+      order: [["recorded_at", "ASC"]],
+    });
+
+    let totalSteps = 0;
+    let lastRecordedAt: Date | null = null;
+
+    if (readings.length > 0) {
+      const firstValue = Number(readings[0].value_primary);
+      const lastValue = Number(readings[readings.length - 1].value_primary);
+      lastRecordedAt = readings[readings.length - 1].recorded_at;
+
+      // If the pedometer reset (last < first), the total for today is
+      // just the latest value. Otherwise it's the delta.
+      totalSteps = lastValue < firstValue ? lastValue : lastValue - firstValue;
+    }
+
+    return successMessage(res, "Today's step count fetched successfully", {
+      device_id,
+      total_steps: totalSteps,
+      date: now.toISOString().split("T")[0],
+      last_recorded_at: lastRecordedAt,
+    });
+  } catch (err) {
+    console.error("getTodaySteps error:", err);
+    return errorMessage(res, "Error fetching today's step count");
+  }
+};
+
+export default { AddMetrics, getAnalytics, getHealthOverview, getTodaySteps };

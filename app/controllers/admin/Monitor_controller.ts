@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
+import { canAccessDevice } from "../../helper/WatchAccess";
 
 // Search device by IMEI and get location data
 async function getDeviceLocation(req: Request, res: Response, next: NextFunction) {
@@ -30,7 +31,7 @@ async function getDeviceLocation(req: Request, res: Response, next: NextFunction
       ],
     });
 
-    if (!device) {
+    if (!device || !(await canAccessDevice(req, device.id))) {
       return errorMessage(res, "Device not found with this IMEI");
     }
 
