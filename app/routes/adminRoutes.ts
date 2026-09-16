@@ -10,6 +10,7 @@ import User_controller from "../controllers/admin/User_controller";
 import Dashboard_controller from "../controllers/admin/Dashboard_controller";
 import Admin_Auth_controller from "../controllers/admin/Auth_controller";
 import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
+import Notification_controller from "../controllers/admin/Notification_controller";
 const router = express.Router();
 
 // Dashboard stats
@@ -59,7 +60,7 @@ router.post(
 );
 
 // Delete geofence by ID
-router.delete(
+router.post(
   "/delete_geofence",
   checkAdmin,
   ValidateJoi(Schemas.geofence.delete, "params"),
@@ -119,6 +120,12 @@ router.post(
   checkAdmin,
   ValidateJoi(Schemas.deleteMultipleHealthMetrics),
   Health_controller.deleteMultipleHealthMetrics
+);
+router.post(
+  "/get_all_notifications",
+  checkAdmin,
+  ValidateJoi(Schemas.getAllNotifications),
+  Notification_controller.getAllNotifications
 );
 router.post(
   "/delete_multiple_devices",
