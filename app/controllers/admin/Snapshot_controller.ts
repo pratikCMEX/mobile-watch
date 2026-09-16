@@ -2,6 +2,11 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { Op } from "sequelize";
+import {
+  canAccessAllDevices,
+  canAccessDevice,
+  deviceIdScope,
+} from "../../helper/WatchAccess";
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 
@@ -27,7 +32,7 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
         ],
       });
 
-      if (!snapshot) {
+      if (!snapshot || !(await canAccessDevice(req, snapshot.device_id))) {
         return errorMessage(res, "Snapshot not found");
       }
 
@@ -41,7 +46,7 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
         attributes: ["id", "imei", "device_name"],
       });
 
-      if (!device) {
+      if (!device || !(await canAccessDevice(req, device.id))) {
         return errorMessage(res, "Device not found with this IMEI");
       }
 
@@ -96,7 +101,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
         ],
       });
 
-      if (!snapshot) {
+      if (!snapshot || !(await canAccessDevice(req, snapshot.device_id))) {
         return errorMessage(res, "Snapshot not found");
       }
 
@@ -110,7 +115,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
         attributes: ["id", "imei", "device_name"],
       });
 
-      if (!device) {
+      if (!device || !(await canAccessDevice(req, device.id))) {
         return errorMessage(res, "Device not found with this IMEI");
       }
 
@@ -151,6 +156,8 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
     // Otherwise, return all snapshots with pagination
     // If search parameter is provided, search by both id and imei
     const where: any = {};
+    const scope = await deviceIdScope(req);
+    if (scope) where.device_id = scope;
     if (search && search !== "") {
       where[Op.or] = [
         { id: { [Op.like]: `%${search}%` } },
@@ -206,7 +213,7 @@ async function deleteSnapshot(req: Request, res: Response, next: NextFunction) {
     }
 
     const snapshot = await db.Snapshot.findOne({ where: { id } });
-    if (!snapshot) {
+    if (!snapshot || !(await canAccessDevice(req, snapshot.device_id))) {
       return errorMessage(res, "Snapshot not found");
     }
 
@@ -241,6 +248,15 @@ async function deleteMultipleSnapshots(req: Request, res: Response, next: NextFu
 
     if (snapshots.length === 0) {
       return errorMessage(res, "No snapshots found with the provided IDs");
+    }
+
+    if (
+      !(await canAccessAllDevices(
+        req,
+        snapshots.map((s: any) => s.device_id)
+      ))
+    ) {
+      return errorMessage(res, "You do not have access to one or more of these snapshots");
     }
 
     // Delete image files

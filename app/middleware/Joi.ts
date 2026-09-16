@@ -1640,6 +1640,54 @@ export const Schemas = {
       weight_kg: Joi.number().integer().optional().allow(null),
     }).or("imei", "serial_number"),
   },
+  staff: {
+    create: Joi.object({
+      name: Joi.string().trim().required(),
+      email: Joi.string().email().required(),
+      username: Joi.string().trim().required(),
+      password: Joi.string().min(6).required(),
+      // true = access to all current and future watches
+      all_watches: Joi.boolean().optional().default(false),
+      device_ids: Joi.when("all_watches", {
+        is: true,
+        then: Joi.array().items(Joi.string().uuid()).optional(),
+        otherwise: Joi.array().items(Joi.string().uuid()).min(1).required(),
+      }),
+    }),
+    update: Joi.object({
+      id: Joi.string().uuid().required(),
+      name: Joi.string().trim().optional(),
+      email: Joi.string().email().optional(),
+      username: Joi.string().trim().optional(),
+      password: Joi.string().min(6).optional().allow(""),
+      all_watches: Joi.boolean().optional(),
+      device_ids: Joi.array().items(Joi.string().uuid()).optional(),
+    }),
+    updateStatus: Joi.object({
+      id: Joi.string().uuid().required(),
+      status: Joi.string().valid("active", "inactive").required(),
+    }),
+    byId: Joi.object({
+      id: Joi.string().uuid().required(),
+    }),
+    list: Joi.object({
+      search: Joi.string().optional().allow(""),
+      page: Joi.number().integer().min(1).optional().default(1),
+      sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
+      limit: Joi.number().integer().min(1).optional().default(10),
+      status: Joi.string().valid("active", "inactive").optional().allow(""),
+    }),
+    loginLogs: Joi.object({
+      staff_id: Joi.string().uuid().optional().allow(""),
+      search: Joi.string().optional().allow(""),
+      ip_address: Joi.string().optional().allow(""),
+      from_date: Joi.date().iso().optional().allow(""),
+      to_date: Joi.date().iso().optional().allow(""),
+      page: Joi.number().integer().min(1).optional().default(1),
+      sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
+      limit: Joi.number().integer().min(1).optional().default(20),
+    }),
+  },
   appUpdate: {
     create: Joi.object({
       apk_version: Joi.string().required(),

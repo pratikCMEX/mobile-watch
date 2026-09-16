@@ -9,6 +9,14 @@ import { Op } from "sequelize";
 import bcrypt from "bcrypt";
 
 import { generateAuthToken, sendWelcomeEmail } from "../../helper/Helper";
+import { getAccessibleUserIds } from "../../helper/WatchAccess";
+
+// Staff limited to specific watches can only manage the owners of those
+// watches.
+const canAccessUser = async (req: Request, userId: string) => {
+  const userIds = await getAccessibleUserIds(req);
+  return userIds === null || userIds.includes(userId);
+};
 
 async function createUser(req: Request, res: Response, next: NextFunction) {
   try {
@@ -59,6 +67,10 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
     const offset = (Number(page) - 1) * Number(limit);
 
     const whereCondition: any = {};
+    const userIds = await getAccessibleUserIds(req);
+    if (userIds) {
+      whereCondition.id = { [Op.in]: userIds };
+    }
     if (search) {
       whereCondition[Op.or] = [
         { name: { [Op.iLike]: `%${search}%` } },
@@ -103,6 +115,10 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
       return errorMessage(res, "User ID is required");
     }
 
+    if (!(await canAccessUser(req, id))) {
+      return errorMessage(res, "User not found");
+    }
+
     const updateData: any = {};
 
     if (name) updateData.name = name;
@@ -131,7 +147,7 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.body;
     const user = await db.User.findOne({ where: { id } });
-    if (!user) {
+    if (!user || !(await canAccessUser(req, user.id))) {
       return errorMessage(res, "User not found");
     }
     await db.User.destroy({ where: { id } });
@@ -151,7 +167,7 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
       where: { id },
       attributes: { exclude: ["password"] },
     });
-    if (!user) {
+    if (!user || !(await canAccessUser(req, user.id))) {
       return errorMessage(res, "User not found");
     }
     return successMessage(res, "User fetched successfully", user);
@@ -174,7 +190,16 @@ async function getCurrentAdmin(
 
     const admin = await db.Admin.findOne({
       where: { id: adminData.id },
-      attributes: { exclude: ["password"] },
+      attributes: { exclude: ["password", "session_token"] },
+      include: [
+        {
+          model: db.Device,
+          as: "AssignedDevices",
+          attributes: ["id", "imei", "serial_number", "device_name"],
+          through: { attributes: [] },
+          required: false,
+        },
+      ],
     });
 
     if (!admin) {

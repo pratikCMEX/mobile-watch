@@ -6,6 +6,11 @@ import { deleteFile, unlinkUploadedFiles } from "../../helper/Helper";
 import { Op } from "sequelize";
 import { tcpServer } from "../../app";
 import { ensureAmrNarrowband } from "../../library/AudioConverter";
+import {
+  canAccessAllDevices,
+  canAccessDevice,
+  deviceIdScope,
+} from "../../helper/WatchAccess";
 
 const createDevice = async function (
   req: Request,
@@ -659,6 +664,12 @@ const listDevices = async function (
       where.id = id;
     }
 
+    // Staff: restrict to assigned watches (combined with any id filter)
+    const scope = await deviceIdScope(req);
+    if (scope) {
+      where[Op.and] = [{ id: scope }];
+    }
+
     const { rows, count } = await db.Device.findAndCountAll({
       where,
       limit: Number(limit),
@@ -699,7 +710,9 @@ const getAllDeviceImei = async function (
   next: NextFunction
 ) {
   try {
+    const scope = await deviceIdScope(req);
     const devices = await db.Device.findAll({
+      where: scope ? { id: scope } : {},
       attributes: ["id", "imei"],
       order: [["createdAt", "DESC"]],
     });
@@ -735,6 +748,10 @@ const deleteMultipleDevices = async function (
       return errorMessage(res, "No devices found with the provided IDs");
     }
 
+    if (!(await canAccessAllDevices(req, ids))) {
+      return errorMessage(res, "You do not have access to one or more of these devices");
+    }
+
     await db.Device.destroy({ where: { id: { [Op.in]: ids } } });
 
     return successMessage(
@@ -763,7 +780,7 @@ const assignDeviceToUser = async function (
     }
 
     const device = await db.Device.findOne({ where: { id: device_id } });
-    if (!device) {
+    if (!device || !(await canAccessDevice(req, device.id))) {
       return errorMessage(res, "Device not found");
     }
 
@@ -898,7 +915,7 @@ const sendDeviceCommand = async (
     const device = await db.Device.findOne({
       where: { serial_number: serial_number },
     });
-    if (!device) {
+    if (!device || !(await canAccessDevice(req, device.id))) {
       return errorMessage(
         res,
         `Device with serial_number '${serial_number}' not found`
@@ -1064,7 +1081,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     const device = await db.Device.findOne({
       where: { serial_number: serial_number },
     });
-    if (!device) {
+    if (!device || !(await canAccessDevice(req, device.id))) {
       return errorMessage(
         res,
         `Device with serial_number '${serial_number}' not found`
