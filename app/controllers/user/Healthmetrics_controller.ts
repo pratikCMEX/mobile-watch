@@ -300,7 +300,6 @@ const getHealthOverview = async (
       "calories",
       "temperature",
       "distance",
-      // "steps_daily",
     ];
 
     const overview: any = {};
@@ -345,8 +344,9 @@ const getHealthOverview = async (
             : "stable"
           : null;
 
-      // Map steps_daily to steps in response
-      const responseKey = metricType === "steps_daily" ? "steps" : metricType;
+      // Map steps_cumulative to steps in response
+      const responseKey =
+        metricType === "steps_cumulative" ? "steps" : metricType;
 
       overview[responseKey] = {
         latest: latestValue,
