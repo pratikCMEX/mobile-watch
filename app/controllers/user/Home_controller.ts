@@ -32,7 +32,12 @@ const formatLocation = (location: any) => {
 };
 
 const getHealthOverview = async (deviceId: string) => {
-  const metricTypes = ["heart_rate", "blood_pressure", "sleep", "steps_daily"];
+  const metricTypes = [
+    "heart_rate",
+    "blood_pressure",
+    "sleep",
+    "steps_cumulative",
+  ];
   const overview: any = {};
 
   for (const metricType of metricTypes) {
@@ -75,8 +80,9 @@ const getHealthOverview = async (deviceId: string) => {
           : "stable"
         : null;
 
-    // Map steps_daily to steps in response
-    const responseKey = metricType === "steps_daily" ? "steps" : metricType;
+    // Map steps_cumulative to steps in response
+    const responseKey =
+      metricType === "steps_cumulative" ? "steps" : metricType;
 
     overview[responseKey] = {
       latest: latestValue,
