@@ -54,9 +54,9 @@ export const Schemas = {
     imei: Joi.string().required(),
   }),
   getAllHealthMetrics: Joi.object({
-    page: Joi.number().integer().min(1).optional(),
-    limit: Joi.number().integer().min(1).optional(),
-    imei: Joi.string().optional().allow(null),
+    page: Joi.number().integer().min(1).optional().default(1),
+    limit: Joi.number().integer().min(1).optional().default(10),
+    imei: Joi.string().optional().allow(null, ""),
   }),
   deleteHealthMetric: Joi.object({
     id: Joi.string().required(),
