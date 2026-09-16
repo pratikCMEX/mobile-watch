@@ -10,6 +10,7 @@ import User_controller from "../controllers/admin/User_controller";
 import Dashboard_controller from "../controllers/admin/Dashboard_controller";
 import Admin_Auth_controller from "../controllers/admin/Auth_controller";
 import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
+import Notification_controller from "../controllers/admin/Notification_controller";
 const router = express.Router();
 
 // Dashboard stats
@@ -123,6 +124,12 @@ router.post(
   Device_controller.deleteMultipleDevices
 );
 router.post(
+  "/get_all_notifications",
+  checkAdmin,
+  ValidateJoi(Schemas.getAllNotifications),
+  Notification_controller.getAllNotifications
+);
+router.post(
   "/assign_device_to_user",
   checkAdmin,
   ValidateJoi(Schemas.assignDeviceToUser),
@@ -213,5 +220,7 @@ router.delete(
   ValidateJoi(Schemas.appUpdate.delete),
   AppUpdate_controller.deleteAppUpdate
 );
+
+
 
 module.exports = router;
