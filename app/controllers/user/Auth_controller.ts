@@ -12,7 +12,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
       password,
       fcm_token = "",
       device_type = "",
-      force_login = false,
+      force_login = true,
     } = req.body;
 
     if (!email || !password) {
@@ -54,7 +54,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
      * Assuming:
      * device.session_token = current login session
      */
-    if (user.session_token && !force_login) {
+    if (!force_login) {
       return errorMessage(res, "Device is already logged in", {
         already_logged_in: true,
       });
