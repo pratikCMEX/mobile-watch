@@ -15,7 +15,13 @@ export interface DeviceSleepTimeAttributes {
 
 type DeviceSleepTimeCreationAttributes = Optional<
   DeviceSleepTimeAttributes,
-  "id" | "is_enabled" | "last_command_protocol" | "last_acked_at"
+  | "id"
+  | "time_section"
+  | "start_time"
+  | "end_time"
+  | "is_enabled"
+  | "last_command_protocol"
+  | "last_acked_at"
 >;
 
 class DeviceSleepTime

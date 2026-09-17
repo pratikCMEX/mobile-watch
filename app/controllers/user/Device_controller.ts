@@ -3433,6 +3433,213 @@ const setWalkTime = async function (
 };
 
 /**
+ * POST /user/device/set_sleep_time
+ *
+ * Configure the watch's sleep/body-tumbling detection window.
+ *
+ * Wire protocol:
+ *   enabled: [3G*<id>*<LEN>*SLEEPTIME,HH:MM-HH:MM]
+ *   disabled/clear: [3G*<id>*0009*SLEEPTIME]
+ *
+ * The database stores one canonical row per device in DeviceSleepTimes.
+ * The original API value is normalized to HH:MM-HH:MM, while the TCP
+ * command preserves the caller's hour formatting where possible.
+ *
+ * Body:
+ *   {
+ *     serial_number: "5678901234",
+ *     time_section: "21:10-7:30",
+ *     enabled: true
+ *   }
+ */
+const setSleepTime = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, time_section, enabled = true } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    const shouldEnable = enabled !== false;
+    if (shouldEnable && (!time_section || typeof time_section !== "string")) {
+      return errorMessage(
+        res,
+        "time_section is required when enabled is true (format: HH:MM-HH:MM; overnight windows are allowed)"
+      );
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    if (!tcpServer.getDevice(serial_number)) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot send SLEEPTIME command."
+      );
+    }
+
+    const result = tcpServer.sendSleepTimeCommand(
+      serial_number,
+      shouldEnable ? String(time_section).trim() : null
+    );
+    if (!result.sent) {
+      return errorMessage(
+        res,
+        "Failed to send SLEEPTIME command. Use a valid HH:MM-HH:MM time section."
+      );
+    }
+
+    let storedRecord: any = null;
+    await db.sequelize.transaction(async (transaction: any) => {
+      const values = {
+        device_id: device.id,
+        time_section: result.time_section,
+        start_time: result.start_time,
+        end_time: result.end_time,
+        is_enabled: shouldEnable,
+        last_command_protocol: result.protocol,
+        last_acked_at: null,
+      };
+
+      storedRecord = await db.DeviceSleepTime.findOne({
+        where: { device_id: device.id },
+        transaction,
+      });
+
+      if (storedRecord) {
+        await storedRecord.update(values, { transaction });
+      } else {
+        storedRecord = await db.DeviceSleepTime.create(values, {
+          transaction,
+        });
+      }
+    });
+
+    Logging.info(
+      `SLEEPTIME command sent to device ${serial_number} ` +
+        `(device_id=${device.id}, enabled=${shouldEnable}, ` +
+        `time_section=${result.time_section || "null"})`
+    );
+
+    return successMessage(
+      res,
+      shouldEnable
+        ? "Sleep/body-tumbling detection window set successfully"
+        : "Sleep/body-tumbling detection window cleared successfully",
+      {
+        serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        enabled: shouldEnable,
+        time_section: result.time_section,
+        start_time: result.start_time,
+        end_time: result.end_time,
+        command_sent: true,
+        command_protocol: result.protocol,
+        stored_in_db: true,
+        record: storedRecord?.toJSON?.() ?? storedRecord,
+        note: shouldEnable
+          ? "The configured window may cross midnight (for example, 21:10-07:30). The device ACK updates last_acked_at."
+          : "The server mirror was cleared and a bare SLEEPTIME command was sent to the watch.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("setSleepTime error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error setting sleep-time: " + msg);
+  }
+};
+
+/**
+ * POST /user/device/get_sleep_time
+ *
+ * Read the persisted sleep/body-tumbling detection window for a device.
+ * A missing row means the feature has never been configured.
+ *
+ * Body: { serial_number } or { device_id }
+ */
+const getSleepTime = async function (
+  req: Request,
+  res: Response,
+  _next: NextFunction
+) {
+  try {
+    const { serial_number, device_id } = req.body as {
+      serial_number?: string;
+      device_id?: string;
+    };
+
+    if (!serial_number && !device_id) {
+      return errorMessage(res, "serial_number or device_id is required");
+    }
+
+    const device = serial_number
+      ? await db.Device.findOne({ where: { serial_number } })
+      : await db.Device.findByPk(device_id);
+
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device ${
+          serial_number ? `with serial_number '${serial_number}'` : ""
+        } not found`
+      );
+    }
+
+    const record = await db.DeviceSleepTime.findOne({
+      where: { device_id: device.id },
+    });
+
+    return successMessage(
+      res,
+      "Sleep/body-tumbling detection settings fetched successfully",
+      {
+        serial_number: device.serial_number ?? serial_number,
+        device_id: device.id,
+        device_name: device.device_name,
+        configured: Boolean(record),
+        sleep_time: record
+          ? {
+              enabled: record.is_enabled,
+              time_section: record.time_section,
+              start_time: record.start_time,
+              end_time: record.end_time,
+              last_command_protocol: record.last_command_protocol,
+              last_acked_at: record.last_acked_at,
+              updated_at: record.updatedAt,
+            }
+          : {
+              enabled: false,
+              time_section: null,
+              start_time: null,
+              end_time: null,
+              last_command_protocol: null,
+              last_acked_at: null,
+              updated_at: null,
+            },
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("getSleepTime error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error fetching sleep-time: " + msg);
+  }
+};
+
+/**
  * POST /user/device/get_walk_time
  *
  * Read back the persisted walk-time schedule + step target, AND
@@ -4126,6 +4333,8 @@ export default {
   setUploadInterval,
   setWalkTime,
   getWalkTime,
+  setSleepTime,
+  getSleepTime,
   locateDevice,
   getDeviceLocation,
   registerDeviceByImei,
