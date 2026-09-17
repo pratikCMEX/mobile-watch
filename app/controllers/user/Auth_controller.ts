@@ -44,9 +44,9 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
       where: { owner_id: user.id },
       order: [["createdAt", "ASC"]],
     });
-    if (firstDevice.length === 0) {
-      return errorMessage(res, "Device not registered", null);
-    }
+    // if (firstDevice.length === 0) {
+    //   return errorMessage(res, "Device not registered", null);
+    // }
 
     /*
      * Check whether this device is already logged in.
