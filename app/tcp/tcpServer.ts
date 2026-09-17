@@ -265,6 +265,14 @@ export interface TcpClient {
    * Device IMEI if/when available.
    */
   imei?: string;
+
+  /**
+   * Set to true while syncSosNumbersToDevice is pushing
+   * SOS numbers to this device. Used to suppress SOS
+   * trigger notifications that might arrive as ACKs or
+   * spurious packets during the sync window.
+   */
+  sosSyncInProgress?: boolean;
 }
 
 export interface TcpServerOptions {
@@ -6154,16 +6162,40 @@ class TcpServer {
       `SOS trigger received from device ${packet.deviceId}: slot=${sosSlot} raw="${packet.raw}"`
     );
 
+    // ── SOS sync in-progress guard ─────────────────────────
+    // When save_contact / save_contacts / delete_contact is in progress,
+    // syncSosNumbersToDevice pushes SOS SET commands to the device.
+    // The device may reply with ACKs or spurious packets that could be
+    // mistaken for real SOS triggers.  Suppress ALL notifications while
+    // a sync is in progress.
+    if (client.sosSyncInProgress) {
+      Logging.info(
+        `SOS ${sosSlot} from device ${packet.deviceId} suppressed — SOS sync in progress (sosSyncInProgress=true)`
+      );
+      this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+        Logging.error(
+          `Failed to mark device ${packet.deviceId} online from SOS: ${error.message}`
+        )
+      );
+      void client;
+      return;
+    }
+
     // ── ACK guard ──────────────────────────────────────────
     // When the server sends a SOS SET command (e.g. [3G*id*0010*SOS1,phone]),
     // the device replies with a short ACK like [3G*id*0002*SOS1,1] where the
-    // payload is just a status code ("0" or "1").  This is NOT a real SOS
-    // trigger and must NOT create a notification.  A genuine SOS trigger
-    // from the user always carries a phone-number payload.
+    // payload is just a status code ("0" or "1") — or possibly a bare ACK
+    // with no payload at all (e.g. [3G*id*0002*SOS1]).  This is NOT a real
+    // SOS trigger and must NOT create a notification.  A genuine SOS trigger
+    // from the user always carries a phone-number payload (digits).
     const payload = (packet.payload || "").trim();
-    if (payload === "0" || payload === "1") {
+    if (payload === "" || payload === "0" || payload === "1") {
       Logging.info(
-        `SOS ${sosSlot} from device ${packet.deviceId} is an ACK response (status=${payload}) — skipping notification`
+        `SOS ${sosSlot} from device ${
+          packet.deviceId
+        } is an ACK response (status="${
+          payload || "(bare ack)"
+        }") — skipping notification`
       );
       this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
         Logging.error(

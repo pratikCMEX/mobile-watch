@@ -83,46 +83,61 @@ async function syncSosNumbersToDevice(
     return { online: false, wire_results: [] };
   }
 
-  const contacts = await db.EmergencyContact.findAll({
-    where: { device_id: deviceId, priority: { [Op.not]: null } },
-    order: [["priority", "ASC"]],
-  });
+  // Mark SOS sync in progress so that any SOS trigger packets
+  // (ACKs or spurious) received from the device during this
+  // window do NOT create notifications.
+  tcpClient.sosSyncInProgress = true;
+  Logging.info(
+    `SOS sync started for device ${serialNumber} (device_id: ${deviceId})`
+  );
 
-  const wireResults: Array<{
-    slot: "SOS1" | "SOS2" | "SOS3";
-    priority: number;
-    name: string;
-    digits: string;
-    sent: boolean;
-    protocol: string;
-  }> = [];
-
-  for (const c of contacts) {
-    const slot: "SOS1" | "SOS2" | "SOS3" =
-      c.priority === 1 ? "SOS1" : c.priority === 2 ? "SOS2" : "SOS3";
-
-    const digits = (c.country_code || "") + (c.phone_number || "");
-    if (!digits) continue;
-
-    const sent = tcpServer.sendSosCommand(serialNumber, slot, digits);
-    const protocol = buildSosProtocolString(serialNumber, slot, digits);
-
-    wireResults.push({
-      slot,
-      priority: c.priority,
-      name: c.name,
-      digits,
-      sent,
-      protocol,
+  try {
+    const contacts = await db.EmergencyContact.findAll({
+      where: { device_id: deviceId, priority: { [Op.not]: null } },
+      order: [["priority", "ASC"]],
     });
 
+    const wireResults: Array<{
+      slot: "SOS1" | "SOS2" | "SOS3";
+      priority: number;
+      name: string;
+      digits: string;
+      sent: boolean;
+      protocol: string;
+    }> = [];
+
+    for (const c of contacts) {
+      const slot: "SOS1" | "SOS2" | "SOS3" =
+        c.priority === 1 ? "SOS1" : c.priority === 2 ? "SOS2" : "SOS3";
+
+      const digits = (c.country_code || "") + (c.phone_number || "");
+      if (!digits) continue;
+
+      const sent = tcpServer.sendSosCommand(serialNumber, slot, digits);
+      const protocol = buildSosProtocolString(serialNumber, slot, digits);
+
+      wireResults.push({
+        slot,
+        priority: c.priority,
+        name: c.name,
+        digits,
+        sent,
+        protocol,
+      });
+
+      Logging.info(
+        `SOS ${slot} -> device ${serialNumber} (device_id: ${deviceId}): ${protocol}` +
+          (sent ? "" : " [SEND FAILED]")
+      );
+    }
+
+    return { online: true, wire_results: wireResults };
+  } finally {
+    tcpClient.sosSyncInProgress = false;
     Logging.info(
-      `SOS ${slot} -> device ${serialNumber} (device_id: ${deviceId}): ${protocol}` +
-        (sent ? "" : " [SEND FAILED]")
+      `SOS sync completed for device ${serialNumber} (device_id: ${deviceId})`
     );
   }
-
-  return { online: true, wire_results: wireResults };
 }
 
 // ─────────────────────────────────────────────────────────────
