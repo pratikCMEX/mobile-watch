@@ -119,7 +119,7 @@ async function getAllHealthMetrics(
         });
 
         const orConditions: any[] = [
-          { metric_type: { [Op.like]: `%${search}%` } },
+          { metric_type: search }, // Exact match for ENUM type
         ];
 
         for (const device of devices) {
@@ -132,9 +132,9 @@ async function getAllHealthMetrics(
         listWhere[Op.or] = orConditions;
       } catch (err) {
         console.error("Error during IMEI/device_name search:", err);
-        // If error occurs, just search by metric_type
+        // If error occurs, just search by metric_type (exact match)
         listWhere[Op.or] = [
-          { metric_type: { [Op.like]: `%${search}%` } },
+          { metric_type: search },
         ];
       }
     }
