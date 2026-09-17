@@ -167,9 +167,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
           attributes: ["id"],
         });
 
-        const orConditions: any[] = [
-          { id: { [Op.like]: `%${search}%` } },
-        ];
+        const orConditions: any[] = [];
 
         if (device) {
           const hasAccess = await canAccessDevice(req, device.id);
@@ -178,11 +176,11 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
           }
         }
 
-        where[Op.or] = orConditions;
+        if (orConditions.length > 0) {
+          where[Op.or] = orConditions;
+        }
       } catch (err) {
         console.error("Error during IMEI search:", err);
-        // If error occurs, just search by id
-        where[Op.or] = [{ id: { [Op.like]: `%${search}%` } }];
       }
     }
 

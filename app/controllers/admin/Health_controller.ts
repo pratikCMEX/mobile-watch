@@ -114,7 +114,6 @@ async function getAllHealthMetrics(
         });
 
         const orConditions: any[] = [
-          { id: { [Op.like]: `%${search}%` } },
           { device_id: { [Op.like]: `%${search}%` } },
           { metric_type: { [Op.like]: `%${search}%` } },
         ];
@@ -129,9 +128,8 @@ async function getAllHealthMetrics(
         listWhere[Op.or] = orConditions;
       } catch (err) {
         console.error("Error during IMEI search:", err);
-        // If error occurs, just search by id, device_id, metric_type
+        // If error occurs, just search by device_id, metric_type
         listWhere[Op.or] = [
-          { id: { [Op.like]: `%${search}%` } },
           { device_id: { [Op.like]: `%${search}%` } },
           { metric_type: { [Op.like]: `%${search}%` } },
         ];
