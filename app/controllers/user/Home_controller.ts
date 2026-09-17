@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { Op } from "sequelize";
+import { start } from "node:repl";
 
 const formatDevice = (device: any) => {
   const d = device.toJSON ? device.toJSON() : device;
@@ -39,6 +40,8 @@ const getHealthOverview = async (deviceId: string) => {
     "steps_cumulative",
   ];
   const overview: any = {};
+  const now = new Date();
+  const todayStart = new Date();
 
   for (const metricType of metricTypes) {
     // Get latest reading
@@ -47,18 +50,12 @@ const getHealthOverview = async (deviceId: string) => {
       order: [["recorded_at", "DESC"]],
     });
 
-    // Get previous day's reading (from 24-48 hours ago)
-    const now = new Date();
-    const previousDayStart = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-    const previousDayEnd = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
+    // Most recent reading strictly before today (not a fixed 24-48h window)
     const previousDayMetric = await db.HealthMetric.findOne({
       where: {
         device_id: deviceId,
         metric_type: metricType,
-        recorded_at: {
-          [Op.between]: [previousDayStart, previousDayEnd],
-        },
+        recorded_at: { [Op.lt]: todayStart },
       },
       order: [["recorded_at", "DESC"]],
     });
@@ -93,6 +90,18 @@ const getHealthOverview = async (deviceId: string) => {
       delta: delta,
       direction: direction,
     };
+  }
+
+  // Steps actually taken TODAY = today's cumulative - last cumulative before today
+  if (overview["steps"]) {
+    const stepsLatest = overview["steps"].latest;
+    const stepsPrevious = overview["steps"].previous_day_value;
+    const stepsToday =
+      stepsLatest !== null && stepsPrevious !== null
+        ? Math.max(stepsLatest - stepsPrevious, 0)
+        : stepsLatest || 0;
+
+    overview["steps"].latest = stepsToday;
   }
 
   // Distance (km) and calories, derived from today's step count
