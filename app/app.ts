@@ -9,6 +9,8 @@ import fs from "fs";
 import { config } from "./config/config";
 import db from "./models";
 import TcpServer from "./tcp/tcpServer";
+import { Server } from "socket.io";
+export { io };
 
 const app = express();
 const server = http.createServer(app);
@@ -47,6 +49,22 @@ app.use(
 app.use(helmet());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use((req: any, res: any, next: any) => {
+  /** Log the req */
+  Logging.info(
+    `Incomming - METHOD: [${req.method}] - URL: [${req.url}] - IP: [${req.socket.remoteAddress}]`
+  );
+
+  res.on("finish", () => {
+    /** Log the res */
+    Logging.info(
+      `Result - METHOD: [${req.method}] - URL: [${req.url}] - IP: [${req.socket.remoteAddress}] - STATUS: [${res.statusCode}]`
+    );
+  });
+
+  next();
+});
 app.use("/webhook", express.raw({ type: "application/json" }));
 
 // ─── Rate Limiting ──────────────────────────────────────────────
@@ -144,6 +162,38 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
+const io = new Server(server, {
+  cors: {
+    origin: "*", // your frontend URL
+    methods: ["GET", "POST"],
+  },
+});
+
+// ✅ Store io globally so controllers can use it
+
+// ✅ Socket connection
+io.on("connection", (socket) => {
+  console.log("Client connected:", socket.id);
+
+  // ✅ User joins their own room using user_id
+  socket.on("join", (user_id: string) => {
+    socket.join(user_id);
+    console.log(`User ${user_id} joined room`);
+  });
+  socket.on("isDeviceConnected", (data) => {
+    console.log("Received from Android:", data);
+
+    io.emit("isDeviceConnected", data);
+  });
+  socket.on("isMobileDeviceConnected", (data) => {
+    console.log("Received from Android:", data);
+
+    io.emit("isMobileDeviceConnected", data);
+  });
+  socket.on("disconnect", () => {
+    console.log("Client disconnected:", socket.id);
+  });
+});
 // ─── Start Server ──────────────────────────────────────────────
 server.listen(config.server.port, "0.0.0.0", async () => {
   Logging.info(`Server running on port ${config.server.port}`);

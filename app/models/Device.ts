@@ -136,6 +136,10 @@ class Device
       foreignKey: "device_id",
       as: "DeviceSetting",
     });
+    Device.hasOne(models.DeviceSleepTime, {
+      foreignKey: "device_id",
+      as: "DeviceSleepTime",
+    });
     Device.hasMany(models.DeviceAlarm, {
       foreignKey: "device_id",
       as: "DeviceAlarms",

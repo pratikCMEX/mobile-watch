@@ -10,4 +10,10 @@ router.post(
   TestNotification_controller.sendTestNotification
 );
 
+router.post(
+  "/send_web_test_notification",
+  // ValidateJoi(Schemas.testNotification.),
+  TestNotification_controller.sendWebTestNotification
+);
+
 module.exports = router;

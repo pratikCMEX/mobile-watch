@@ -3,6 +3,7 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { pushToUser } from "../../services/notification.service";
 import Logging from "../../library/Logging";
+import { sendNotification } from "../../helper/WebNotification";
 
 const sendTestNotification = async (
   req: Request,
@@ -110,6 +111,19 @@ const sendTestNotification = async (
   }
 };
 
+const sendWebTestNotification = async (req: Request, res: Response) => {
+  await sendNotification({
+    user_id: req.body.user_id,
+    type: "general",
+    title: "this is a test notification",
+    message: `Test notification from the admin .`,
+    data: {
+      // appointment_id: appointment.id,
+      updated_at: new Date(),
+    },
+  });
+};
 export default {
   sendTestNotification,
+  sendWebTestNotification,
 };
