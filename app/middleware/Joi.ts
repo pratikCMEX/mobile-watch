@@ -1661,6 +1661,7 @@ export const Schemas = {
       sorting: Joi.string().valid("ASC", "DESC").optional().default("DESC"),
       limit: Joi.number().integer().min(1).optional().default(10),
       device_id: Joi.string().optional(),
+      is_active: Joi.boolean().optional(),
     }),
     delete: Joi.object({
       id: Joi.string().required(),
