@@ -280,6 +280,12 @@ router.get(
   Staff_controller.getCurrentStaff
 );
 router.post(
+  "/update_current_staff",
+  checkAdmin,
+  ValidateJoi(Schemas.staff.updateCurrent),
+  Staff_controller.updateCurrentStaff
+);
+router.post(
   "/staff_login_logs",
   checkAdmin,
   adminOnly,

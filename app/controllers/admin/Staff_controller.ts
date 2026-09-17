@@ -321,6 +321,70 @@ async function getCurrentStaff(req: Request, res: Response, next: NextFunction) 
   }
 }
 
+async function updateCurrentStaff(req: Request, res: Response, next: NextFunction) {
+  const transaction = await db.sequelize.transaction();
+  try {
+    const staffId = (req as any).user?.id;
+    const { name, email, username, password, device_ids } = req.body;
+
+    if (!staffId) {
+      await transaction.rollback();
+      return errorMessage(res, "Staff not authenticated");
+    }
+
+    const staff = await db.Admin.findOne({ where: { id: staffId, role: "staff" } });
+    if (!staff) {
+      await transaction.rollback();
+      return errorMessage(res, "Staff not found");
+    }
+
+    if (username !== undefined && username !== staff.username) {
+      if (await usernameTaken(username, staffId)) {
+        await transaction.rollback();
+        return errorMessage(res, "Username already exists");
+      }
+      staff.username = username;
+    }
+
+    if (email !== undefined && email !== staff.email) {
+      if (await emailTaken(email, staffId)) {
+        await transaction.rollback();
+        return errorMessage(res, "Email already exists");
+      }
+      staff.email = email;
+    }
+
+    if (name !== undefined) staff.name = name;
+    if (password) staff.password = password;
+
+    if (device_ids !== undefined && device_ids.length) {
+      const deviceError = await validateDeviceIds(device_ids);
+      if (deviceError) {
+        await transaction.rollback();
+        return errorMessage(res, deviceError);
+      }
+    }
+
+    await staff.save({ transaction });
+
+    if (staff.all_watches) {
+      // Full access makes specific assignments meaningless
+      await setAssignedDevices(staff.id, [], transaction);
+    } else if (device_ids !== undefined) {
+      await setAssignedDevices(staff.id, device_ids, transaction);
+    }
+
+    await transaction.commit();
+
+    const updated = await findStaffWithDevices(staff.id);
+    return successMessage(res, "Staff profile updated successfully", updated);
+  } catch (err) {
+    await transaction.rollback();
+    console.error("updateCurrentStaff error:", err);
+    return errorMessage(res, "Error updating staff profile");
+  }
+}
+
 // Staff login history: which staff logged in, from which IP, and when.
 async function staffLoginLogs(req: Request, res: Response, next: NextFunction) {
   try {
@@ -400,5 +464,6 @@ export default {
   listStaff,
   getStaffDetail,
   getCurrentStaff,
+  updateCurrentStaff,
   staffLoginLogs,
 };
