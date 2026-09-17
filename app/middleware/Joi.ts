@@ -1764,7 +1764,7 @@ export const Schemas = {
       name: Joi.string().trim().optional(),
       email: Joi.string().email().optional(),
       username: Joi.string().trim().optional(),
-      password: Joi.string().min(6).optional().allow(""),
+      // password: Joi.string().min(6).optional().allow(""),
       device_ids: Joi.array().items(Joi.string().uuid()).optional(),
     }),
     loginLogs: Joi.object({

@@ -325,7 +325,7 @@ async function updateCurrentStaff(req: Request, res: Response, next: NextFunctio
   const transaction = await db.sequelize.transaction();
   try {
     const staffId = (req as any).user?.id;
-    const { name, email, username, password, device_ids } = req.body;
+    const { name, email, username, device_ids } = req.body;
 
     if (!staffId) {
       await transaction.rollback();
@@ -355,7 +355,10 @@ async function updateCurrentStaff(req: Request, res: Response, next: NextFunctio
     }
 
     if (name !== undefined) staff.name = name;
-    if (password) staff.password = password;
+    // if (password) {
+    //   const bcrypt = require("bcrypt");
+    //   staff.password = await bcrypt.hash(password, 10);
+    // }
 
     if (device_ids !== undefined && device_ids.length) {
       const deviceError = await validateDeviceIds(device_ids);
