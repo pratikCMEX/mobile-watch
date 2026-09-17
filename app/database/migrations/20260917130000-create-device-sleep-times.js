@@ -29,17 +29,21 @@ module.exports = {
       },
       time_section: {
         type: Sequelize.STRING(11),
-        allowNull: false,
-        comment: "Normalized HH:MM-HH:MM sleep detection window",
+        allowNull: true,
+        defaultValue: null,
+        comment:
+          "Normalized HH:MM-HH:MM sleep detection window; NULL when disabled",
       },
       start_time: {
         type: Sequelize.STRING(5),
-        allowNull: false,
+        allowNull: true,
+        defaultValue: null,
         comment: "Window start in 24-hour HH:MM format",
       },
       end_time: {
         type: Sequelize.STRING(5),
-        allowNull: false,
+        allowNull: true,
+        defaultValue: null,
         comment: "Window end in 24-hour HH:MM format; may cross midnight",
       },
       is_enabled: {
