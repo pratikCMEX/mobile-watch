@@ -276,6 +276,12 @@ export interface TcpServerOptions {
 // TCP Server
 // ─────────────────────────────────────────────────────────────
 
+// Minimum distance (in meters) the device must move from its last
+// recorded location before a new Location row is persisted.
+// This prevents duplicate entries when the device stays stationary
+// (e.g. parked for an hour) and keeps the locations table lean.
+const MIN_DISTANCE_METERS = 10;
+
 class TcpServer {
   private readonly server: net.Server;
 
@@ -1705,16 +1711,46 @@ class TcpServer {
       }")`
     );
 
-    await db.Location.create({
-      device_id: device.id,
-      latitude,
-      longitude,
-      speed_kmh: parseFloat(location.speed) || null,
-      direction: location.direction || null,
-      is_valid_fix: isValidFix,
-      recorded_at: recordedAt,
+    // ── Deduplication: only persist a new Location row if the device
+    //    has moved at least MIN_DISTANCE_METERS from its last recorded
+    //    position. This prevents duplicate entries when the device is
+    //    stationary (e.g. parked for an hour).
+    const lastLocation = await db.Location.findOne({
+      where: { device_id: device.id },
+      order: [["recorded_at", "DESC"]],
+      attributes: ["latitude", "longitude"],
     });
-    Logging.info(`${tag} step 4 OK: Location row created`);
+
+    let shouldSaveLocation = true;
+    if (lastLocation) {
+      const dist = this.haversineDistanceMeters(
+        Number(lastLocation.latitude),
+        Number(lastLocation.longitude),
+        latitude,
+        longitude
+      );
+      if (dist < MIN_DISTANCE_METERS) {
+        shouldSaveLocation = false;
+        Logging.info(
+          `${tag} step 4 SKIP: distance=${dist.toFixed(
+            2
+          )}m < ${MIN_DISTANCE_METERS}m threshold — no new Location row`
+        );
+      }
+    }
+
+    if (shouldSaveLocation) {
+      await db.Location.create({
+        device_id: device.id,
+        latitude,
+        longitude,
+        speed_kmh: parseFloat(location.speed) || null,
+        direction: location.direction || null,
+        is_valid_fix: isValidFix,
+        recorded_at: recordedAt,
+      });
+      Logging.info(`${tag} step 4 OK: Location row created`);
+    }
 
     const battery = parseInt(location.battery || "", 10);
 
@@ -3696,16 +3732,46 @@ class TcpServer {
       }")`
     );
 
-    await db.Location.create({
-      device_id: device.id,
-      latitude,
-      longitude,
-      speed_kmh: parseFloat(location.speed) || null,
-      direction: location.direction || null,
-      is_valid_fix: isValidFix,
-      recorded_at: recordedAt,
+    // ── Deduplication: only persist a new Location row if the device
+    //    has moved at least MIN_DISTANCE_METERS from its last recorded
+    //    position. This prevents duplicate entries when the device is
+    //    stationary (e.g. parked for an hour).
+    const lastLocation = await db.Location.findOne({
+      where: { device_id: device.id },
+      order: [["recorded_at", "DESC"]],
+      attributes: ["latitude", "longitude"],
     });
-    Logging.info(`${tag} step 4 OK: Location row created`);
+
+    let shouldSaveLocation = true;
+    if (lastLocation) {
+      const dist = this.haversineDistanceMeters(
+        Number(lastLocation.latitude),
+        Number(lastLocation.longitude),
+        latitude,
+        longitude
+      );
+      if (dist < MIN_DISTANCE_METERS) {
+        shouldSaveLocation = false;
+        Logging.info(
+          `${tag} step 4 SKIP: distance=${dist.toFixed(
+            2
+          )}m < ${MIN_DISTANCE_METERS}m threshold — no new Location row`
+        );
+      }
+    }
+
+    if (shouldSaveLocation) {
+      await db.Location.create({
+        device_id: device.id,
+        latitude,
+        longitude,
+        speed_kmh: parseFloat(location.speed) || null,
+        direction: location.direction || null,
+        is_valid_fix: isValidFix,
+        recorded_at: recordedAt,
+      });
+      Logging.info(`${tag} step 4 OK: Location row created`);
+    }
 
     await device.update({
       last_updated_at: new Date(),
