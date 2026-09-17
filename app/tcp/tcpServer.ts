@@ -3640,9 +3640,8 @@ class TcpServer {
 
       const dateStr = recordedAt.toISOString().split("T")[0];
 
-      // Look for an existing steps_cumulative row for the same device
-      // and the same calendar date.
-      const existing = await db.HealthMetric.findOne({
+      // ── Steps (steps_cumulative) ──────────────────────
+      const existingSteps = await db.HealthMetric.findOne({
         where: {
           device_id: deviceId,
           metric_type: "steps_cumulative",
@@ -3654,11 +3653,8 @@ class TcpServer {
         },
       });
 
-      if (existing) {
-        // Same date — update the existing row with the latest cumulative
-        // value (the pedometer only increases, so the newest reading is
-        // always the highest for that day).
-        await existing.update({
+      if (existingSteps) {
+        await existingSteps.update({
           value_primary: steps,
           value_secondary: !isNaN(tumbling) ? tumbling : null,
           unit: "steps",
@@ -3671,7 +3667,6 @@ class TcpServer {
           }`
         );
       } else {
-        // Different date — insert a new row.
         await db.HealthMetric.create({
           device_id: deviceId,
           metric_type: "steps_cumulative",
@@ -3686,6 +3681,46 @@ class TcpServer {
             !isNaN(tumbling) ? tumbling : "n/a"
           }`
         );
+      }
+
+      // ── Sleep (tumbling = sleep data from device) ──────
+      // Tumbling value from the UD_LTE packet represents sleep data.
+      // Stored as metric_type "sleep" so it appears in analytics
+      // alongside steps, heart_rate, etc.
+      if (!isNaN(tumbling)) {
+        const existingSleep = await db.HealthMetric.findOne({
+          where: {
+            device_id: deviceId,
+            metric_type: "sleep",
+            [db.Sequelize.Op.and]: db.sequelize.where(
+              db.sequelize.fn("DATE", db.sequelize.col("recorded_at")),
+              "=",
+              dateStr
+            ),
+          },
+        });
+
+        if (existingSleep) {
+          await existingSleep.update({
+            value_primary: tumbling,
+            value_secondary: null,
+            unit: "minutes",
+            recorded_at: recordedAt,
+          });
+
+          Logging.info(`${tag} OK (updated): sleep=${tumbling} minutes`);
+        } else {
+          await db.HealthMetric.create({
+            device_id: deviceId,
+            metric_type: "sleep",
+            value_primary: tumbling,
+            value_secondary: null,
+            unit: "minutes",
+            recorded_at: recordedAt,
+          });
+
+          Logging.info(`${tag} OK (created): sleep=${tumbling} minutes`);
+        }
       }
     } catch (error: any) {
       Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
