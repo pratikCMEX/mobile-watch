@@ -608,9 +608,24 @@ export const Schemas = {
               /^([01]?[0-9]|2[0-3]):[0-5][0-9]-[1-3]-[0-9](-[01]{7})?$/,
               "alarm format"
             )
+            .custom((value, helpers) => {
+              const [, , type, days] = value.split("-");
+
+              if (type === "3" && (!days || !/^[01]{7}$/.test(days))) {
+                return helpers.error("any.invalid");
+              }
+
+              if (type !== "3" && days) {
+                return helpers.error("any.invalid");
+              }
+
+              return value;
+            })
             .messages({
               "string.pattern.base":
-                "Invalid alarm format. Expected: HH:MM-type-repeat or HH:MM-type-repeat-days (e.g., 08:10-1-1 or 08:10-1-3-0111110)",
+                "Invalid alarm format. Expected: HH:MM-switch-type or HH:MM-switch-type-days (e.g., 08:10-1-1 or 08:10-1-3-0111110)",
+              "any.invalid":
+                "Weekly alarms require a seven-character days mask; non-weekly alarms must not include days",
             })
         )
         .min(1)
