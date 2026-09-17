@@ -106,19 +106,23 @@ async function getAllHealthMetrics(
 
     if (body.search && body.search !== "") {
       const search = body.search;
-      // Check if search matches an IMEI first
+      // Check if search matches an IMEI or device_name first
       try {
-        const device = await db.Device.findOne({
-          where: { imei: { [Op.like]: `%${search}%` } },
+        const devices = await db.Device.findAll({
+          where: {
+            [Op.or]: [
+              { imei: { [Op.like]: `%${search}%` } },
+              { device_name: { [Op.like]: `%${search}%` } },
+            ],
+          },
           attributes: ["id"],
         });
 
         const orConditions: any[] = [
-          { device_id: { [Op.like]: `%${search}%` } },
           { metric_type: { [Op.like]: `%${search}%` } },
         ];
 
-        if (device) {
+        for (const device of devices) {
           const hasAccess = await canAccessDevice(req, device.id);
           if (hasAccess) {
             orConditions.push({ device_id: device.id });
@@ -127,10 +131,9 @@ async function getAllHealthMetrics(
 
         listWhere[Op.or] = orConditions;
       } catch (err) {
-        console.error("Error during IMEI search:", err);
-        // If error occurs, just search by device_id, metric_type
+        console.error("Error during IMEI/device_name search:", err);
+        // If error occurs, just search by metric_type
         listWhere[Op.or] = [
-          { device_id: { [Op.like]: `%${search}%` } },
           { metric_type: { [Op.like]: `%${search}%` } },
         ];
       }
