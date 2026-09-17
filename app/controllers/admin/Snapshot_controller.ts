@@ -160,16 +160,21 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
     if (scope) where.device_id = scope;
 
     if (search && search !== "") {
-      // Check if search matches an IMEI first
+      // Check if search matches an IMEI or device_name first
       try {
-        const device = await db.Device.findOne({
-          where: { imei: { [Op.like]: `%${search}%` } },
+        const devices = await db.Device.findAll({
+          where: {
+            [Op.or]: [
+              { imei: { [Op.like]: `%${search}%` } },
+              { device_name: { [Op.like]: `%${search}%` } },
+            ],
+          },
           attributes: ["id"],
         });
 
         const orConditions: any[] = [];
 
-        if (device) {
+        for (const device of devices) {
           const hasAccess = await canAccessDevice(req, device.id);
           if (hasAccess) {
             orConditions.push({ device_id: device.id });
@@ -180,7 +185,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
           where[Op.or] = orConditions;
         }
       } catch (err) {
-        console.error("Error during IMEI search:", err);
+        console.error("Error during IMEI/device_name search:", err);
       }
     }
 
