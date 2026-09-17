@@ -118,9 +118,7 @@ async function getAllHealthMetrics(
           attributes: ["id"],
         });
 
-        const orConditions: any[] = [
-          { metric_type: search }, // Exact match for ENUM type
-        ];
+        const orConditions: any[] = [];
 
         for (const device of devices) {
           const hasAccess = await canAccessDevice(req, device.id);
@@ -129,13 +127,11 @@ async function getAllHealthMetrics(
           }
         }
 
-        listWhere[Op.or] = orConditions;
+        if (orConditions.length > 0) {
+          listWhere[Op.or] = orConditions;
+        }
       } catch (err) {
         console.error("Error during IMEI/device_name search:", err);
-        // If error occurs, just search by metric_type (exact match)
-        listWhere[Op.or] = [
-          { metric_type: search },
-        ];
       }
     }
 
