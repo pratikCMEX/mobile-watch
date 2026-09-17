@@ -843,6 +843,56 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+interface ParsedDeviceAlarm {
+  slot_index: number;
+  alarm_time: string;
+  is_enabled: boolean;
+  alarm_type: 1 | 2 | 3;
+  weekdays_mask: string | null;
+  alarm_value: string;
+}
+
+const ALARM_VALUE_PATTERN =
+  /^((?:[01]?\d|2[0-3]):[0-5]\d)-([01])-([1-3])(?:-([01]{7}))?$/;
+
+const parseAlarmValue = (
+  value: string,
+  slotIndex: number
+): ParsedDeviceAlarm => {
+  const match = ALARM_VALUE_PATTERN.exec(value);
+
+  if (!match) {
+    throw new Error(
+      `Invalid alarm at slot ${slotIndex}. Expected HH:MM-switch-type[-days].`
+    );
+  }
+
+  const [, timeValue, switchValue, typeValue, weekdaysMask = null] = match;
+  const [hour, minute] = timeValue.split(":");
+  const alarmType = Number(typeValue) as 1 | 2 | 3;
+
+  if (alarmType === 3 && !weekdaysMask) {
+    throw new Error(
+      `Weekly alarm at slot ${slotIndex} requires a seven-character days mask`
+    );
+  }
+
+  if (alarmType !== 3 && weekdaysMask) {
+    throw new Error(
+      `Days mask is only valid for weekly alarms at slot ${slotIndex}`
+    );
+  }
+
+  return {
+    slot_index: slotIndex,
+    alarm_time: `${hour.padStart(2, "0")}:${minute}`,
+    is_enabled: switchValue === "1",
+    alarm_type: alarmType,
+    weekdays_mask: weekdaysMask,
+    alarm_value: value,
+  };
+};
+
 const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { serial_number, alarms } = req.body;
@@ -878,20 +928,34 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
       );
     }
 
-    const commandSent = tcpServer.sendAlarmCommand(serial_number, alarms);
-
-    if (!commandSent) {
-      return errorMessage(
-        res,
-        "Failed to send alarm command. Device may be disconnected."
-      );
-    }
-
-    // Build the command protocol string for response (LEN is hex).
+    const parsedAlarms = alarms.map(parseAlarmValue);
     const alarmPayload = alarms.join(",");
     const content = `REMIND,${alarmPayload}`;
     const length = content.length.toString(16).padStart(4, "0");
     const commandProtocol = `[CS*${serial_number}*${length}*${content}]`;
+    let storedAlarms: any[] = [];
+
+    await db.sequelize.transaction(async (transaction: any) => {
+      await db.DeviceAlarm.destroy({
+        where: { device_id: device.id },
+        transaction,
+      });
+
+      storedAlarms = await db.DeviceAlarm.bulkCreate(
+        parsedAlarms.map((alarm) => ({
+          device_id: device.id,
+          last_command_protocol: commandProtocol,
+          ...alarm,
+        })),
+        { transaction }
+      );
+
+      const commandSent = tcpServer.sendAlarmCommand(serial_number, alarms);
+
+      if (!commandSent) {
+        throw new Error("Failed to send alarm command to the device");
+      }
+    });
 
     Logging.info(
       `Alarm command sent to device ${serial_number} (device_id: ${
@@ -909,6 +973,7 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
       command_message:
         "REMIND command sent to device. The device will update its alarm settings.",
       command_protocol: commandProtocol,
+      stored_alarms: storedAlarms.map((alarm) => alarm.toJSON()),
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
