@@ -390,12 +390,18 @@ const getHealthOverview = async (
 
     // Steps actually taken TODAY = today's cumulative - last cumulative before today
     // (falls back to the raw latest value if there's no earlier reading to diff against)
-    const stepsLatest = overview["steps"]?.latest;
-    const stepsPrevious = overview["steps"]?.previous_day_value;
-    const stepsToday =
-      stepsLatest !== null && stepsPrevious !== null
-        ? Math.max(stepsLatest - stepsPrevious, 0)
-        : stepsLatest || 0;
+    if (overview["steps"]) {
+      const stepsLatest = overview["steps"].latest;
+      const stepsPrevious = overview["steps"].previous_day_value;
+      const stepsToday =
+        stepsLatest !== null && stepsPrevious !== null
+          ? Math.max(stepsLatest - stepsPrevious, 0)
+          : stepsLatest || 0;
+
+      overview["steps"].latest = stepsToday;
+    }
+
+    const stepsToday = overview["steps"]?.latest || 0;
 
     const totalDistanceKm = Number((stepsToday * 0.000762).toFixed(2));
     const totalCalories = Number((stepsToday * 0.04).toFixed(2));
