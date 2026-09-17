@@ -101,6 +101,12 @@ router.post(
 );
 
 router.post("/edit_device_name", checkToken, Device_controller.editDeviceName);
+router.post(
+  "/update_device_number",
+  checkToken,
+  Device_controller.updateDeviceNumber
+);
+
 // List the auto-answer numbers currently stored server-side for a
 // device (server-side mirror of the ACALL whitelist on the watch).
 router.post(

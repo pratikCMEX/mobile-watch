@@ -4302,6 +4302,34 @@ const editDeviceName = async function (
     return errorMessage(res, "Error editing device name: " + msg);
   }
 };
+
+const updateDeviceNumber = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, phone_number } = req.body;
+
+    if (!device_id || !phone_number) {
+      return errorMessage(res, "device_id, phone_number are required");
+    }
+
+    const device = await db.Device.findOne({ where: { id: device_id } });
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    device.phone_number = phone_number;
+    await device.save();
+
+    return successMessage(res, "Device number updated successfully", device);
+  } catch (err: any) {
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error updating device number: " + msg);
+  }
+};
+
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -4339,4 +4367,5 @@ export default {
   getDeviceLocation,
   registerDeviceByImei,
   editDeviceName,
+  updateDeviceNumber,
 };

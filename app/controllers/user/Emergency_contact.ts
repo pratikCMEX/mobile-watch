@@ -8,6 +8,7 @@ import {
 } from "../../library/Response";
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
+import { log } from "node:console";
 
 // ─────────────────────────────────────────────────────────────
 // Phone-number normalization + SOS protocol helpers
@@ -152,6 +153,7 @@ async function createOrUpdateEmergencyContact(
   next: NextFunction
 ) {
   try {
+    Logging.info(`createOrUpdateEmergencyContact(${JSON.stringify(req.body)})`);
     let { id, name, country_code, phone_number, device_id, serial_number } =
       req.body;
     let priority: any = req.body.priority;
