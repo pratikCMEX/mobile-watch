@@ -226,12 +226,17 @@ const getTravelHistory = async (
       });
     }
 
-    // total_distance_km is treated as a cumulative odometer field —
-    // last reading minus first reading in the window
-    const firstDist = Number(locations[0].total_distance_km) || 0;
-    const lastDist =
-      Number(locations[locations.length - 1].total_distance_km) || 0;
-    const totalDistanceKm = Math.max(lastDist - firstDist, 0);
+    // Calculate total distance by summing haversine distances between
+    // consecutive points — robust even when total_distance_km is null
+    let totalDistanceKm = 0;
+    for (let i = 1; i < locations.length; i++) {
+      totalDistanceKm += haversineDistance(
+        Number(locations[i - 1].latitude),
+        Number(locations[i - 1].longitude),
+        Number(locations[i].latitude),
+        Number(locations[i].longitude)
+      );
+    }
 
     // Merge consecutive points that stayed within STOP_THRESHOLD_KM into one entry
     const points: { time: string; latitude: number; longitude: number }[] = [];
