@@ -812,6 +812,62 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
       );
     }
 
+    const deviceSetting = await db.DeviceSetting.findOne({
+      where: { device_id: device.id },
+    });
+    const currentSceneMode = Number(deviceSetting?.scene_mode ?? 1);
+    let sceneModeChanged = false;
+
+    // FIND must be audible. Switch vibration-only and silence modes to
+    // vibration + ringing before sending the command.
+    if (currentSceneMode === 3 || currentSceneMode === 4) {
+      const sceneModeCommandSent = tcpServer.sendSceneModeCommand(
+        serial_number,
+        1
+      );
+
+      if (!sceneModeCommandSent) {
+        return errorMessage(
+          res,
+          "Failed to set the device to vibration and ringing mode."
+        );
+      }
+
+      sceneModeChanged = true;
+
+      try {
+        if (deviceSetting) {
+          deviceSetting.scene_mode = 1;
+          const commandSent = tcpServer.sendSceneModeCommand(serial_number, 1);
+          await deviceSetting.save();
+        } else {
+          await db.DeviceSetting.create({
+            device_id: device.id,
+            sms_alert_enabled: "0",
+            take_off_device_alert: "0",
+            safe_mode: "0",
+            talking_clock: "0",
+            night_power_saving: "0",
+            volume: 50,
+            brightness: 50,
+            fall_down_alert_enabled: "0",
+            fall_down_reminder_call: "0",
+            fall_down_level: 5,
+            scene_mode: 1,
+            low_battery_alert: "0",
+          });
+        }
+      } catch (settingErr) {
+        Logging.error(
+          `Failed to update DeviceSetting scene_mode for device ${device.id}: ${settingErr}`
+        );
+      }
+
+      Logging.info(
+        `Scene mode switched from ${currentSceneMode} to 1 before FIND for device ${serial_number}`
+      );
+    }
+
     const commandSent = tcpServer.sendFindCommand(serial_number);
 
     if (!commandSent) {
