@@ -3611,8 +3611,8 @@ class TcpServer {
    * from a UD_LTE packet as a HealthMetric row.
    *
    * The pedometer value is cumulative (keeps increasing), so we store
-   * it as metric_type "steps_cumulative". The tumbling count is stored
-   * in value_secondary.
+   * it as metric_type "steps_cumulative". The tumbling count is persisted
+   * separately as sleep data with unit "tumbling".
    *
    * Upsert logic: if a steps_cumulative record already exists for the
    * same device and the same calendar date, update that row in place
@@ -3656,35 +3656,27 @@ class TcpServer {
       if (existingSteps) {
         await existingSteps.update({
           value_primary: steps,
-          value_secondary: !isNaN(tumbling) ? tumbling : null,
+          value_secondary: null,
           unit: "steps",
           recorded_at: recordedAt,
         });
 
-        Logging.info(
-          `${tag} OK (updated): steps_cumulative=${steps} tumbling=${
-            !isNaN(tumbling) ? tumbling : "n/a"
-          }`
-        );
+        Logging.info(`${tag} OK (updated): steps_cumulative=${steps}`);
       } else {
         await db.HealthMetric.create({
           device_id: deviceId,
           metric_type: "steps_cumulative",
           value_primary: steps,
-          value_secondary: !isNaN(tumbling) ? tumbling : null,
+          value_secondary: null,
           unit: "steps",
           recorded_at: recordedAt,
         });
 
-        Logging.info(
-          `${tag} OK (created): steps_cumulative=${steps} tumbling=${
-            !isNaN(tumbling) ? tumbling : "n/a"
-          }`
-        );
+        Logging.info(`${tag} OK (created): steps_cumulative=${steps}`);
       }
 
-      // ── Sleep (tumbling = sleep data from device) ──────
-      // Tumbling value from the UD_LTE packet represents sleep data.
+      // ── Sleep (tumbling value from device) ──────────────
+      // Tumbling value from the UD_LTE packet is stored as sleep data.
       // Stored as metric_type "sleep" so it appears in analytics
       // alongside steps, heart_rate, etc.
       if (!isNaN(tumbling)) {
@@ -3704,22 +3696,22 @@ class TcpServer {
           await existingSleep.update({
             value_primary: tumbling,
             value_secondary: null,
-            unit: "minutes",
+            unit: "tumbling",
             recorded_at: recordedAt,
           });
 
-          Logging.info(`${tag} OK (updated): sleep=${tumbling} minutes`);
+          Logging.info(`${tag} OK (updated): sleep=${tumbling} tumbling`);
         } else {
           await db.HealthMetric.create({
             device_id: deviceId,
             metric_type: "sleep",
             value_primary: tumbling,
             value_secondary: null,
-            unit: "minutes",
+            unit: "tumbling",
             recorded_at: recordedAt,
           });
 
-          Logging.info(`${tag} OK (created): sleep=${tumbling} minutes`);
+          Logging.info(`${tag} OK (created): sleep=${tumbling} tumbling`);
         }
       }
     } catch (error: any) {
