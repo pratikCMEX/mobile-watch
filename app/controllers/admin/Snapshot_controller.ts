@@ -154,15 +154,27 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
     }
 
     // Otherwise, return all snapshots with pagination
-    // If search parameter is provided, search by both id and imei
+    // If search parameter is provided, search by id, imei, and device_name
     const where: any = {};
     const scope = await deviceIdScope(req);
     if (scope) where.device_id = scope;
+
     if (search && search !== "") {
-      where[Op.or] = [
+      // Check if search matches an IMEI first
+      const device = await db.Device.findOne({
+        where: { imei: { [Op.like]: `%${search}%` } },
+        attributes: ["id"],
+      });
+
+      const orConditions: any[] = [
         { id: { [Op.like]: `%${search}%` } },
-        { "$DeviceSnapshot.imei$": { [Op.like]: `%${search}%` } },
       ];
+
+      if (device) {
+        orConditions.push({ device_id: device.id });
+      }
+
+      where[Op.or] = orConditions;
     }
 
     const { count, rows } = await db.Snapshot.findAndCountAll({

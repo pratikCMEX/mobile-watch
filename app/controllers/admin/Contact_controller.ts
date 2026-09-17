@@ -40,13 +40,25 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
       if (scope) where.device_id = scope;
     }
 
-    // General search parameter - searches name, phone_number, and country_code
+    // General search parameter - searches name, phone_number, country_code, imei, and device_name
     if (search && search !== "") {
-      where[Op.or] = [
+      // Check if search matches an IMEI first
+      const device = await db.Device.findOne({
+        where: { imei: { [Op.like]: `%${search}%` } },
+        attributes: ["id"],
+      });
+
+      const orConditions: any[] = [
         { name: { [Op.iLike]: `%${search}%` } },
         { phone_number: { [Op.like]: `%${search}%` } },
         { country_code: { [Op.like]: `%${search}%` } },
       ];
+
+      if (device) {
+        orConditions.push({ device_id: device.id });
+      }
+
+      where[Op.or] = orConditions;
     }
 
     const { count, rows } = await db.EmergencyContact.findAndCountAll({
@@ -56,6 +68,7 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
           model: db.Device,
           as: "DeviceEmergencyContact",
           attributes: ["id", "imei", "device_name"],
+          required: false,
         },
       ],
       order: [["createdAt", "DESC"]],
@@ -107,13 +120,25 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
       if (scope) where.device_id = scope;
     }
 
-    // General search parameter - searches name, phone_number, and country_code
+    // General search parameter - searches name, phone_number, country_code, imei, and device_name
     if (search && search !== "") {
-      where[Op.or] = [
+      // Check if search matches an IMEI first
+      const device = await db.Device.findOne({
+        where: { imei: { [Op.like]: `%${search}%` } },
+        attributes: ["id"],
+      });
+
+      const orConditions: any[] = [
         { name: { [Op.iLike]: `%${search}%` } },
         { phone_number: { [Op.like]: `%${search}%` } },
         { country_code: { [Op.like]: `%${search}%` } },
       ];
+
+      if (device) {
+        orConditions.push({ device_id: device.id });
+      }
+
+      where[Op.or] = orConditions;
     }
 
     const { count, rows } = await db.DevicePhonebook.findAndCountAll({
@@ -123,6 +148,7 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
           model: db.Device,
           as: "DevicePhonebookDevice",
           attributes: ["id", "imei", "device_name"],
+          required: false,
         },
       ],
       order: [["slot_index", "ASC"]],
