@@ -21,8 +21,7 @@ const listGeofences = async (
             page = 1,
             sorting = "DESC",
             limit = 10,
-            // device_id = "",
-            // is_active = "",
+            is_active = "",
         } = req.body;
 
 
@@ -68,9 +67,9 @@ const listGeofences = async (
         const scope = await deviceIdScope(req);
         if (scope) whereCondition.device_id = scope;
 
-        // if (is_active !== "") {
-        //   whereCondition.is_active = is_active;
-        // }
+        if (is_active !== "") {
+            whereCondition.is_active = is_active;
+        }
 
         const { count, rows } = await db.Geofence.findAndCountAll({
             where: whereCondition,
