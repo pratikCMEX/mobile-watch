@@ -821,17 +821,17 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     // FIND must be audible. Switch vibration-only and silence modes to
     // vibration + ringing before sending the command.
     if (currentSceneMode === 3 || currentSceneMode === 4) {
-      // const sceneModeCommandSent = tcpServer.sendSceneModeCommand(
-      //   serial_number,
-      //   1
-      // );
+      const sceneModeCommandSent = tcpServer.sendSceneModeCommand(
+        serial_number,
+        1
+      );
 
-      // if (!sceneModeCommandSent) {
-      //   return errorMessage(
-      //     res,
-      //     "Failed to set the device to vibration and ringing mode."
-      //   );
-      // }
+      if (!sceneModeCommandSent) {
+        return errorMessage(
+          res,
+          "Failed to set the device to vibration and ringing mode."
+        );
+      }
 
       sceneModeChanged = true;
 
