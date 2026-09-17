@@ -324,6 +324,23 @@ router.post(
   Device_controller.getWalkTime
 );
 
+// Configure sleep/body-tumbling detection (SLEEPTIME command).
+// The time section uses HH:MM-HH:MM and may cross midnight.
+router.post(
+  "/set_sleep_time",
+  checkToken,
+  ValidateJoi(Schemas.sleepTime.set),
+  Device_controller.setSleepTime
+);
+
+// Read back the persisted sleep/body-tumbling detection window.
+router.post(
+  "/get_sleep_time",
+  checkToken,
+  ValidateJoi(Schemas.sleepTime.get),
+  Device_controller.getSleepTime
+);
+
 // Press the "Locate" pin in the app (sends CR command).
 // Wakes up the device GPS system, performs constant positioning
 // for ~3 minutes and reports fixes every ~20 seconds. Each fix is

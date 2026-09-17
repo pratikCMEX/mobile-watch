@@ -639,6 +639,50 @@ export const Schemas = {
         }),
     }),
   },
+  sleepTime: {
+    set: Joi.object({
+      serial_number: Joi.string().trim().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      time_section: Joi.string()
+        .trim()
+        .pattern(
+          /^([01]?\d|2[0-3]):[0-5]\d\s*-\s*([01]?\d|2[0-3]):[0-5]\d$/,
+          "time section format"
+        )
+        .custom((value, helpers) => {
+          const match = value.match(
+            /^([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)$/
+          );
+          if (!match) return helpers.error("any.invalid");
+
+          const start = Number(match[1]) * 60 + Number(match[2]);
+          const end = Number(match[3]) * 60 + Number(match[4]);
+          if (start === end) {
+            return helpers.error("any.invalid");
+          }
+          return value;
+        })
+        .when("enabled", {
+          is: true,
+          then: Joi.required(),
+          otherwise: Joi.optional().allow(null, ""),
+        })
+        .messages({
+          "string.pattern.base":
+            "Invalid time_section. Expected HH:MM-HH:MM in 24-hour format (overnight windows are allowed)",
+          "any.invalid":
+            "time_section must be a non-zero window in HH:MM-HH:MM format",
+          "any.required": "time_section is required when enabled is true",
+        }),
+      enabled: Joi.boolean().optional().default(true),
+    }),
+    get: Joi.object({
+      serial_number: Joi.string().trim().optional().allow(""),
+      device_id: Joi.string().trim().optional().allow(""),
+    }).or("serial_number", "device_id"),
+  },
   capture: {
     snapshot: Joi.object({
       serial_number: Joi.string().required().messages({

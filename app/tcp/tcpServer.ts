@@ -795,6 +795,10 @@ class TcpServer {
         this.handleWalkTimeResponse(client, parsed);
         break;
 
+      case "SLEEPTIME":
+        this.handleSleepTimeResponse(client, parsed);
+        break;
+
       case "CR":
         this.handleCrResponse(client, parsed);
         break;
@@ -5161,6 +5165,223 @@ class TcpServer {
     );
 
     void client;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // SLEEPTIME - Sleep/body-tumbling detection window
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle the device's acknowledgement for a SLEEPTIME setting.
+   *
+   * The firmware replies with a bare command on success, for example:
+   *   [3G*5678901234*0009*SLEEPTIME]
+   * Some firmware revisions may append a status value (0/1).
+   */
+  private handleSleepTimeResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `SLEEPTIME response from device ${packet.deviceId}: status="${
+        status || "(ack)"
+      }" (${ok ? "OK" : "FAILED"})`
+    );
+
+    this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${packet.deviceId} online from SLEEPTIME: ${error.message}`
+      )
+    );
+
+    if (ok) {
+      this.findDevice(packet.deviceId)
+        .then((device) => {
+          if (!device) return null;
+          return db.DeviceSleepTime.findOne({
+            where: { device_id: device.id },
+          }).then((record: any) => {
+            if (!record) return null;
+            record.last_acked_at = new Date();
+            return record.save();
+          });
+        })
+        .catch((error: Error) =>
+          Logging.error(
+            `Failed to update last_acked_at for SLEEPTIME on device ${packet.deviceId}: ${error.message}`
+          )
+        );
+    }
+
+    void client;
+  }
+
+  /**
+   * Validate and normalise one SLEEPTIME section.
+   *
+   * The wire protocol examples permit a one-digit hour (for example
+   * `21:10-7:30`), while the database stores canonical `HH:MM-HH:MM`
+   * values. Overnight windows are valid when start is later than end.
+   */
+  private normaliseSleepTimeSection(input: string): {
+    wireSection: string;
+    timeSection: string;
+    startTime: string;
+    endTime: string;
+  } | null {
+    const trimmed = (input || "").trim();
+    if (!trimmed) return null;
+
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+
+    const startHour = Number(match[1]);
+    const startMinute = Number(match[2]);
+    const endHour = Number(match[3]);
+    const endMinute = Number(match[4]);
+
+    if (
+      !Number.isFinite(startHour) ||
+      !Number.isFinite(startMinute) ||
+      !Number.isFinite(endHour) ||
+      !Number.isFinite(endMinute)
+    ) {
+      return null;
+    }
+    if (
+      startHour < 0 ||
+      startHour > 23 ||
+      endHour < 0 ||
+      endHour > 23 ||
+      startMinute < 0 ||
+      startMinute > 59 ||
+      endMinute < 0 ||
+      endMinute > 59
+    ) {
+      return null;
+    }
+
+    const startTotal = startHour * 60 + startMinute;
+    const endTotal = endHour * 60 + endMinute;
+    if (startTotal === endTotal) return null;
+
+    const formatTime = (hour: number, minute: number) =>
+      `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+
+    // Keep the hour representation supplied by the caller on the wire
+    // (the protocol example uses `7:30`), but expose canonical fields for DB.
+    const wireSection = `${match[1]}:${match[2]}-${match[3]}:${match[4]}`;
+    return {
+      wireSection,
+      timeSection: `${formatTime(startHour, startMinute)}-${formatTime(
+        endHour,
+        endMinute
+      )}`,
+      startTime: formatTime(startHour, startMinute),
+      endTime: formatTime(endHour, endMinute),
+    };
+  }
+
+  /**
+   * Send a sleep/body-tumbling detection window to a device.
+   *
+   * Wire format:
+   *   [3G*<id>*<LEN>*SLEEPTIME,<time-section>]
+   *
+   * Example:
+   *   [3G*5678901234*0014*SLEEPTIME,21:10-7:30]
+   *
+   * The time section may cross midnight (start > end). The returned
+   * metadata contains canonical HH:MM values for database persistence.
+   *
+   * @param deviceId    The watch's TCP device ID / serial number.
+   * @param timeSection A section such as `21:10-7:30` or `21:10-07:30`.
+   * @returns Command result and canonical time fields, or sent=false.
+   */
+  public sendSleepTimeCommand(
+    deviceId: string,
+    timeSection?: string | null
+  ): {
+    sent: boolean;
+    protocol: string;
+    content: string;
+    time_section: string | null;
+    start_time: string | null;
+    end_time: string | null;
+  } {
+    const client = this.devices.get(deviceId);
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send SLEEPTIME command.`
+      );
+      return {
+        sent: false,
+        protocol: "",
+        content: "",
+        time_section: null,
+        start_time: null,
+        end_time: null,
+      };
+    }
+
+    // A bare SLEEPTIME command is used to clear/disable the detection
+    // window on firmware that does not provide a separate switch command.
+    const trimmedSection =
+      typeof timeSection === "string" ? timeSection.trim() : "";
+    if (!trimmedSection) {
+      const content = "SLEEPTIME";
+      const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+      const command = `[3G*${deviceId}*${length}*${content}]`;
+
+      Logging.info(
+        `Sending SLEEPTIME disable/clear command to device ${deviceId}: ${command}`
+      );
+      this.send(client, command);
+
+      return {
+        sent: true,
+        protocol: command,
+        content,
+        time_section: null,
+        start_time: null,
+        end_time: null,
+      };
+    }
+
+    const normalised = this.normaliseSleepTimeSection(trimmedSection);
+    if (!normalised) {
+      Logging.error(
+        `Invalid SLEEPTIME section '${timeSection}' for device ${deviceId}. Expected HH:MM-HH:MM (24h, non-zero window; overnight allowed).`
+      );
+      return {
+        sent: false,
+        protocol: "",
+        content: "",
+        time_section: null,
+        start_time: null,
+        end_time: null,
+      };
+    }
+
+    const content = `SLEEPTIME,${normalised.wireSection}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending SLEEPTIME command to device ${deviceId} (window=${normalised.timeSection}): ${command}`
+    );
+    this.send(client, command);
+
+    return {
+      sent: true,
+      protocol: command,
+      content,
+      time_section: normalised.timeSection,
+      start_time: normalised.startTime,
+      end_time: normalised.endTime,
+    };
   }
 
   // ───────────────────────────────────────────────────────────

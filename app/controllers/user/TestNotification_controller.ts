@@ -3,6 +3,7 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { pushToUser } from "../../services/notification.service";
 import Logging from "../../library/Logging";
+import { sendNotification } from "../../helper/WebNotification";
 
 const sendTestNotification = async (
   req: Request,
@@ -74,6 +75,17 @@ const sendTestNotification = async (
       },
     });
 
+    await sendNotification({
+      user_id: "65daa590-8bd1-4d4c-891e-c9ca59ce2792",
+      type: "general",
+      title: "this is a test notification",
+      message: `Test notification from the admin .`,
+      data: {
+        // appointment_id: appointment.id,
+        updated_at: new Date(),
+      },
+    });
+
     if (!response) {
       return errorMessage(
         res,
@@ -110,6 +122,10 @@ const sendTestNotification = async (
   }
 };
 
+const sendWebTestNotification = async (req: Request, res: Response) => {
+  // });
+};
 export default {
   sendTestNotification,
+  sendWebTestNotification,
 };
