@@ -40,8 +40,8 @@ const getHealthOverview = async (deviceId: string) => {
     "steps_cumulative",
   ];
   const overview: any = {};
-  const now = new Date();
   const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
 
   for (const metricType of metricTypes) {
     // Get latest reading
