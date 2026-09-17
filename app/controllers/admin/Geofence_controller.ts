@@ -180,10 +180,56 @@ const createGeofence = async function (
     }
 };
 
+const updateGeofence = async function (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) {
+    try {
+        const {
+            id,
+            name,
+            latitude,
+            longitude,
+            radius_meters,
+            is_active,
+            fence_type,
+            fence_alarm_type,
+        } = req.body;
+
+        if (!id) {
+            return errorMessage(res, "Geofence ID is required");
+        }
+
+        const geofence = await db.Geofence.findByPk(id);
+        if (!geofence || !(await canAccessDevice(req, geofence.device_id))) {
+            return errorMessage(res, "Geofence not found", 404);
+        }
+
+        const updateData: any = {};
+
+        if (name !== undefined) updateData.name = name;
+        if (latitude !== undefined) updateData.latitude = latitude;
+        if (longitude !== undefined) updateData.longitude = longitude;
+        if (radius_meters !== undefined) updateData.radius_meters = radius_meters;
+        if (is_active !== undefined) updateData.is_active = is_active;
+        if (fence_type !== undefined) updateData.fence_type = fence_type;
+        if (fence_alarm_type !== undefined) updateData.fence_alarm_type = fence_alarm_type;
+
+        await geofence.update(updateData);
+
+        return successMessage(res, "Geofence updated successfully", geofence);
+    } catch (err) {
+        console.error("updateGeofence error:", err);
+        return errorMessage(res, "Error updating geofence");
+    }
+};
+
 export default {
 
     listGeofences,
     deleteGeofence,
     toggleGeofenceStatus,
     createGeofence,
+    updateGeofence,
 };

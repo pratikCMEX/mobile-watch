@@ -45,6 +45,14 @@ router.post(
   Geofence_controller.createGeofence
 );
 
+// Update geofence by ID
+router.post(
+  "/update_geofence",
+  checkAdmin,
+  ValidateJoi(Schemas.geofence.update),
+  Geofence_controller.updateGeofence
+);
+
 // List geofences with pagination/filter
 router.post(
   "/list_geofence",
@@ -265,6 +273,11 @@ router.post(
   adminOnly,
   ValidateJoi(Schemas.staff.byId),
   Staff_controller.getStaffDetail
+);
+router.get(
+  "/get_current_staff",
+  checkAdmin,
+  Staff_controller.getCurrentStaff
 );
 router.post(
   "/staff_login_logs",

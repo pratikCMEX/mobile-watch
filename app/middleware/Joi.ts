@@ -1605,6 +1605,16 @@ export const Schemas = {
     delete: Joi.object({
       id: Joi.string().required(),
     }),
+    update: Joi.object({
+      id: Joi.string().required(),
+      name: Joi.string().optional().allow(null, ""),
+      latitude: Joi.number().optional(),
+      longitude: Joi.number().optional(),
+      radius_meters: Joi.number().optional(),
+      is_active: Joi.boolean().optional(),
+      fence_type: Joi.string().optional().allow(null, ""),
+      fence_alarm_type: Joi.number().integer().valid(0, 1, 2).optional(),
+    }),
     toggleStatus: Joi.object({
       id: Joi.string().required(),
       is_active: Joi.boolean().required(),
