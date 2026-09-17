@@ -212,7 +212,7 @@ const getTravelHistory = async (
       where: {
         device_id: device.id,
         recorded_at: { [Op.between]: [start, end] },
-        is_valid_fix: true,
+        // is_valid_fix: true,
       },
       order: [["recorded_at", "ASC"]],
       attributes: ["latitude", "longitude", "total_distance_km", "recorded_at"],
