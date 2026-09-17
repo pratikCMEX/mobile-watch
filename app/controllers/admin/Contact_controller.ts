@@ -54,7 +54,7 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
         { country_code: { [Op.like]: `%${search}%` } },
       ];
 
-      if (device) {
+      if (device && (await canAccessDevice(req, device.id))) {
         orConditions.push({ device_id: device.id });
       }
 
@@ -134,7 +134,7 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
         { country_code: { [Op.like]: `%${search}%` } },
       ];
 
-      if (device) {
+      if (device && (await canAccessDevice(req, device.id))) {
         orConditions.push({ device_id: device.id });
       }
 

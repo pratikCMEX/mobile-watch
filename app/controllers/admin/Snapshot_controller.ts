@@ -170,7 +170,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
         { id: { [Op.like]: `%${search}%` } },
       ];
 
-      if (device) {
+      if (device && (await canAccessDevice(req, device.id))) {
         orConditions.push({ device_id: device.id });
       }
 

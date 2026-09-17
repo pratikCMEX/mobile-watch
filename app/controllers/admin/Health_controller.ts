@@ -104,15 +104,25 @@ async function getAllHealthMetrics(
     const scope = await deviceIdScope(req);
     if (scope) listWhere.device_id = scope;
 
-   
     if (body.search && body.search !== "") {
       const search = body.search;
-      listWhere[Op.or] = [
+      // Check if search matches an IMEI first
+      const device = await db.Device.findOne({
+        where: { imei: { [Op.like]: `%${search}%` } },
+        attributes: ["id"],
+      });
+
+      const orConditions: any[] = [
         { id: { [Op.like]: `%${search}%` } },
         { device_id: { [Op.like]: `%${search}%` } },
         { metric_type: { [Op.like]: `%${search}%` } },
-        { "$DeviceHealthMetric.imei$": { [Op.like]: `%${search}%` } },
       ];
+
+      if (device && (await canAccessDevice(req, device.id))) {
+        orConditions.push({ device_id: device.id });
+      }
+
+      listWhere[Op.or] = orConditions;
     }
 
     const { count, rows } = await db.HealthMetric.findAndCountAll({
