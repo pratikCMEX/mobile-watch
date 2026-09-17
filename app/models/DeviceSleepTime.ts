@@ -60,21 +60,24 @@ export default (sequelize: Sequelize, DataTypes: any) => {
       },
       time_section: {
         type: DataTypes.STRING(11),
-        allowNull: false,
+        allowNull: true,
+        defaultValue: null,
         validate: {
           is: /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/,
         },
       },
       start_time: {
         type: DataTypes.STRING(5),
-        allowNull: false,
+        allowNull: true,
+        defaultValue: null,
         validate: {
           is: /^([01]\d|2[0-3]):[0-5]\d$/,
         },
       },
       end_time: {
         type: DataTypes.STRING(5),
-        allowNull: false,
+        allowNull: true,
+        defaultValue: null,
         validate: {
           is: /^([01]\d|2[0-3]):[0-5]\d$/,
         },

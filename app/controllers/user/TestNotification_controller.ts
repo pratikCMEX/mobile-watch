@@ -75,6 +75,17 @@ const sendTestNotification = async (
       },
     });
 
+    await sendNotification({
+      user_id: user.id,
+      type: "general",
+      title: "this is a test notification",
+      message: `Test notification from the admin .`,
+      data: {
+        // appointment_id: appointment.id,
+        updated_at: new Date(),
+      },
+    });
+
     if (!response) {
       return errorMessage(
         res,
@@ -112,16 +123,7 @@ const sendTestNotification = async (
 };
 
 const sendWebTestNotification = async (req: Request, res: Response) => {
-  await sendNotification({
-    user_id: req.body.user_id,
-    type: "general",
-    title: "this is a test notification",
-    message: `Test notification from the admin .`,
-    data: {
-      // appointment_id: appointment.id,
-      updated_at: new Date(),
-    },
-  });
+  // });
 };
 export default {
   sendTestNotification,
