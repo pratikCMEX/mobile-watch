@@ -43,22 +43,35 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
     // General search parameter - searches name, phone_number, country_code, imei, and device_name
     if (search && search !== "") {
       // Check if search matches an IMEI first
-      const device = await db.Device.findOne({
-        where: { imei: { [Op.like]: `%${search}%` } },
-        attributes: ["id"],
-      });
+      try {
+        const device = await db.Device.findOne({
+          where: { imei: { [Op.like]: `%${search}%` } },
+          attributes: ["id"],
+        });
 
-      const orConditions: any[] = [
-        { name: { [Op.iLike]: `%${search}%` } },
-        { phone_number: { [Op.like]: `%${search}%` } },
-        { country_code: { [Op.like]: `%${search}%` } },
-      ];
+        const orConditions: any[] = [
+          { name: { [Op.iLike]: `%${search}%` } },
+          { phone_number: { [Op.like]: `%${search}%` } },
+          { country_code: { [Op.like]: `%${search}%` } },
+        ];
 
-      if (device && (await canAccessDevice(req, device.id))) {
-        orConditions.push({ device_id: device.id });
+        if (device) {
+          const hasAccess = await canAccessDevice(req, device.id);
+          if (hasAccess) {
+            orConditions.push({ device_id: device.id });
+          }
+        }
+
+        where[Op.or] = orConditions;
+      } catch (err) {
+        console.error("Error during IMEI search:", err);
+        // If error occurs, just search by name, phone_number, country_code
+        where[Op.or] = [
+          { name: { [Op.iLike]: `%${search}%` } },
+          { phone_number: { [Op.like]: `%${search}%` } },
+          { country_code: { [Op.like]: `%${search}%` } },
+        ];
       }
-
-      where[Op.or] = orConditions;
     }
 
     const { count, rows } = await db.EmergencyContact.findAndCountAll({
@@ -123,22 +136,35 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
     // General search parameter - searches name, phone_number, country_code, imei, and device_name
     if (search && search !== "") {
       // Check if search matches an IMEI first
-      const device = await db.Device.findOne({
-        where: { imei: { [Op.like]: `%${search}%` } },
-        attributes: ["id"],
-      });
+      try {
+        const device = await db.Device.findOne({
+          where: { imei: { [Op.like]: `%${search}%` } },
+          attributes: ["id"],
+        });
 
-      const orConditions: any[] = [
-        { name: { [Op.iLike]: `%${search}%` } },
-        { phone_number: { [Op.like]: `%${search}%` } },
-        { country_code: { [Op.like]: `%${search}%` } },
-      ];
+        const orConditions: any[] = [
+          { name: { [Op.iLike]: `%${search}%` } },
+          { phone_number: { [Op.like]: `%${search}%` } },
+          { country_code: { [Op.like]: `%${search}%` } },
+        ];
 
-      if (device && (await canAccessDevice(req, device.id))) {
-        orConditions.push({ device_id: device.id });
+        if (device) {
+          const hasAccess = await canAccessDevice(req, device.id);
+          if (hasAccess) {
+            orConditions.push({ device_id: device.id });
+          }
+        }
+
+        where[Op.or] = orConditions;
+      } catch (err) {
+        console.error("Error during IMEI search:", err);
+        // If error occurs, just search by name, phone_number, country_code
+        where[Op.or] = [
+          { name: { [Op.iLike]: `%${search}%` } },
+          { phone_number: { [Op.like]: `%${search}%` } },
+          { country_code: { [Op.like]: `%${search}%` } },
+        ];
       }
-
-      where[Op.or] = orConditions;
     }
 
     const { count, rows } = await db.DevicePhonebook.findAndCountAll({
