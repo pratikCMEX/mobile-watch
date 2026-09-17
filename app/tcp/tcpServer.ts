@@ -6154,6 +6154,26 @@ class TcpServer {
       `SOS trigger received from device ${packet.deviceId}: slot=${sosSlot} raw="${packet.raw}"`
     );
 
+    // ── ACK guard ──────────────────────────────────────────
+    // When the server sends a SOS SET command (e.g. [3G*id*0010*SOS1,phone]),
+    // the device replies with a short ACK like [3G*id*0002*SOS1,1] where the
+    // payload is just a status code ("0" or "1").  This is NOT a real SOS
+    // trigger and must NOT create a notification.  A genuine SOS trigger
+    // from the user always carries a phone-number payload.
+    const payload = (packet.payload || "").trim();
+    if (payload === "0" || payload === "1") {
+      Logging.info(
+        `SOS ${sosSlot} from device ${packet.deviceId} is an ACK response (status=${payload}) — skipping notification`
+      );
+      this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
+        Logging.error(
+          `Failed to mark device ${packet.deviceId} online from SOS ACK: ${error.message}`
+        )
+      );
+      void client;
+      return;
+    }
+
     this.findDevice(packet.deviceId)
       .then((device) => {
         if (!device) {
