@@ -239,9 +239,11 @@ const getTravelHistory = async (
     let clusterStart: any = locations[0];
     let clusterEnd: any = locations[0];
 
+    const formatTime = (d: any) => new Date(d).toISOString();
+
     const pushCluster = (clStart: any, clEnd: any) => {
-      const startLabel = clStart.recorded_at;
-      const endLabel = clEnd.recorded_at;
+      const startLabel = formatTime(clStart.recorded_at);
+      const endLabel = formatTime(clEnd.recorded_at);
       points.push({
         time:
           new Date(clStart.recorded_at).getTime() ===
