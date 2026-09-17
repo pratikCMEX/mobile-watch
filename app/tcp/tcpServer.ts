@@ -5302,7 +5302,7 @@ class TcpServer {
    */
   public sendSleepTimeCommand(
     deviceId: string,
-    timeSection: string
+    timeSection?: string | null
   ): {
     sent: boolean;
     protocol: string;
@@ -5326,7 +5326,31 @@ class TcpServer {
       };
     }
 
-    const normalised = this.normaliseSleepTimeSection(timeSection);
+    // A bare SLEEPTIME command is used to clear/disable the detection
+    // window on firmware that does not provide a separate switch command.
+    const trimmedSection =
+      typeof timeSection === "string" ? timeSection.trim() : "";
+    if (!trimmedSection) {
+      const content = "SLEEPTIME";
+      const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+      const command = `[3G*${deviceId}*${length}*${content}]`;
+
+      Logging.info(
+        `Sending SLEEPTIME disable/clear command to device ${deviceId}: ${command}`
+      );
+      this.send(client, command);
+
+      return {
+        sent: true,
+        protocol: command,
+        content,
+        time_section: null,
+        start_time: null,
+        end_time: null,
+      };
+    }
+
+    const normalised = this.normaliseSleepTimeSection(trimmedSection);
     if (!normalised) {
       Logging.error(
         `Invalid SLEEPTIME section '${timeSection}' for device ${deviceId}. Expected HH:MM-HH:MM (24h, non-zero window; overnight allowed).`

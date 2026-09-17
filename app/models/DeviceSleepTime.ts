@@ -24,9 +24,9 @@ class DeviceSleepTime
 {
   public id!: string;
   public device_id!: string;
-  public time_section!: string;
-  public start_time!: string;
-  public end_time!: string;
+  public time_section!: string | null;
+  public start_time!: string | null;
+  public end_time!: string | null;
   public is_enabled!: boolean;
   public last_command_protocol!: string | null;
   public last_acked_at!: Date | null;
