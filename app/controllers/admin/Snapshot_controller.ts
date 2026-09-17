@@ -154,7 +154,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
     }
 
     // Otherwise, return all snapshots with pagination
-    // If search parameter is provided, search by both id and imei
+    // If search parameter is provided, search by id, imei, and device_name
     const where: any = {};
     const scope = await deviceIdScope(req);
     if (scope) where.device_id = scope;
@@ -162,6 +162,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
       where[Op.or] = [
         { id: { [Op.like]: `%${search}%` } },
         { "$DeviceSnapshot.imei$": { [Op.like]: `%${search}%` } },
+        { "$DeviceSnapshot.device_name$": { [Op.like]: `%${search}%` } },
       ];
     }
 

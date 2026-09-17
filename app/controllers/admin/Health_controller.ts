@@ -16,7 +16,7 @@ async function getAllHealthMetrics(
 ) {
   try {
     const body = req.body || {};
-    const { page = 1, limit = 10, imei, id } = body;
+    const { page = 1, limit = 10, imei, id,search } = body;
     const offset = (Number(page) - 1) * Number(limit);
 
     // If ID is provided, search by ID
@@ -99,9 +99,20 @@ async function getAllHealthMetrics(
     }
 
     // Otherwise, return all health metrics with pagination
+    // If search parameter is provided, search by imei, device_id, and metric_type
     const listWhere: any = {};
     const scope = await deviceIdScope(req);
     if (scope) listWhere.device_id = scope;
+
+   
+    if (search && search !== "") {
+      listWhere[Op.or] = [
+        { id: { [Op.like]: `%${search}%` } },
+        { device_id: { [Op.like]: `%${search}%` } },
+        { metric_type: { [Op.like]: `%${search}%` } },
+        { "$DeviceHealthMetric.imei$": { [Op.like]: `%${search}%` } },
+      ];
+    }
 
     const { count, rows } = await db.HealthMetric.findAndCountAll({
       where: listWhere,

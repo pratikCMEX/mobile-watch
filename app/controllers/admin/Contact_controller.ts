@@ -40,12 +40,14 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
       if (scope) where.device_id = scope;
     }
 
-    // General search parameter - searches name, phone_number, and country_code
+    // General search parameter - searches name, phone_number, country_code, imei, and device_name
     if (search && search !== "") {
       where[Op.or] = [
         { name: { [Op.iLike]: `%${search}%` } },
         { phone_number: { [Op.like]: `%${search}%` } },
         { country_code: { [Op.like]: `%${search}%` } },
+        { "$DeviceEmergencyContact.imei$": { [Op.like]: `%${search}%` } },
+        { "$DeviceEmergencyContact.device_name$": { [Op.like]: `%${search}%` } },
       ];
     }
 
@@ -107,12 +109,14 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
       if (scope) where.device_id = scope;
     }
 
-    // General search parameter - searches name, phone_number, and country_code
+    // General search parameter - searches name, phone_number, country_code, imei, and device_name
     if (search && search !== "") {
       where[Op.or] = [
         { name: { [Op.iLike]: `%${search}%` } },
         { phone_number: { [Op.like]: `%${search}%` } },
         { country_code: { [Op.like]: `%${search}%` } },
+        { "$DevicePhonebookDevice.imei$": { [Op.like]: `%${search}%` } },
+        { "$DevicePhonebookDevice.device_name$": { [Op.like]: `%${search}%` } },
       ];
     }
 
