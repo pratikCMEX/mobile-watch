@@ -20,21 +20,16 @@ export const sendNotification = async ({
     // 1. Save notification
     console.log("user_iddsdsdsdsdsd", user_id);
 
-    await db.Notification.create({
-      user_id,
-      type,
-      title,
-      message,
-      is_read: false,
-    });
+    // await db.Notification.create({
+    //   user_id,
+    //   type,
+    //   title,
+    //   message,
+    //   is_read: false,
+    // });
 
     // 2. Get unread count
-    const unreadCount = await db.Notification.count({
-      where: {
-        user_id,
-        is_read: false,
-      },
-    });
+    const unreadCount = 1;
 
     // 3. Emit socket event
     io.to(user_id).emit("notification", {
