@@ -1716,6 +1716,13 @@ export const Schemas = {
       limit: Joi.number().integer().min(1).optional().default(10),
       status: Joi.string().valid("active", "inactive").optional().allow(""),
     }),
+    updateCurrent: Joi.object({
+      name: Joi.string().trim().optional(),
+      email: Joi.string().email().optional(),
+      username: Joi.string().trim().optional(),
+      password: Joi.string().min(6).optional().allow(""),
+      device_ids: Joi.array().items(Joi.string().uuid()).optional(),
+    }),
     loginLogs: Joi.object({
       staff_id: Joi.string().uuid().optional().allow(""),
       search: Joi.string().optional().allow(""),
