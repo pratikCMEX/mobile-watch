@@ -42,6 +42,10 @@ async function adminLogin(req: Request, res: Response, next: NextFunction) {
       name: admin.username,
     });
 
+    // Save session token to database
+    admin.session_token = token;
+    await admin.save();
+
     try {
       await db.AdminLoginLog.create({
         admin_id: admin.id,
