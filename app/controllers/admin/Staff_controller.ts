@@ -301,6 +301,26 @@ async function getStaffDetail(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+async function getCurrentStaff(req: Request, res: Response, next: NextFunction) {
+  try {
+    const staffId = (req as any).user?.id;
+
+    if (!staffId) {
+      return errorMessage(res, "Staff not authenticated");
+    }
+
+    const staff = await findStaffWithDevices(staffId);
+    if (!staff) {
+      return errorMessage(res, "Staff not found");
+    }
+
+    return successMessage(res, "Staff profile fetched successfully", staff);
+  } catch (err) {
+    console.error("getCurrentStaff error:", err);
+    return errorMessage(res, "Error fetching staff profile");
+  }
+}
+
 // Staff login history: which staff logged in, from which IP, and when.
 async function staffLoginLogs(req: Request, res: Response, next: NextFunction) {
   try {
@@ -379,5 +399,6 @@ export default {
   deleteStaff,
   listStaff,
   getStaffDetail,
+  getCurrentStaff,
   staffLoginLogs,
 };
