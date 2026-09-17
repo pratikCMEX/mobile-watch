@@ -334,6 +334,8 @@ const getHealthOverview = async (
     ];
 
     const overview: any = {};
+    const now = new Date();
+    const todayStart = startOfDay(now);
 
     for (const metricType of metricTypes) {
       // Get latest reading
@@ -342,18 +344,12 @@ const getHealthOverview = async (
         order: [["recorded_at", "DESC"]],
       });
 
-      // Get previous day's reading (from 24-48 hours ago)
-      const now = new Date();
-      const previousDayStart = new Date(now.getTime() - 48 * 60 * 60 * 1000);
-      const previousDayEnd = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-
+      // Most recent reading strictly before today (not a fixed 24-48h window)
       const previousDayMetric = await db.HealthMetric.findOne({
         where: {
           device_id: device_id,
           metric_type: metricType,
-          recorded_at: {
-            [Op.between]: [previousDayStart, previousDayEnd],
-          },
+          recorded_at: { [Op.lt]: todayStart },
         },
         order: [["recorded_at", "DESC"]],
       });
@@ -392,8 +388,14 @@ const getHealthOverview = async (
       };
     }
 
-    // Distance (km) and calories, derived from today's step count
-    const stepsToday = overview["steps"]?.latest || 0;
+    // Steps actually taken TODAY = today's cumulative - last cumulative before today
+    // (falls back to the raw latest value if there's no earlier reading to diff against)
+    const stepsLatest = overview["steps"]?.latest;
+    const stepsPrevious = overview["steps"]?.previous_day_value;
+    const stepsToday =
+      stepsLatest !== null && stepsPrevious !== null
+        ? Math.max(stepsLatest - stepsPrevious, 0)
+        : stepsLatest || 0;
 
     const totalDistanceKm = Number((stepsToday * 0.000762).toFixed(2));
     const totalCalories = Number((stepsToday * 0.04).toFixed(2));
