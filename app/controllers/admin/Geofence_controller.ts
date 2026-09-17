@@ -21,8 +21,7 @@ const listGeofences = async (
             page = 1,
             sorting = "DESC",
             limit = 10,
-            // device_id = "",
-            // is_active = "",
+            is_active = "",
         } = req.body;
 
 
@@ -32,15 +31,45 @@ const listGeofences = async (
         const whereCondition: any = {};
 
         if (search) {
-            whereCondition.name = { [Op.iLike]: `%${search}%` };
+            // Check if search matches an IMEI or device_name first
+            try {
+                const devices = await db.Device.findAll({
+                    where: {
+                        [Op.or]: [
+                            { imei: { [Op.like]: `%${search}%` } },
+                            { device_name: { [Op.like]: `%${search}%` } },
+                        ],
+                    },
+                    attributes: ["id"],
+                });
+
+                const orConditions: any[] = [
+                    { name: { [Op.iLike]: `%${search}%` } },
+                ];
+
+                for (const device of devices) {
+                    const hasAccess = await canAccessDevice(req, device.id);
+                    if (hasAccess) {
+                        orConditions.push({ device_id: device.id });
+                    }
+                }
+
+                if (orConditions.length > 0) {
+                    whereCondition[Op.or] = orConditions;
+                }
+            } catch (err) {
+                console.error("Error during IMEI/device_name search:", err);
+                // If error occurs, just search by name
+                whereCondition.name = { [Op.iLike]: `%${search}%` };
+            }
         }
 
         const scope = await deviceIdScope(req);
         if (scope) whereCondition.device_id = scope;
 
-        // if (is_active !== "") {
-        //   whereCondition.is_active = is_active;
-        // }
+        if (is_active !== "") {
+            whereCondition.is_active = is_active;
+        }
 
         const { count, rows } = await db.Geofence.findAndCountAll({
             where: whereCondition,
