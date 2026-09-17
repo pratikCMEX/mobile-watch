@@ -42,10 +42,15 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
 
     // General search parameter - searches name, phone_number, country_code, imei, and device_name
     if (search && search !== "") {
-      // Check if search matches an IMEI first
+      // Check if search matches an IMEI or device_name first
       try {
-        const device = await db.Device.findOne({
-          where: { imei: { [Op.like]: `%${search}%` } },
+        const devices = await db.Device.findAll({
+          where: {
+            [Op.or]: [
+              { imei: { [Op.like]: `%${search}%` } },
+              { device_name: { [Op.like]: `%${search}%` } },
+            ],
+          },
           attributes: ["id"],
         });
 
@@ -55,7 +60,7 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
           { country_code: { [Op.like]: `%${search}%` } },
         ];
 
-        if (device) {
+        for (const device of devices) {
           const hasAccess = await canAccessDevice(req, device.id);
           if (hasAccess) {
             orConditions.push({ device_id: device.id });
@@ -64,7 +69,7 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
 
         where[Op.or] = orConditions;
       } catch (err) {
-        console.error("Error during IMEI search:", err);
+        console.error("Error during IMEI/device_name search:", err);
         // If error occurs, just search by name, phone_number, country_code
         where[Op.or] = [
           { name: { [Op.iLike]: `%${search}%` } },
@@ -135,10 +140,15 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
 
     // General search parameter - searches name, phone_number, country_code, imei, and device_name
     if (search && search !== "") {
-      // Check if search matches an IMEI first
+      // Check if search matches an IMEI or device_name first
       try {
-        const device = await db.Device.findOne({
-          where: { imei: { [Op.like]: `%${search}%` } },
+        const devices = await db.Device.findAll({
+          where: {
+            [Op.or]: [
+              { imei: { [Op.like]: `%${search}%` } },
+              { device_name: { [Op.like]: `%${search}%` } },
+            ],
+          },
           attributes: ["id"],
         });
 
@@ -148,7 +158,7 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
           { country_code: { [Op.like]: `%${search}%` } },
         ];
 
-        if (device) {
+        for (const device of devices) {
           const hasAccess = await canAccessDevice(req, device.id);
           if (hasAccess) {
             orConditions.push({ device_id: device.id });
@@ -157,7 +167,7 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
 
         where[Op.or] = orConditions;
       } catch (err) {
-        console.error("Error during IMEI search:", err);
+        console.error("Error during IMEI/device_name search:", err);
         // If error occurs, just search by name, phone_number, country_code
         where[Op.or] = [
           { name: { [Op.iLike]: `%${search}%` } },
