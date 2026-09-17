@@ -105,7 +105,8 @@ async function getAllHealthMetrics(
     if (scope) listWhere.device_id = scope;
 
    
-    if (search && search !== "") {
+    if (body.search && body.search !== "") {
+      const search = body.search;
       listWhere[Op.or] = [
         { id: { [Op.like]: `%${search}%` } },
         { device_id: { [Op.like]: `%${search}%` } },
