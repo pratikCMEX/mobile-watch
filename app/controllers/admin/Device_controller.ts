@@ -1185,6 +1185,133 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     return errorMessage(res, "Error sending find device command");
   }
 };
+
+function haversineDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371; // km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+const STOP_THRESHOLD_KM = 0.03; // ~30 meters
+
+const getTravelHistory = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, start_time, end_time } = req.body;
+
+    if (!serial_number || !start_time || !end_time) {
+      return errorMessage(
+        res,
+        "serial_number, start_time and end_time are required"
+      );
+    }
+
+    const device = await db.Device.findOne({ where: { serial_number } });
+    if (!device) {
+      return errorMessage(res, "Device not found for given serial_number");
+    }
+
+    const start = new Date(start_time);
+    const end = new Date(end_time);
+
+    const locations = await db.Location.findAll({
+      where: {
+        device_id: device.id,
+        recorded_at: { [Op.between]: [start, end] },
+        // is_valid_fix: true,
+      },
+      order: [["recorded_at", "ASC"]],
+      attributes: ["latitude", "longitude", "total_distance_km", "recorded_at"],
+    });
+
+    if (!locations.length) {
+      return successMessage(res, "Travel history fetched successfully", {
+        serial_number,
+        total_distance: "0 km",
+        points: [],
+      });
+    }
+
+    // Calculate total distance by summing haversine distances between
+    // consecutive points — robust even when total_distance_km is null
+    let totalDistanceKm = 0;
+    for (let i = 1; i < locations.length; i++) {
+      totalDistanceKm += haversineDistance(
+        Number(locations[i - 1].latitude),
+        Number(locations[i - 1].longitude),
+        Number(locations[i].latitude),
+        Number(locations[i].longitude)
+      );
+    }
+
+    // Merge consecutive points that stayed within STOP_THRESHOLD_KM into one entry
+    const points: { time: string; latitude: number; longitude: number }[] = [];
+
+    let clusterStart: any = locations[0];
+    let clusterEnd: any = locations[0];
+
+    const formatTime = (d: any) => new Date(d).toISOString();
+
+    const pushCluster = (clStart: any, clEnd: any) => {
+      const startLabel = formatTime(clStart.recorded_at);
+      const endLabel = formatTime(clEnd.recorded_at);
+      points.push({
+        time:
+          new Date(clStart.recorded_at).getTime() ===
+          new Date(clEnd.recorded_at).getTime()
+            ? startLabel
+            : `${startLabel} - ${endLabel}`,
+        latitude: Number(clEnd.latitude),
+        longitude: Number(clEnd.longitude),
+      });
+    };
+
+    for (let i = 1; i < locations.length; i++) {
+      const prev = clusterEnd;
+      const curr = locations[i];
+
+      const dist = haversineDistance(
+        Number(prev.latitude),
+        Number(prev.longitude),
+        Number(curr.latitude),
+        Number(curr.longitude)
+      );
+
+      if (dist <= STOP_THRESHOLD_KM) {
+        clusterEnd = curr; // still at the same spot — extend the cluster
+      } else {
+        pushCluster(clusterStart, clusterEnd); // moved — close the cluster
+        clusterStart = curr;
+        clusterEnd = curr;
+      }
+    }
+    pushCluster(clusterStart, clusterEnd);
+
+    return successMessage(res, "Travel history fetched successfully", {
+      serial_number,
+      total_distance: `${totalDistanceKm.toFixed(2)} km`,
+      points,
+    });
+  } catch (err) {
+    console.error("getTravelHistory error:", err);
+    return errorMessage(res, "Error fetching travel history");
+  }
+};
 export default {
   createDevice,
   updateDevice,
@@ -1202,4 +1329,5 @@ export default {
   changeServerPortal,
   sendDeviceCommand,
   findDevice,
+  getTravelHistory,
 };

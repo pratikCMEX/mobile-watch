@@ -167,6 +167,13 @@ router.post(
   Device_controller.findDevice
 );
 
+router.post(
+  "/get_travel_history",
+  checkAdmin,
+  ValidateJoi(Schemas.deviceRestart.restart),
+  Device_controller.getTravelHistory
+);
+
 // User management routes
 router.post(
   "/create_user",
@@ -274,11 +281,7 @@ router.post(
   ValidateJoi(Schemas.staff.byId),
   Staff_controller.getStaffDetail
 );
-router.get(
-  "/get_current_staff",
-  checkAdmin,
-  Staff_controller.getCurrentStaff
-);
+router.get("/get_current_staff", checkAdmin, Staff_controller.getCurrentStaff);
 router.post(
   "/update_current_staff",
   checkAdmin,
