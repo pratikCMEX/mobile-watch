@@ -820,7 +820,10 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
 
     // FIND must be audible. Switch vibration-only and silence modes to
     // vibration + ringing before sending the command.
+    Logging.info(`Current scene mode: ${currentSceneMode}`);
     if (currentSceneMode === 3 || currentSceneMode === 4) {
+      Logging.info(`Trueeeeeeeeeeeeeeeeee`);
+
       const sceneModeCommandSent = tcpServer.sendSceneModeCommand(
         serial_number,
         1
