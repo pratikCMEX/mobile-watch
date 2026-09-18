@@ -1,6 +1,10 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
-import { errorMessage, successMessage } from "../../library/Response";
+import {
+  errorMessage,
+  successMessage,
+  successPagination,
+} from "../../library/Response";
 import Logging from "../../library/Logging";
 import { deleteFile, unlinkUploadedFiles } from "../../helper/Helper";
 import { Op } from "sequelize";
@@ -1334,6 +1338,240 @@ const getTravelHistory = async (
     return errorMessage(res, "Error fetching travel history");
   }
 };
+
+// ── Multi-user watch sharing (DeviceMembers) ────────────────────
+// A watch can be shared with several users. Each member is either
+// "admin" (full access + can manage members) or "member" (view +
+// receive alerts). The owner is always recorded as admin.
+
+const addMember = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, user_id, role = "member" } = req.body;
+
+    if (!device_id || !user_id) {
+      return errorMessage(res, "device_id and user_id are required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device || !(await canAccessDevice(req, device.id))) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const user = await db.User.findByPk(user_id);
+    if (!user) {
+      return errorMessage(res, "User not found");
+    }
+
+    // Refuse to demote the owner: the owner is always an admin.
+    const isOwner = device.owner_id === user_id;
+    const finalRole = isOwner ? "admin" : role;
+
+    await ensureDeviceMember(device.id, user_id, finalRole as any);
+
+    const member = await db.DeviceMember.findOne({
+      where: { device_id: device.id, user_id },
+      include: [
+        {
+          model: db.User,
+          as: "DeviceUser",
+          attributes: ["id", "name", "email", "phone_number"],
+        },
+      ],
+    });
+
+    return successMessage(res, "Member added successfully", member);
+  } catch (err) {
+    console.error("addMember error:", err);
+    return errorMessage(res, "Error adding member");
+  }
+};
+
+const addMembers = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const {
+      device_id,
+      user_ids,
+      role = "member",
+    }: { device_id: string; user_ids: string[]; role?: string } = req.body;
+
+    if (!device_id || !Array.isArray(user_ids) || !user_ids.length) {
+      return errorMessage(res, "device_id and user_ids array are required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device || !(await canAccessDevice(req, device.id))) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const added: any[] = [];
+    const skipped: { user_id: string; reason: string }[] = [];
+
+    for (const user_id of user_ids) {
+      const user = await db.User.findByPk(user_id);
+      if (!user) {
+        skipped.push({ user_id, reason: "user not found" });
+        continue;
+      }
+      // The owner is always an admin — never demote them.
+      const isOwner = device.owner_id === user_id;
+      const finalRole = isOwner ? "admin" : role;
+      await ensureDeviceMember(device.id, user_id, finalRole as any);
+      added.push({ user_id, role: finalRole });
+    }
+
+    return successMessage(res, "Members added successfully", {
+      added,
+      skipped,
+      total_added: added.length,
+      total_skipped: skipped.length,
+    });
+  } catch (err) {
+    console.error("addMembers error:", err);
+    return errorMessage(res, "Error adding members");
+  }
+};
+
+const listMembers = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, page = 1, limit = 20, search = "" } = req.body;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device || !(await canAccessDevice(req, device.id))) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const offset = (Number(page) - 1) * Number(limit);
+
+    const whereCondition: any = { device_id: device.id };
+    if (search) {
+      // Filter on the related User's name/email/phone.
+      whereCondition[Op.or] = [
+        db.sequelize.where(
+          db.sequelize.col("DeviceUser.name"),
+          "LIKE",
+          `%${search}%`
+        ),
+        db.sequelize.where(
+          db.sequelize.col("DeviceUser.email"),
+          "LIKE",
+          `%${search}%`
+        ),
+        db.sequelize.where(
+          db.sequelize.col("DeviceUser.phone_number"),
+          "LIKE",
+          `%${search}%`
+        ),
+      ];
+    }
+
+    const { count, rows } = await db.DeviceMember.findAndCountAll({
+      where: whereCondition,
+      include: [
+        {
+          model: db.User,
+          as: "DeviceUser",
+          attributes: ["id", "name", "email", "phone_number"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+      limit: Number(limit),
+      offset,
+      distinct: true,
+    });
+
+    // Tag each row with a boolean so the UI can tell who is the owner.
+    const data = rows.map((m: any) => {
+      const json = m.toJSON ? m.toJSON() : m;
+      const user = json.DeviceUser || {};
+      return {
+        id: json.id,
+        device_id: json.device_id,
+        user_id: json.user_id,
+        role: json.role,
+        is_owner: device.owner_id === json.user_id,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone_number: user.phone_number,
+        },
+        createdAt: json.createdAt,
+      };
+    });
+
+    return successPagination(res, "Members fetched successfully", data, {
+      page: Number(page),
+      limit: Number(limit),
+      total: count,
+    });
+  } catch (err) {
+    console.error("listMembers error:", err);
+    return errorMessage(res, "Error fetching members");
+  }
+};
+
+const removeMember = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, user_id } = req.body;
+
+    if (!device_id || !user_id) {
+      return errorMessage(res, "device_id and user_id are required");
+    }
+
+    const device = await db.Device.findByPk(device_id);
+    if (!device || !(await canAccessDevice(req, device.id))) {
+      return errorMessage(res, "Device not found");
+    }
+
+    // The owner can never be removed as a member — they are the
+    // primary owner of the watch.
+    if (device.owner_id === user_id) {
+      return errorMessage(
+        res,
+        "Cannot remove the owner from the watch. Transfer ownership first."
+      );
+    }
+
+    const member = await db.DeviceMember.findOne({
+      where: { device_id: device.id, user_id },
+    });
+
+    if (!member) {
+      return errorMessage(res, "User is not a member of this watch");
+    }
+
+    await member.destroy();
+
+    return successMessage(res, "Member removed successfully", {
+      device_id: device.id,
+      user_id,
+    });
+  } catch (err) {
+    console.error("removeMember error:", err);
+    return errorMessage(res, "Error removing member");
+  }
+};
+
 export default {
   createDevice,
   updateDevice,
@@ -1352,4 +1590,9 @@ export default {
   sendDeviceCommand,
   findDevice,
   getTravelHistory,
+  // Multi-user watch sharing
+  addMember,
+  addMembers,
+  listMembers,
+  removeMember,
 };

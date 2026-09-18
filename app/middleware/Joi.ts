@@ -129,6 +129,30 @@ export const Schemas = {
     user_id: Joi.string().required(),
     device_name: Joi.string().required(),
   }),
+  // ── Multi-user watch sharing (DeviceMembers) ──────────────────
+  // A watch can be shared with several users. Each member is either
+  // "admin" (full access + can manage members) or "member" (view +
+  // receive alerts). The owner is always recorded as admin.
+  addMember: Joi.object({
+    device_id: Joi.string().required(),
+    user_id: Joi.string().required(),
+    role: Joi.string().valid("admin", "member").default("member"),
+  }),
+  addMembers: Joi.object({
+    device_id: Joi.string().required(),
+    user_ids: Joi.array().items(Joi.string().required()).min(1).required(),
+    role: Joi.string().valid("admin", "member").default("member"),
+  }),
+  listMembers: Joi.object({
+    device_id: Joi.string().required(),
+    page: Joi.number().min(1).default(1),
+    limit: Joi.number().min(1).max(100).default(20),
+    search: Joi.string().allow(""),
+  }),
+  removeMember: Joi.object({
+    device_id: Joi.string().required(),
+    user_id: Joi.string().required(),
+  }),
   login: Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().required(),

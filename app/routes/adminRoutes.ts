@@ -145,6 +145,35 @@ router.post(
   ValidateJoi(Schemas.assignDeviceToUser),
   Device_controller.assignDeviceToUser
 );
+
+// ── Multi-user watch sharing (DeviceMembers) ────────────────────
+// A watch can be shared with several users. Each member is either
+// "admin" (full access + can manage members) or "member" (view +
+// receive alerts). The owner is always recorded as admin.
+router.post(
+  "/add_member",
+  checkAdmin,
+  ValidateJoi(Schemas.addMember),
+  Device_controller.addMember
+);
+router.post(
+  "/add_members",
+  checkAdmin,
+  ValidateJoi(Schemas.addMembers),
+  Device_controller.addMembers
+);
+router.post(
+  "/list_members",
+  checkAdmin,
+  ValidateJoi(Schemas.listMembers),
+  Device_controller.listMembers
+);
+router.post(
+  "/remove_member",
+  checkAdmin,
+  ValidateJoi(Schemas.removeMember),
+  Device_controller.removeMember
+);
 router.post(
   "/changeServerPortal",
   // checkAdmin,
