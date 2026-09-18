@@ -2930,13 +2930,22 @@ const requestHeartRateAndBodyTemperature = async function (
 
     // Send the bodytemp2 command to request real-time temperature measurement
     const tempCommandSent = tcpServer.requestBodyTemperature(serialNumber);
+    let hrCommandSent = false;
+    console.log("Temperature command sent:", tempCommandSent);
 
-    // Send the hrtstart command to request heart rate / blood pressure
-    const hrCommandSent = tcpServer.sendHeartRateRequest(serialNumber, 1);
-
-    if (!tempCommandSent && !hrCommandSent) {
-      return errorMessage(res, "Failed to send commands to device");
+    if (!tempCommandSent) {
+      return errorMessage(res, "Failed to send temperature command to device");
     }
+
+    setTimeout(() => {
+      hrCommandSent = tcpServer.sendHeartRateRequest(serialNumber, 1);
+
+      console.log("HR command sent after 15 seconds:", hrCommandSent);
+
+      if (!hrCommandSent) {
+        console.error("Failed to send HR command to device");
+      }
+    }, 15 * 1000);
 
     return successMessage(
       res,
