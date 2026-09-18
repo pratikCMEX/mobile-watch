@@ -24,8 +24,8 @@ async function createUser(req: Request, res: Response, next: NextFunction) {
     if (!name || !email || !password) {
       return errorMessage(res, "Name, email and password are required");
     }
-    const existing = await db.User.findOne({ 
-      where: { email, deletedAt: null } 
+    const existing = await db.User.findOne({
+      where: { email, deletedAt: null },
     });
     if (existing) {
       return errorMessage(res, "A user with this email already exists");
@@ -125,11 +125,11 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
     if (email) {
       // Check if email is already used by another user
       const existingUser = await db.User.findOne({
-        where: { 
+        where: {
           email,
           deletedAt: null,
-          id: { [Op.ne]: id }
-        }
+          id: { [Op.ne]: id },
+        },
       });
       if (existingUser) {
         return errorMessage(res, "Email already in use by another user");
