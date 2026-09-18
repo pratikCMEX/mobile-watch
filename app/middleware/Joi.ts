@@ -160,6 +160,7 @@ export const Schemas = {
     fcm_token: Joi.string().optional().allow(""),
     device_type: Joi.string().optional().allow(""),
     force_login: Joi.boolean().optional().allow(false),
+    time_zone: Joi.string().optional().allow(""),
   }),
   user: {
     create: Joi.object({
