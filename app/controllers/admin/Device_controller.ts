@@ -10,6 +10,7 @@ import {
   canAccessAllDevices,
   canAccessDevice,
   deviceIdScope,
+  ensureDeviceMember,
 } from "../../helper/WatchAccess";
 
 const createDevice = async function (
@@ -76,6 +77,11 @@ const createDevice = async function (
       is_online: false,
       last_updated_at: null,
     });
+
+    // Register the owner as a member (admin) of the new watch.
+    if (owner_id) {
+      await ensureDeviceMember(device.id, owner_id, "admin");
+    }
 
     return successMessage(res, "Device created successfully", device);
   } catch (err) {
@@ -162,6 +168,12 @@ const updateDevice = async function (
     if (weight_kg !== undefined) device.weight_kg = weight_kg;
 
     await device.save();
+
+    // Whenever the owner changes, keep the DeviceMember table in sync
+    // so the owner is always recorded as a member (admin) of the watch.
+    if (owner_id !== undefined && owner_id) {
+      await ensureDeviceMember(device.id, owner_id, "admin");
+    }
 
     return successMessage(res, "Device updated successfully", device);
   } catch (err) {
@@ -578,6 +590,11 @@ const assignOwner = async function (
 
     await device.update({ owner_id });
 
+    // Keep DeviceMember in sync: the newly assigned owner is a member
+    // (admin) of the watch. Existing members are preserved so a watch
+    // can legitimately be shared across multiple users.
+    await ensureDeviceMember(device.id, owner_id, "admin");
+
     return successMessage(res, "Owner assigned successfully", device);
   } catch (err) {
     console.error("assignOwner error:", err);
@@ -795,6 +812,11 @@ const assignDeviceToUser = async function (
     device.owner_id = user_id;
     device.device_name = device_name;
     await device.save();
+
+    // Keep DeviceMember in sync: the assigned user is now a member
+    // (admin) of the watch. Existing members are preserved so a watch
+    // can legitimately be shared across multiple users.
+    await ensureDeviceMember(device.id, user_id, "admin");
 
     return successMessage(res, "Device assigned to user successfully", device);
   } catch (err) {

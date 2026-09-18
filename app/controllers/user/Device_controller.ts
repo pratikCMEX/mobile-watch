@@ -11,6 +11,7 @@ import { tcpServer } from "../../app";
 import { buildServerPortalCommand } from "../../tcp/protocol";
 import Device from "../../models/Device";
 import DeviceSetting from "../../models/DeviceSetting";
+import { ensureDeviceMember } from "../../helper/WatchAccess";
 
 /**
  * Country code auto-prepended to 10-digit national numbers on the wire.
@@ -4342,6 +4343,10 @@ const registerDeviceByImei = async function (
         if (age !== undefined) existingBySerial.age = age;
         if (weight_kg !== undefined) existingBySerial.weight_kg = weight_kg;
         await existingBySerial.save();
+
+        // Register the claiming user as a member (primary owner → admin).
+        await ensureDeviceMember(existingBySerial.id, userId, "admin");
+
         return successMessage(
           res,
           "Device added successfully",
@@ -4399,6 +4404,10 @@ const registerDeviceByImei = async function (
           if (age !== undefined) existingByImei.age = age;
           if (weight_kg !== undefined) existingByImei.weight_kg = weight_kg;
           await existingByImei.save();
+
+          // Register the claiming user as a member (primary owner → admin).
+          await ensureDeviceMember(existingByImei.id, userId, "admin");
+
           return successMessage(
             res,
             "Device added successfully",
@@ -4480,6 +4489,9 @@ const registerDeviceByImei = async function (
           if (weight_kg !== undefined) device.weight_kg = weight_kg;
           await device.save();
         }
+        // Ensure the claiming user is recorded as a member of this
+        // watch (primary owner → admin), even on the race path.
+        await ensureDeviceMember(device.id, userId, "admin");
         return successMessage(
           res,
           hadNoOwner
@@ -4518,6 +4530,9 @@ const registerDeviceByImei = async function (
       }
       throw error;
     }
+
+    // Newly created device — register the claiming user as a member.
+    await ensureDeviceMember(device.id, userId, "admin");
 
     return successMessage(res, "Device registered successfully", device);
   } catch (err: any) {

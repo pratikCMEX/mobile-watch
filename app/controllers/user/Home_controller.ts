@@ -3,6 +3,7 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { Op } from "sequelize";
 import { start } from "node:repl";
+import { getUserDeviceIds } from "../../helper/WatchAccess";
 
 const formatDevice = (device: any) => {
   const d = device.toJSON ? device.toJSON() : device;
@@ -148,19 +149,46 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
     });
 
     const healthOverview = await getHealthOverview(device.id);
-    const firstDevice = await db.Device.findAll({
-      attributes: [
-        "id",
-        "serial_number",
-        "device_name",
-        "phone_number",
-        "profile_image",
-        "connection_status",
-        "last_updated_at",
-      ],
-      where: { owner_id: device.owner_id },
-      order: [["createdAt", "ASC"]],
-    });
+
+    // `all_devices` is now scoped to the watches the *current user* is a
+    // member of (via DeviceMembers), not just the ones sharing the same
+    // owner_id. This is what makes multi-user-per-watch work: a shared
+    // watch shows up in every member's device switcher.
+    const userId = (req as any)?.userinfo?.payload?.id as string | undefined;
+    let firstDevice: any[] = [];
+    if (userId) {
+      const memberDeviceIds = await getUserDeviceIds(userId);
+      if (memberDeviceIds.length) {
+        firstDevice = await db.Device.findAll({
+          attributes: [
+            "id",
+            "serial_number",
+            "device_name",
+            "phone_number",
+            "profile_image",
+            "connection_status",
+            "last_updated_at",
+          ],
+          where: { id: { [Op.in]: memberDeviceIds } },
+          order: [["createdAt", "ASC"]],
+        });
+      }
+    } else {
+      // No authenticated user — fall back to the legacy owner_id scope.
+      firstDevice = await db.Device.findAll({
+        attributes: [
+          "id",
+          "serial_number",
+          "device_name",
+          "phone_number",
+          "profile_image",
+          "connection_status",
+          "last_updated_at",
+        ],
+        where: { owner_id: device.owner_id },
+        order: [["createdAt", "ASC"]],
+      });
+    }
 
     return successMessage(res, "Home data fetched successfully", {
       device: formatDevice(device),

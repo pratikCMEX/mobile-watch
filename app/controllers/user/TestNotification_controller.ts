@@ -1,9 +1,11 @@
 import { NextFunction, Request, Response } from "express";
+import { Op } from "sequelize";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { pushToUser } from "../../services/notification.service";
 import Logging from "../../library/Logging";
 import { sendNotification } from "../../helper/WebNotification";
+import { getUserDeviceIds } from "../../helper/WatchAccess";
 
 const sendTestNotification = async (
   req: Request,
@@ -30,12 +32,17 @@ const sendTestNotification = async (
       return errorMessage(res, "User does not have an FCM token registered");
     }
 
-    // Find the user's device so we can persist a notification record.
-    // The Notifications table requires a device_id (NOT NULL).
-    const device = await db.Device.findOne({
-      where: { owner_id: user_id },
-      attributes: ["id"],
-    });
+    // Find one of the user's devices so we can persist a notification
+    // record. The Notifications table requires a device_id (NOT NULL).
+    // A user may be a member of several watches — pick any of them.
+    const memberDeviceIds = await getUserDeviceIds(user.id);
+    const device =
+      memberDeviceIds.length > 0
+        ? await db.Device.findOne({
+            where: { id: { [Op.in]: memberDeviceIds } },
+            attributes: ["id"],
+          })
+        : null;
 
     if (!device) {
       return errorMessage(

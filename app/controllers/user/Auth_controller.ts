@@ -4,6 +4,7 @@ import { errorMessage, successMessage } from "../../library/Response";
 import bcrypt from "bcrypt";
 import { Op } from "sequelize";
 import { generateAuthToken, deleteFile } from "../../helper/Helper";
+import { getUserDeviceIds } from "../../helper/WatchAccess";
 
 const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -33,18 +34,25 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
       return errorMessage(res, "Invalid email or password", null);
     }
 
-    const firstDevice = await db.Device.findAll({
-      attributes: [
-        "id",
-        "device_name",
-        "profile_image",
-        "phone_number",
-        "connection_status",
-        "last_updated_at",
-      ],
-      where: { owner_id: user.id },
-      order: [["createdAt", "ASC"]],
-    });
+    // Return every watch this user is a member of (via DeviceMembers),
+    // not just the ones where owner_id happens to match. This is what
+    // lets a single watch be shared across multiple accounts.
+    const memberDeviceIds = await getUserDeviceIds(user.id);
+    const firstDevice =
+      memberDeviceIds.length > 0
+        ? await db.Device.findAll({
+            attributes: [
+              "id",
+              "device_name",
+              "profile_image",
+              "phone_number",
+              "connection_status",
+              "last_updated_at",
+            ],
+            where: { id: { [Op.in]: memberDeviceIds } },
+            order: [["createdAt", "ASC"]],
+          })
+        : [];
     // if (firstDevice.length === 0) {
     //   return errorMessage(res, "Device not registered", null);
     // }
@@ -278,8 +286,32 @@ const deleteAccount = async (
     if (!user) {
       return errorMessage(res, "User not found");
     }
-    await db.Device.destroy({ where: { owner_id: userId } });
 
+    // A watch that is shared with other users must NOT be wiped when
+    // one member deletes their account — only the leaving member's
+    // DeviceMember row is removed (FK onDelete CASCADE handles that
+    // when the User row is destroyed). Devices this user is the sole
+    // member of are deleted too, preserving the old single-owner
+    // behaviour for non-shared watches.
+    const memberDeviceIds = await getUserDeviceIds(userId);
+    if (memberDeviceIds.length) {
+      const soleOwnedDeviceIds: string[] = [];
+      for (const deviceId of memberDeviceIds) {
+        const otherMembers = await db.DeviceMember.count({
+          where: { device_id: deviceId, user_id: { [Op.ne]: userId } },
+        });
+        if (otherMembers === 0) soleOwnedDeviceIds.push(deviceId);
+      }
+
+      if (soleOwnedDeviceIds.length) {
+        await db.Device.destroy({
+          where: { id: { [Op.in]: soleOwnedDeviceIds } },
+        });
+      }
+    }
+
+    // Destroying the User row cascades their DeviceMember rows
+    // (FK onDelete CASCADE), then removes the account itself.
     await user.destroy({ force: true });
 
     return successMessage(res, "Account deleted successfully");

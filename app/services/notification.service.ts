@@ -21,6 +21,13 @@ export type NotificationType =
 export interface NotificationPayload {
   device_id: string;
   user_id?: string | null;
+  /**
+   * When set, the notification is created once per recipient and the
+   * FCM push is fanned out to every member of the watch. This is what
+   * makes alarms on a shared watch reach all members instead of only
+   * the (possibly stale) owner_id.
+   */
+  user_ids?: string[] | null;
   type: NotificationType;
   title: string;
   body: string;
@@ -29,33 +36,70 @@ export interface NotificationPayload {
 
 /**
  * Create a notification record in the database and (optionally) push
- * it to the device owner's Firebase Cloud Messaging tokens.
+ * it to the device owner's / members' Firebase Cloud Messaging tokens.
+ *
+ * - `user_id`  → single-recipient notification (legacy callers).
+ * - `user_ids` → one Notification row per recipient, FCM fanned out to
+ *   every member of the watch (used by the TCP alarm pipeline so a
+ *   shared watch alerts all members).
  *
  * @param payload - Notification data
- * @returns The created Notification record
+ * @returns The created Notification record (or the last one when
+ *          fanning out to multiple recipients)
  */
 export const createNotification = async (
   payload: NotificationPayload
 ): Promise<any> => {
-  const { device_id, user_id, type, title, body, metadata } = payload;
+  const { device_id, user_id, user_ids, type, title, body, metadata } = payload;
 
-  const notification = await db.Notification.create({
-    device_id,
-    user_id: user_id ?? null,
-    type,
-    title,
-    body,
-    metadata: metadata ?? null,
-    is_read: "0",
-  });
+  // Normalise the recipient list. user_ids takes precedence so the TCP
+  // alarm path can fan out to every member; otherwise fall back to the
+  // single legacy user_id.
+  let recipients: string[] = [];
+  if (user_ids && user_ids.length) {
+    recipients = [...new Set(user_ids.filter(Boolean))];
+  } else if (user_id) {
+    recipients = [user_id];
+  }
 
-  Logging.info(
-    `Notification created: id=${notification.id} device=${device_id} type=${type}`
-  );
+  if (recipients.length === 0) {
+    // No recipient known — still persist the record so it is visible to
+    // admins, but skip the FCM push.
+    const notification = await db.Notification.create({
+      device_id,
+      user_id: null,
+      type,
+      title,
+      body,
+      metadata: metadata ?? null,
+      is_read: "0",
+    });
+    Logging.info(
+      `Notification created (no recipient): id=${notification.id} device=${device_id} type=${type}`
+    );
+    return notification;
+  }
 
-  // If we know the user, try to push via FCM.
-  if (user_id) {
-    await pushToUser(user_id, {
+  let lastNotification: any = null;
+  for (const recipientId of recipients) {
+    const notification = await db.Notification.create({
+      device_id,
+      user_id: recipientId,
+      type,
+      title,
+      body,
+      metadata: metadata ?? null,
+      is_read: "0",
+    });
+
+    lastNotification = notification;
+
+    Logging.info(
+      `Notification created: id=${notification.id} device=${device_id} user=${recipientId} type=${type}`
+    );
+
+    // Push via FCM to this specific recipient.
+    await pushToUser(recipientId, {
       title,
       body,
       type,
@@ -67,7 +111,7 @@ export const createNotification = async (
     );
   }
 
-  return notification;
+  return lastNotification;
 };
 
 /**

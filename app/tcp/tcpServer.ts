@@ -1361,10 +1361,34 @@ class TcpServer {
     const deviceIdDb = device.id;
     const deviceName = device.device_name;
 
+    // A shared watch must alert EVERY member, not just the (possibly
+    // stale) owner_id. Resolve the member list once and fan the alarm
+    // notifications out to all of them.
+    let memberUserIds: string[] = [];
+    try {
+      const members = (await db.DeviceMember.findAll({
+        where: { device_id: deviceIdDb },
+        attributes: ["user_id"],
+        raw: true,
+      })) as any[];
+      memberUserIds = [...new Set(members.map((m: any) => m.user_id))];
+    } catch (memberErr: any) {
+      Logging.warn(
+        `${tag} could not resolve DeviceMembers for ${deviceIdDb}: ${
+          memberErr?.message || memberErr
+        }`
+      );
+    }
+    if (memberUserIds.length === 0 && ownerId) {
+      // No membership rows yet — fall back to the legacy owner_id so
+      // single-owner watches still get their alarms.
+      memberUserIds = [ownerId];
+    }
+
     // ── SOS alarm (bit 16) ──────────────────────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_SOS) !== 0) {
       Logging.info(
-        `${tag} SOS alarm detected — sending SOS notification to owner`
+        `${tag} SOS alarm detected — sending SOS notification to ${memberUserIds.length} member(s)`
       );
       const notificationPayload = buildSosNotification(
         deviceIdDb,
@@ -1373,7 +1397,7 @@ class TcpServer {
       );
       await createNotification({
         ...notificationPayload,
-        user_id: ownerId,
+        user_ids: memberUserIds,
       });
       Logging.info(`${tag} SOS notification created for device ${deviceIdDb}`);
     }
@@ -1381,11 +1405,11 @@ class TcpServer {
     // ── Low battery alarm (bit 17) ──────────────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_LOW_BATTERY_ALARM) !== 0) {
       Logging.info(
-        `${tag} Low battery alarm detected — sending notification to owner`
+        `${tag} Low battery alarm detected — sending notification to ${memberUserIds.length} member(s)`
       );
       await createNotification({
         device_id: deviceIdDb,
-        user_id: ownerId,
+        user_ids: memberUserIds,
         type: "low_battery",
         title: "Low Battery",
         body: `Device ${deviceId} battery is low`,
@@ -1399,7 +1423,7 @@ class TcpServer {
     // ── Out of fence alarm (bit 18) ─────────────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_OUT_FENCE_ALARM) !== 0) {
       Logging.info(
-        `${tag} Out-of-fence alarm detected — sending notification to owner`
+        `${tag} Out-of-fence alarm detected — sending notification to ${memberUserIds.length} member(s)`
       );
       const notificationPayload = buildGeoFenceNotification(
         deviceIdDb,
@@ -1409,7 +1433,7 @@ class TcpServer {
       );
       await createNotification({
         ...notificationPayload,
-        user_id: ownerId,
+        user_ids: memberUserIds,
       });
       Logging.info(
         `${tag} Geo-fence-out notification created for device ${deviceIdDb}`
@@ -1419,7 +1443,7 @@ class TcpServer {
     // ── Into the fence alarm (bit 19) ───────────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_ENTER_FENCE_ALARM) !== 0) {
       Logging.info(
-        `${tag} Into-fence alarm detected — sending notification to owner`
+        `${tag} Into-fence alarm detected — sending notification to ${memberUserIds.length} member(s)`
       );
       const notificationPayload = buildGeoFenceNotification(
         deviceIdDb,
@@ -1429,7 +1453,7 @@ class TcpServer {
       );
       await createNotification({
         ...notificationPayload,
-        user_id: ownerId,
+        user_ids: memberUserIds,
       });
       Logging.info(
         `${tag} Geo-fence-in notification created for device ${deviceIdDb}`
@@ -3574,15 +3598,37 @@ class TcpServer {
         newStatus
       );
 
+      // A shared watch must alert EVERY member, not just the
+      // (possibly stale) owner_id. Resolve the member list and fan
+      // the geofence notification out to all of them.
+      let memberUserIds: string[] = [];
+      try {
+        const members = (await db.DeviceMember.findAll({
+          where: { device_id: device.id },
+          attributes: ["user_id"],
+          raw: true,
+        })) as any[];
+        memberUserIds = [...new Set(members.map((m: any) => m.user_id))];
+      } catch (memberErr: any) {
+        Logging.warn(
+          `${tag} step 5: could not resolve DeviceMembers for device ${
+            device.id
+          }: ${memberErr?.message || memberErr}`
+        );
+      }
+      if (memberUserIds.length === 0 && device.owner_id) {
+        memberUserIds = [device.owner_id];
+      }
+
       Logging.info(
         `${tag} step 5: device.owner_id=${
           device.owner_id ?? "null"
-        } -> calling createNotification()`
+        } member_count=${memberUserIds.length} -> calling createNotification()`
       );
 
       const notification = await createNotification({
         ...notificationPayload,
-        user_id: device.owner_id || null,
+        user_ids: memberUserIds,
       });
 
       Logging.info(
@@ -6386,16 +6432,37 @@ class TcpServer {
     }
 
     this.findDevice(packet.deviceId)
-      .then((device) => {
+      .then(async (device) => {
         if (!device) {
           Logging.warn(`SOS trigger from unknown device ${packet.deviceId}`);
           return;
         }
 
-        const ownerId = device.owner_id;
-        if (!ownerId) {
+        // A shared watch must alert EVERY member, not just the
+        // (possibly stale) owner_id. Resolve the member list and fan
+        // the SOS notification out to all of them.
+        let memberUserIds: string[] = [];
+        try {
+          const members = (await db.DeviceMember.findAll({
+            where: { device_id: device.id },
+            attributes: ["user_id"],
+            raw: true,
+          })) as any[];
+          memberUserIds = [...new Set(members.map((m: any) => m.user_id))];
+        } catch (memberErr: any) {
           Logging.warn(
-            `SOS trigger from device ${packet.deviceId} but no owner_id set`
+            `SOS trigger: could not resolve DeviceMembers for device ${
+              device.id
+            }: ${memberErr?.message || memberErr}`
+          );
+        }
+        if (memberUserIds.length === 0 && device.owner_id) {
+          // No membership rows yet — fall back to the legacy owner_id.
+          memberUserIds = [device.owner_id];
+        }
+        if (memberUserIds.length === 0) {
+          Logging.warn(
+            `SOS trigger from device ${packet.deviceId} but no owner_id or members set`
           );
           return;
         }
@@ -6409,7 +6476,7 @@ class TcpServer {
 
         return createNotification({
           ...notificationPayload,
-          user_id: ownerId,
+          user_ids: memberUserIds,
         });
       })
       .then((notification) => {
