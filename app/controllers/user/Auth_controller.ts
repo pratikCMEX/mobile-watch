@@ -5,6 +5,41 @@ import bcrypt from "bcrypt";
 import { Op } from "sequelize";
 import { generateAuthToken, deleteFile } from "../../helper/Helper";
 import { getUserDeviceIds } from "../../helper/WatchAccess";
+import { tcpServer } from "../../app";
+
+/**
+ * Maps GMT timezone strings (e.g., "GMT-8", "GMT+5") to numeric offsets (e.g., -8, 5).
+ * Used to store the timezone as a number in the database.
+ */
+const GMT_TO_OFFSET: Record<string, number> = {
+  "GMT-12": -12,
+  "GMT-11": -11,
+  "GMT-10": -10,
+  "GMT-9": -9,
+  "GMT-8": -8,
+  "GMT-7": -7,
+  "GMT-6": -6,
+  "GMT-5": -5,
+  "GMT-4": -4,
+  "GMT-3": -3,
+  "GMT-2": -2,
+  "GMT-1": -1,
+  "GMT+0": 0,
+  "GMT+1": 1,
+  "GMT+2": 2,
+  "GMT+3": 3,
+  "GMT+4": 4,
+  "GMT+5": 5,
+  "GMT+6": 6,
+  "GMT+7": 7,
+  "GMT+8": 8,
+  "GMT+9": 9,
+  "GMT+10": 10,
+  "GMT+11": 11,
+  "GMT+12": 12,
+  "GMT+13": 13,
+  "GMT+14": 14,
+};
 
 const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -14,6 +49,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
       fcm_token = "",
       device_type = "",
       force_login = true,
+      time_zone = "GMT-8",
     } = req.body;
 
     if (!email || !password) {
@@ -48,14 +84,31 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
               "phone_number",
               "connection_status",
               "last_updated_at",
+              "timezone",
             ],
             where: { id: { [Op.in]: memberDeviceIds } },
             order: [["createdAt", "ASC"]],
           })
         : [];
-    // if (firstDevice.length === 0) {
-    //   return errorMessage(res, "Device not registered", null);
-    // }
+
+    // If there are devices, check and update timezone for the first device if needed
+    if (firstDevice.length > 0) {
+      const offset = GMT_TO_OFFSET[time_zone] ?? -8; // Default to -8 if invalid timezone
+
+      for (const device of firstDevice) {
+        if (!device.timezone) {
+          const result = tcpServer.sendLzCommand(
+            device.serial_number,
+            null,
+            offset
+          );
+
+          await device.update({ timezone: String(offset) });
+          // Update the in-memory object so the response reflects the new value
+          device.timezone = String(offset);
+        }
+      }
+    }
 
     /*
      * Check whether this device is already logged in.
