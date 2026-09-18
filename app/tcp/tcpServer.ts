@@ -3667,17 +3667,50 @@ class TcpServer {
   }
 
   /**
+   * Compute the start (inclusive) and end (inclusive) of the IST
+   * (UTC+5:30) hour bucket that contains `d`.
+   *
+   * Steps are bucketed by hour in device-local time (IST) rather than
+   * by calendar date, so the server stores one row per device per
+   * hour instead of one row per day.
+   */
+  private istHourBucket(d: Date): { hourStart: Date; hourEnd: Date } {
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    // Shift the instant into IST wall-clock, then truncate to the hour.
+    const ist = new Date(d.getTime() + IST_OFFSET_MS);
+    const hourStartIST = new Date(
+      Date.UTC(
+        ist.getUTCFullYear(),
+        ist.getUTCMonth(),
+        ist.getUTCDate(),
+        ist.getUTCHours(),
+        0,
+        0,
+        0
+      )
+    );
+    const hourStart = new Date(hourStartIST.getTime() - IST_OFFSET_MS);
+    const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000 - 1); // inclusive
+    return { hourStart, hourEnd };
+  }
+
+  /**
    * Persist the pedometer (cumulative step count) and tumbling count
    * from a UD_LTE packet as a HealthMetric row.
    *
    * The pedometer value is cumulative (keeps increasing), so we store
-   * it as metric_type "steps_cumulative". The tumbling count is persisted
-   * separately as sleep data with unit "tumbling".
+   * it as metric_type "steps_cumulative". The tumbling count is
+   * persisted separately as sleep data with unit "tumbling".
    *
-   * Upsert logic: if a steps_cumulative record already exists for the
-   * same device and the same calendar date, update that row in place
-   * (the pedometer only goes up, so the latest value is always the
-   * most accurate). If the date is different, insert a new row.
+   * Upsert logic (steps_cumulative): if a row already exists for the
+   * same device in the same HOUR bucket (device-local time = IST,
+   * UTC+5:30), update that row in place (the pedometer only goes up,
+   * so the latest value is always the most accurate). If the hour is
+   * different, insert a new row. This yields up to 24 rows per day
+   * (one per hour) instead of a single row per calendar date.
+   *
+   * Upsert logic (sleep/tumbling): unchanged — one row per calendar
+   * date, updated in place.
    *
    * Errors are caught and logged — a failure to save steps must never
    * break the location pipeline.
@@ -3701,15 +3734,16 @@ class TcpServer {
       const dateStr = recordedAt.toISOString().split("T")[0];
 
       // ── Steps (steps_cumulative) ──────────────────────
+      // Hourly upsert in device-local time (IST, UTC+5:30).
+      const { hourStart, hourEnd } = this.istHourBucket(recordedAt);
+
       const existingSteps = await db.HealthMetric.findOne({
         where: {
           device_id: deviceId,
           metric_type: "steps_cumulative",
-          [db.Sequelize.Op.and]: db.sequelize.where(
-            db.sequelize.fn("DATE", db.sequelize.col("recorded_at")),
-            "=",
-            dateStr
-          ),
+          recorded_at: {
+            [db.Sequelize.Op.between]: [hourStart, hourEnd],
+          },
         },
       });
 
@@ -3721,7 +3755,9 @@ class TcpServer {
           recorded_at: recordedAt,
         });
 
-        Logging.info(`${tag} OK (updated): steps_cumulative=${steps}`);
+        Logging.info(
+          `${tag} OK (updated): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
+        );
       } else {
         await db.HealthMetric.create({
           device_id: deviceId,
@@ -3732,7 +3768,9 @@ class TcpServer {
           recorded_at: recordedAt,
         });
 
-        Logging.info(`${tag} OK (created): steps_cumulative=${steps}`);
+        Logging.info(
+          `${tag} OK (created): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
+        );
       }
 
       // ── Sleep (tumbling value from device) ──────────────
