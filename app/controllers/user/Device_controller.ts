@@ -2765,21 +2765,17 @@ const requestBodyTemperature = async function (
       return errorMessage(res, "Failed to send bodytemp2 command to device");
     }
 
-    return successMessage(
-      res,
-      "bodytemp2 command sent to device. The device will measure body temperature and respond with the reading.",
-      {
-        serial_number: serialNumber,
-        device_id: device.id,
-        device_name: device.device_name,
-        command_sent: true,
-        command_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
-        note:
-          "The device will reply with [3G*<id>*<LEN>*bodytemp2,type,temp]. " +
-          "Temperature data will be stored as a HealthMetric automatically.",
-        timestamp: new Date().toISOString(),
-      }
-    );
+    return successMessage(res, "Command sent successfully to device.", {
+      serial_number: serialNumber,
+      device_id: device.id,
+      device_name: device.device_name,
+      command_sent: true,
+      command_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
+      note:
+        "The device will reply with [3G*<id>*<LEN>*bodytemp2,type,temp]. " +
+        "Temperature data will be stored as a HealthMetric automatically.",
+      timestamp: new Date().toISOString(),
+    });
   } catch (err: any) {
     console.error("requestBodyTemperature error:", err);
     const msg = (err && err.message) || String(err);
