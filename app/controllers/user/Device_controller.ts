@@ -2856,8 +2856,8 @@ const requestHeartRate = async function (
     return successMessage(
       res,
       start === 1
-        ? "hrtstart command sent. Device will upload heart rate / blood pressure once and auto-stop."
-        : "hrtstart command sent. Device will stop uploading heart rate data.",
+        ? "Command to device sent successfully."
+        : "Command to device sent successfully.",
       {
         serial_number: serialNumber,
         device_id: device.id,
@@ -4123,7 +4123,7 @@ const locateDevice = async function (
 
     return successMessage(
       res,
-      "Locate command sent. Device will start real-time GPS positioning for ~3 minutes and report fixes every ~20 seconds.",
+      "Locate command sent — GPS active for a few minutes.",
       {
         serial_number,
         device_id: device.id,
