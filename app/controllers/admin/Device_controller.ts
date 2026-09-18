@@ -1467,10 +1467,16 @@ const addMembers = async function (
 ) {
   try {
     const {
+      device_name,
       device_id,
       user_ids,
       role = "member",
-    }: { device_id: string; user_ids: string[]; role?: string } = req.body;
+    }: {
+      device_id: string;
+      user_ids: string[];
+      role?: string;
+      device_name?: string;
+    } = req.body;
 
     if (!device_id || !Array.isArray(user_ids) || !user_ids.length) {
       return errorMessage(res, "device_id and user_ids array are required");
@@ -1480,6 +1486,26 @@ const addMembers = async function (
     if (!device || !(await canAccessDevice(req, device.id))) {
       return errorMessage(res, "Device not found");
     }
+    if (device_name !== undefined) {
+      device.device_name = device_name;
+      await device.save();
+    }
+
+    // ── Full replace semantics ──────────────────────────────────
+    // The caller wants to set the watch's member list to EXACTLY the
+    // supplied user_ids. So we wipe every existing member row first
+    // (always preserving the owner) and then re-add only the supplied
+    // users. This guarantees the member list never accumulates stale
+    // entries across repeated calls.
+    const ownerId = device.owner_id;
+    const removed = await db.DeviceMember.destroy({
+      where: {
+        device_id: device.id,
+        // Never remove the owner — they are the primary owner of the
+        // watch and must remain an admin member.
+        user_id: ownerId ? { [Op.ne]: ownerId } : undefined,
+      },
+    });
 
     const added: any[] = [];
     const skipped: { user_id: string; reason: string }[] = [];
@@ -1491,13 +1517,21 @@ const addMembers = async function (
         continue;
       }
       // The owner is always an admin — never demote them.
-      const isOwner = device.owner_id === user_id;
+      const isOwner = ownerId && ownerId === user_id;
       const finalRole = isOwner ? "admin" : role;
       await ensureDeviceMember(device.id, user_id, finalRole as any);
       added.push({ user_id, role: finalRole });
     }
 
+    // Make sure the owner is present as a member even if they were
+    // not in the supplied user_ids list.
+    if (ownerId && !added.some((a: any) => a.user_id === ownerId)) {
+      await ensureDeviceMember(device.id, ownerId, "admin");
+      added.unshift({ user_id: ownerId, role: "admin", owner: true });
+    }
+
     return successMessage(res, "Members added successfully", {
+      removed_count: removed,
       added,
       skipped,
       total_added: added.length,

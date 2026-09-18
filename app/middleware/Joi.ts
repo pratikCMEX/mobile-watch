@@ -139,6 +139,7 @@ export const Schemas = {
     role: Joi.string().valid("admin", "member").default("member"),
   }),
   addMembers: Joi.object({
+    device_name: Joi.string().required(),
     device_id: Joi.string().required(),
     user_ids: Joi.array().items(Joi.string().required()).min(1).required(),
     role: Joi.string().valid("admin", "member").default("member"),
