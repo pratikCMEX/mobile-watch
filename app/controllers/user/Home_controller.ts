@@ -39,6 +39,8 @@ const getHealthOverview = async (deviceId: string) => {
     "blood_pressure",
     "sleep",
     "steps_cumulative",
+    "spo2",
+    "temperature",
   ];
   const overview: any = {};
   const todayStart = new Date();
