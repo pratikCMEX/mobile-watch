@@ -1493,18 +1493,13 @@ const addMembers = async function (
 
     // ── Full replace semantics ──────────────────────────────────
     // The caller wants to set the watch's member list to EXACTLY the
-    // supplied user_ids. So we wipe every existing member row first
-    // (always preserving the owner) and then re-add only the supplied
-    // users. This guarantees the member list never accumulates stale
-    // entries across repeated calls.
+    // supplied user_ids. So we wipe EVERY existing member row first
+    // (owner, admin, member — all of them) and then re-add only the
+    // supplied users. This guarantees the member list never
+    // accumulates stale entries across repeated calls.
     const ownerId = device.owner_id;
     const removed = await db.DeviceMember.destroy({
-      where: {
-        device_id: device.id,
-        // Never remove the owner — they are the primary owner of the
-        // watch and must remain an admin member.
-        // user_id: ownerId ? { [Op.ne]: ownerId } : undefined,
-      },
+      where: { device_id: device.id },
     });
 
     const added: any[] = [];
@@ -1521,13 +1516,6 @@ const addMembers = async function (
       const finalRole = isOwner ? "admin" : role;
       await ensureDeviceMember(device.id, user_id, finalRole as any);
       added.push({ user_id, role: finalRole });
-    }
-
-    // Make sure the owner is present as a member even if they were
-    // not in the supplied user_ids list.
-    if (ownerId && !added.some((a: any) => a.user_id === ownerId)) {
-      await ensureDeviceMember(device.id, ownerId, "admin");
-      added.unshift({ user_id: ownerId, role: "admin", owner: true });
     }
 
     return successMessage(res, "Members added successfully", {
@@ -1647,15 +1635,11 @@ const removeMember = async function (
       return errorMessage(res, "Device not found");
     }
 
-    // The owner can never be removed as a member — they are the
-    // primary owner of the watch.
-    if (device.owner_id === user_id) {
-      return errorMessage(
-        res,
-        "Cannot remove the owner from the watch. Transfer ownership first."
-      );
-    }
-
+    // Remove ANY member — admin or owner alike. The Devices.owner_id
+    // column is intentionally left untouched here; it is a legacy
+    // denormalized pointer and is NOT cleared by member management.
+    // If the caller truly wants to unassign the owner they should
+    // use assignOwner / assign_device_to_user to set a new owner.
     const member = await db.DeviceMember.findOne({
       where: { device_id: device.id, user_id },
     });
@@ -1664,11 +1648,17 @@ const removeMember = async function (
       return errorMessage(res, "User is not a member of this watch");
     }
 
+    const wasOwner = device.owner_id === user_id;
+
     await member.destroy();
 
     return successMessage(res, "Member removed successfully", {
       device_id: device.id,
       user_id,
+      was_owner: wasOwner,
+      note: wasOwner
+        ? "Owner's DeviceMember row removed. Devices.owner_id is left intact — use assignOwner to transfer ownership."
+        : undefined,
     });
   } catch (err) {
     console.error("removeMember error:", err);
