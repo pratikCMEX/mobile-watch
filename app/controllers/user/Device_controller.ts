@@ -2929,7 +2929,10 @@ const requestHeartRateAndBodyTemperature = async function (
     }
 
     // Send the bodytemp2 command to request real-time temperature measurement
-    const tempCommandSent = tcpServer.requestBodyTemperature(serialNumber);
+    // const tempCommandSent = tcpServer.requestBodyTemperature(serialNumber);
+    const tempCommandSent = tcpServer.sendHeartRateRequest(serialNumber, 1);
+    const hrCommandSent = tcpServer.requestBodyTemperature(serialNumber);
+
     console.log("Temperature command sent:", tempCommandSent);
 
     if (!tempCommandSent) {
@@ -2940,7 +2943,6 @@ const requestHeartRateAndBodyTemperature = async function (
     // to be sent before responding, so the response reflects reality.
     await new Promise((resolve) => setTimeout(resolve, 15 * 1000));
 
-    const hrCommandSent = tcpServer.sendHeartRateRequest(serialNumber, 1);
     console.log("HR command sent after 15 seconds:", hrCommandSent);
 
     if (!hrCommandSent) {
