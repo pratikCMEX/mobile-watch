@@ -150,6 +150,7 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
         "id",
         "serial_number",
         "device_name",
+        "phone_number",
         "profile_image",
         "connection_status",
         "last_updated_at",
