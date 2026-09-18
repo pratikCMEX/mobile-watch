@@ -170,7 +170,6 @@ router.post(
 router.post(
   "/get_travel_history",
   checkAdmin,
-  ValidateJoi(Schemas.deviceRestart.restart),
   Device_controller.getTravelHistory
 );
 
