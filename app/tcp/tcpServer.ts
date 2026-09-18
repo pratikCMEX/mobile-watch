@@ -1865,29 +1865,77 @@ class TcpServer {
   // ───────────────────────────────────────────────────────────
 
   /**
-   * Payload: oxygen,<unknown flag>,spo2Percent
+   * Device sends:
+   *   [3G*YYYYYYYYYY*LEN*oxygen,type,oxy]
+   *
+   *   type: 0 = manual measuring on device end
+   *   oxy : SPO2 percentage (0–100)
+   *
+   * Server replies:
+   *   [3G*YYYYYYYYYY*LEN*oxygen,status]
+   *
+   *   status: 1 = normal, 0 = abnormal, 2 = error
+   *
+   * SPO2 data rating (server-side):
+   *   90%–100% → Good   → status 1 (normal)
+   *   70%–89%  → Average → status 1 (normal)
+   *   <70%     → Poor    → status 0 (abnormal)
+   *   invalid  → error   → status 2 (error)
    */
-  private handleOxygen(client: TcpClient, packet: ParsedPacket): void {
+  private async handleOxygen(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): Promise<void> {
     Logging.info(
       `oxygen packet received from device ${packet.deviceId}: ${packet.payload}`
     );
 
     const parts = packet.payload.split(",");
+    const type = parseInt(parts[0], 10);
     const spo2 = parseInt(parts[1], 10);
 
-    if (!Number.isInteger(spo2)) return;
+    // Determine status based on SPO2 value
+    let status: number;
 
-    this.saveHealthMetric(
-      packet.deviceId,
-      "spo2",
-      spo2,
-      null,
-      "%",
-      new Date()
-    ).catch((error: Error) =>
-      Logging.error(
-        `Failed to save SpO2 for device ${packet.deviceId}: ${error.message}`
-      )
+    if (!Number.isInteger(spo2) || spo2 < 0 || spo2 > 100) {
+      // Invalid SPO2 value → error
+      status = 2;
+    } else if (spo2 >= 90) {
+      // 90%–100% → Good → normal
+      status = 1;
+    } else if (spo2 >= 70) {
+      // 70%–89% → Average → normal
+      status = 1;
+    } else {
+      // <70% → Poor → abnormal
+      status = 0;
+    }
+
+    // Save the SpO2 reading to the database (only if the value is valid)
+    if (status !== 2) {
+      this.saveHealthMetric(
+        packet.deviceId,
+        "spo2",
+        spo2,
+        type,
+        "%",
+        new Date()
+      ).catch((error: Error) =>
+        Logging.error(
+          `Failed to save SpO2 for device ${packet.deviceId}: ${error.message}`
+        )
+      );
+    }
+
+    // Server reply: [3G*YYYYYYYYYY*LEN*oxygen,status]
+    const content = `oxygen,${status}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const reply = `[3G*${packet.deviceId}*${length}*${content}]`;
+    this.send(client, reply);
+
+    Logging.info(
+      `SpO2 | Device: ${packet.deviceId} | Type: ${type} | ` +
+        `Oxy: ${spo2}% | Status: ${status} | Reply: ${reply}`
     );
   }
 

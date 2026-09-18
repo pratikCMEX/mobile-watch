@@ -214,7 +214,96 @@ Content-Type: multipart/form-data
 
 ---
 
-## 11. Get Health Analytics
+## 11. Save SpO2 (Blood Oxygen Saturation)
+
+**POST** `/health/save_spo2`
+
+Saves a SpO2 reading and returns the server-side rating and status.
+
+SPO2 data rating (server-side):
+
+| SPO2 Range | Rating  | Status | Meaning  |
+| ---------- | ------- | ------ | -------- |
+| 90%–100%   | Good    | 1      | normal   |
+| 70%–89%    | Average | 1      | normal   |
+| <70%       | Poor    | 0      | abnormal |
+| invalid    | —       | 2      | error    |
+
+```json
+{
+  "device_id": "DEVICE_UUID",
+  "spo2": 95,
+  "measurement_type": 0,
+  "unit": "%"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "SpO2 saved successfully",
+  "data": {
+    "data": {
+      "id": "UUID",
+      "device_id": "DEVICE_UUID",
+      "metric_type": "spo2",
+      "value_primary": 95,
+      "value_secondary": 0,
+      "unit": "%",
+      "recorded_at": "2026-09-18T07:00:00.000Z",
+      "createdAt": "2026-09-18T07:00:00.000Z",
+      "updatedAt": "2026-09-18T07:00:00.000Z"
+    },
+    "rating": "Good",
+    "status": 1
+  }
+}
+```
+
+---
+
+## 12. Request Heart Rate & Body Temperature (Combined)
+
+**POST** `/user/device/request_heart_rate_and_body_temperature`
+
+Sends both an `hrtstart,1` command (heart rate / blood pressure) and a
+`bodytemp2` command (body temperature) to the device in a single API call.
+The device replies with the readings, which are automatically stored as
+HealthMetric records.
+
+**Request body:**
+
+```json
+{
+  "serial_number": "8800000015"
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Commands sent to device. The device will measure and respond with heart rate / blood pressure and body temperature readings.",
+  "data": {
+    "serial_number": "8800000015",
+    "device_id": "DEVICE_UUID",
+    "device_name": "Device 8800000015",
+    "bodytemp2_command_sent": true,
+    "hrtstart_command_sent": true,
+    "bodytemp2_protocol": "[3G*8800000015*0009*bodytemp2]",
+    "hrtstart_protocol": "[3G*8800000015*<LEN>*hrtstart,1]",
+    "note": "Device will reply with [3G*<id>*<LEN>*bodytemp2,type,temp] and [3G*<id>*<LEN>*bphrt,systolic,diastolic,heartRate,...]. Temperature is stored as temperature HealthMetric. Blood pressure is stored as blood_pressure HealthMetric. Heart rate is stored as heart_rate HealthMetric.",
+    "timestamp": "2026-09-18T07:00:00.000Z"
+  }
+}
+```
+
+---
+
+## 13. Get Health Analytics
 
 **POST** `/health/get_analytics`
 
@@ -229,7 +318,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 12. Save / Update Geofence
+## 14. Save / Update Geofence
 
 **POST** `/user/device/save_geofence` (route not in userDeviceRoutes, check actual route)
 
@@ -246,7 +335,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 13. List Geofences
+## 15. List Geofences
 
 **POST** `/user/device/list_geofences` (route not in userDeviceRoutes, check actual route)
 
@@ -262,7 +351,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 14. Toggle Geofence Status
+## 16. Toggle Geofence Status
 
 **POST** `/user/device/toggle_geofence_status` (route not in userDeviceRoutes, check actual route)
 
@@ -275,7 +364,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 15. Create Emergency Contact
+## 17. Create Emergency Contact
 
 **POST** `/user/device/create_emergency_contact` (route not in userDeviceRoutes, check actual route)
 
@@ -290,7 +379,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 16. Update Emergency Contact
+## 18. Update Emergency Contact
 
 **POST** `/user/device/update_emergency_contact` (route not in userDeviceRoutes, check actual route)
 
@@ -306,7 +395,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 17. List Emergency Contacts
+## 19. List Emergency Contacts
 
 **POST** `/user/device/list_emergency_contacts` (route not in userDeviceRoutes, check actual route)
 
@@ -322,7 +411,7 @@ Content-Type: multipart/form-data
 
 ---
 
-## 18. Get Device Status
+## 20. Get Device Status
 
 Sends a TS (terminal status) command to the device via TCP to request
 fresh firmware/software status, then returns the current device data
@@ -371,7 +460,7 @@ automatically updates the record.
 
 ---
 
-## 19. Restart Device
+## 21. Restart Device
 
 Sends a RESET (restart) command to the device via TCP. The device will
 restart and, upon coming back online, will re-establish its TCP connection
@@ -398,7 +487,7 @@ and resume sending heartbeats.
 
 ---
 
-## 20. Device Command (Unified API)
+## 22. Device Command (Unified API)
 
 Send various commands to the device via TCP. Use the `command` field to specify
 the action:
@@ -432,7 +521,7 @@ the action:
 
 ---
 
-## 21. Find My Device
+## 23. Find My Device
 
 Send a FIND command to the device via TCP. The device will respond with its
 location or an audible alert to help locate it.
@@ -461,7 +550,7 @@ Protocol: `[CS*YYYYYYYYYY*0004*FIND]`
 
 ---
 
-## 22. Set Alarm Clock
+## 24. Set Alarm Clock
 
 Send alarm clock settings to the device via TCP. You can set up to 3 alarms.
 
@@ -499,7 +588,7 @@ Protocol: `[CS*YYYYYYYYYY*LEN*REMIND,alarm1,alarm2,alarm3]`
 
 ---
 
-## 23. Remote Snapshot (Capture Photo)
+## 25. Remote Snapshot (Capture Photo)
 
 Send a remote snapshot command to the device via TCP. The device will capture
 a photo and send it back as image data.
@@ -539,7 +628,7 @@ and a snapshot record will be created in the database when the device responds.
 
 ---
 
-## 24. Save Emergency Contacts (Bulk)
+## 26. Save Emergency Contacts (Bulk)
 
 Push up to 3 SOS contacts (one per priority slot) to the device in a single call.
 
@@ -584,7 +673,7 @@ Device reply (per slot):
 
 ---
 
-## 25. Save / Update Single Emergency Contact
+## 27. Save / Update Single Emergency Contact
 
 Create or update ONE contact. After saving, the server re-syncs **all** stored
 contacts to the device in priority order.
@@ -617,7 +706,7 @@ contacts to the device in priority order.
 
 ---
 
-## 26. Delete Emergency Contact
+## 28. Delete Emergency Contact
 
 Delete ONE contact by id. After deleting, the server re-syncs the **remaining**
 contacts to the device in priority order.
@@ -643,7 +732,7 @@ contacts to the device in priority order.
 
 ---
 
-## 27. List Emergency Contacts
+## 29. List Emergency Contacts
 
 Paginated list of contacts for a device. Sorted by `priority ASC NULLS LAST`,
 then `createdAt` (use `sorting` to flip).
@@ -664,7 +753,7 @@ then `createdAt` (use `sorting` to flip).
 
 ---
 
-## 28. Get Emergency Contact by ID
+## 30. Get Emergency Contact by ID
 
 Fetch a single contact.
 
@@ -678,7 +767,7 @@ Fetch a single contact.
 
 ---
 
-## 29. Set Phonebook (PHBX)
+## 31. Set Phonebook (PHBX)
 
 Push up to 30 contacts onto the watch's phonebook. Each contact is sent
 as a separate PHBX packet (one round-trip per entry).
@@ -737,7 +826,7 @@ queued for the watch.
 
 ---
 
-## 30. Clear Phonebook Slot (PHBX with empty name AND empty number)
+## 32. Clear Phonebook Slot (PHBX with empty name AND empty number)
 
 Clear a single phonebook slot on the watch. Per the latest protocol spec,
 this firmware clears a slot by sending PHBX again at the same slot index
@@ -792,7 +881,7 @@ Device reply (uses the same PHBX command word):
 
 ---
 
-## 31. List Phonebook Entries (Server-Side Mirror)
+## 33. List Phonebook Entries (Server-Side Mirror)
 
 List all phonebook entries currently stored on the server for a device.
 The server mirrors the watch's PHBX state in a `DevicePhonebooks` table:
@@ -852,7 +941,7 @@ Each `contacts[]` entry:
 
 ---
 
-## 32. Fall-Down Alarm Alert (FALLDOWN)
+## 34. Fall-Down Alarm Alert (FALLDOWN)
 
 Toggle the watch's fall-down alarm alert switch and the "call center
 number after fall" switch.
@@ -888,7 +977,7 @@ Wire protocol:
 
 ---
 
-## 33. Fall-Down Sensitivity (LSSET)
+## 35. Fall-Down Sensitivity (LSSET)
 
 Set the watch's fall-down detection sensitivity level.
 
@@ -928,7 +1017,7 @@ Wire protocol:
 
 ---
 
-## 34. Create App Update
+## 36. Create App Update
 
 Create a new app version record (admin only).
 
@@ -946,18 +1035,18 @@ Authorization: `Bearer <admin JWT>`
 
 **Response fields:**
 
-| Field          | Type    | Description                              |
-| -------------- | ------- | ---------------------------------------- |
-| `id`           | string  | App update UUID                          |
-| `apk_version`  | string  | App version string                       |
-| `type`         | string  | `"ios"` or `"android"`                   |
-| `force_update` | boolean | Whether the app should force the update  |
-| `createdAt`    | date    | Creation timestamp                       |
-| `updatedAt`    | date    | Last update timestamp                    |
+| Field          | Type    | Description                             |
+| -------------- | ------- | --------------------------------------- |
+| `id`           | string  | App update UUID                         |
+| `apk_version`  | string  | App version string                      |
+| `type`         | string  | `"ios"` or `"android"`                  |
+| `force_update` | boolean | Whether the app should force the update |
+| `createdAt`    | date    | Creation timestamp                      |
+| `updatedAt`    | date    | Last update timestamp                   |
 
 ---
 
-## 35. List App Updates
+## 37. List App Updates
 
 List app updates with optional search / filter / pagination (admin only).
 
@@ -977,16 +1066,16 @@ Authorization: `Bearer <admin JWT>`
 
 **Response fields:**
 
-| Field     | Type    | Description                              |
-| --------- | ------- | ---------------------------------------- |
-| `rows`    | array   | Array of app update objects              |
-| `page`    | number  | Current page                             |
-| `limit`   | number  | Page size                                |
-| `total`   | number  | Total record count                       |
+| Field   | Type   | Description                 |
+| ------- | ------ | --------------------------- |
+| `rows`  | array  | Array of app update objects |
+| `page`  | number | Current page                |
+| `limit` | number | Page size                   |
+| `total` | number | Total record count          |
 
 ---
 
-## 36. Update App Update
+## 38. Update App Update
 
 Update an existing app update record (admin only).
 
@@ -1004,7 +1093,7 @@ Authorization: `Bearer <admin JWT>`
 
 ---
 
-## 37. Get App Update
+## 39. Get App Update
 
 Fetch a single app update by ID (admin only).
 
@@ -1020,7 +1109,7 @@ Authorization: `Bearer <admin JWT>`
 
 ---
 
-## 38. Delete App Update
+## 40. Delete App Update
 
 Delete an app update record (admin only).
 
@@ -1036,7 +1125,7 @@ Authorization: `Bearer <admin JWT>`
 
 ---
 
-## 39. Check App Update (Mobile App)
+## 41. Check App Update (Mobile App)
 
 Public endpoint — the mobile app calls this on launch (before/at login)
 to decide whether to prompt the user to upgrade.
@@ -1054,17 +1143,17 @@ Authorization: none (public)
 
 **Response fields:**
 
-| Field            | Type    | Description                                              |
-| ---------------- | ------- | -------------------------------------------------------- |
-| `update_available` | boolean | Whether a newer version exists than the installed one  |
-| `force_update`   | boolean | Whether the app should force the update                 |
-| `latest_version` | string  | The latest available app version                        |
-| `type`           | string  | `"ios"` or `"android"`                                  |
-| `created_at`     | date    | When this update record was created                      |
+| Field              | Type    | Description                                           |
+| ------------------ | ------- | ----------------------------------------------------- |
+| `update_available` | boolean | Whether a newer version exists than the installed one |
+| `force_update`     | boolean | Whether the app should force the update               |
+| `latest_version`   | string  | The latest available app version                      |
+| `type`             | string  | `"ios"` or `"android"`                                |
+| `created_at`       | date    | When this update record was created                   |
 
 ---
 
-## 40. Create Staff
+## 42. Create Staff
 
 **POST** `/admin/create_staff`
 
@@ -1086,7 +1175,7 @@ Authorization: admin token (staff get 403)
 
 ---
 
-## 41. Update Staff
+## 43. Update Staff
 
 **POST** `/admin/update_staff`
 
@@ -1109,7 +1198,7 @@ Authorization: admin token (staff get 403)
 
 ---
 
-## 42. Update Staff Status
+## 44. Update Staff Status
 
 **POST** `/admin/update_staff_status`
 
@@ -1126,7 +1215,7 @@ Authorization: admin token (staff get 403)
 
 ---
 
-## 43. Delete Staff (soft delete)
+## 45. Delete Staff (soft delete)
 
 **DELETE** `/admin/delete_staff`
 
@@ -1142,7 +1231,7 @@ Authorization: admin token (staff get 403)
 
 ---
 
-## 44. List Staff
+## 46. List Staff
 
 **POST** `/admin/list_staff`
 
@@ -1160,7 +1249,7 @@ Authorization: admin token (staff get 403)
 
 ---
 
-## 45. Get Staff Detail
+## 47. Get Staff Detail
 
 **POST** `/admin/get_staff_detail`
 
@@ -1174,7 +1263,7 @@ Authorization: admin token (staff get 403)
 
 ---
 
-## 46. Staff Login Logs
+## 48. Staff Login Logs
 
 **POST** `/admin/staff_login_logs`
 

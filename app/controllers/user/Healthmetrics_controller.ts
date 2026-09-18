@@ -44,6 +44,29 @@ const AddMetrics = async function (
       );
     }
 
+    // Use service layer for spo2 (includes rating + status)
+    if (metric_type === "spo2") {
+      const result = await HealthMetricService.saveSpO2({
+        device_id,
+        spo2: Number(value_primary),
+        measurement_type:
+          value_secondary !== undefined && value_secondary !== null
+            ? Number(value_secondary)
+            : undefined,
+        unit,
+      });
+
+      if (!result.success) {
+        return errorMessage(res, result.error || "Failed to save SpO2");
+      }
+
+      return successMessage(res, "Healthmetric added successfully", {
+        data: result.data,
+        rating: result.rating,
+        status: result.status,
+      });
+    }
+
     const healthmetric = await db.HealthMetric.create({
       device_id: device_id,
       metric_type: metric_type,
@@ -55,6 +78,46 @@ const AddMetrics = async function (
     return successMessage(res, "Healthmetric added successfully", healthmetric);
   } catch (err) {
     return errorMessage(res, "Error adding healthmetric");
+  }
+};
+
+// POST /health/save_spo2
+// Save a SpO2 (blood oxygen saturation) reading.
+//
+// SPO2 data rating (server-side):
+//   90%–100% → Good   → status 1 (normal)
+//   70%–89%  → Average → status 1 (normal)
+//   <70%     → Poor    → status 0 (abnormal)
+//   invalid  → error   → status 2 (error)
+const saveSpO2 = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { device_id, spo2, measurement_type, unit, recorded_at } = req.body;
+
+    if (!device_id || spo2 === undefined || spo2 === null) {
+      return errorMessage(res, "device_id and spo2 are required");
+    }
+
+    const result = await HealthMetricService.saveSpO2({
+      device_id,
+      spo2: Number(spo2),
+      measurement_type:
+        measurement_type !== undefined ? Number(measurement_type) : undefined,
+      unit,
+      recorded_at: recorded_at ? new Date(recorded_at) : undefined,
+    });
+
+    if (!result.success) {
+      return errorMessage(res, result.error || "Failed to save SpO2");
+    }
+
+    return successMessage(res, "SpO2 saved successfully", {
+      data: result.data,
+      rating: result.rating,
+      status: result.status,
+    });
+  } catch (err) {
+    console.error("saveSpO2 error:", err);
+    return errorMessage(res, "Error saving SpO2");
   }
 };
 
@@ -508,4 +571,10 @@ const getTodaySteps = async (
   }
 };
 
-export default { AddMetrics, getAnalytics, getHealthOverview, getTodaySteps };
+export default {
+  AddMetrics,
+  getAnalytics,
+  getHealthOverview,
+  getTodaySteps,
+  saveSpO2,
+};

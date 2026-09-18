@@ -2877,6 +2877,98 @@ const requestHeartRate = async function (
 };
 
 /**
+ * POST /user/device/request_heart_rate_and_body_temperature
+ *
+ * Sends BOTH a heart-rate request (hrtstart,1) and a body-temperature
+ * request (bodytemp2) to the device in a single API call.
+ *
+ * The device will reply with:
+ *   - [3G*<id>*<LEN>*bphrt,systolic,diastolic,heartRate,...]  (heart rate / BP)
+ *   - [3G*<id>*<LEN>*bodytemp2,type,temp]                     (body temperature)
+ *
+ * Both replies are automatically handled by the TCP server and stored
+ * as HealthMetric records.
+ *
+ * Body: { serial_number }
+ */
+const requestHeartRateAndBodyTemperature = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number } = req.body;
+
+    let device = null;
+    if (serial_number) {
+      device = await db.Device.findOne({
+        where: { serial_number },
+      });
+    }
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const serialNumber = device.serial_number;
+
+    if (!serialNumber) {
+      return errorMessage(
+        res,
+        "Device has no serial_number. Cannot send commands."
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serialNumber);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot request heart rate or body temperature."
+      );
+    }
+
+    // Send the bodytemp2 command to request real-time temperature measurement
+    const tempCommandSent = tcpServer.requestBodyTemperature(serialNumber);
+
+    // Send the hrtstart command to request heart rate / blood pressure
+    const hrCommandSent = tcpServer.sendHeartRateRequest(serialNumber, 1);
+
+    if (!tempCommandSent && !hrCommandSent) {
+      return errorMessage(res, "Failed to send commands to device");
+    }
+
+    return successMessage(
+      res,
+      "Commands sent to device. The device will measure and respond with heart rate / blood pressure and body temperature readings.",
+      {
+        serial_number: serialNumber,
+        device_id: device.id,
+        device_name: device.device_name,
+        bodytemp2_command_sent: tempCommandSent,
+        hrtstart_command_sent: hrCommandSent,
+        bodytemp2_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
+        hrtstart_protocol: `[3G*${serialNumber}*<LEN>*hrtstart,1]`,
+        note:
+          "Device will reply with [3G*<id>*<LEN>*bodytemp2,type,temp] and " +
+          "[3G*<id>*<LEN>*bphrt,systolic,diastolic,heartRate,...]. " +
+          "Temperature is stored as temperature HealthMetric. " +
+          "Blood pressure is stored as blood_pressure HealthMetric. " +
+          "Heart rate is stored as heart_rate HealthMetric.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("requestHeartRateAndBodyTemperature error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(
+      res,
+      "Error requesting heart rate and body temperature: " + msg
+    );
+  }
+};
+
+/**
  * POST /user/device/reject_stranger
  *
  * Set the reject stranger calling feature on the device.
@@ -4503,6 +4595,7 @@ export default {
   getDoNotDisturb,
   requestBodyTemperature,
   requestHeartRate,
+  requestHeartRateAndBodyTemperature,
   setRejectStranger,
   setNightPowerSaving,
   setDialLock,

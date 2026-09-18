@@ -122,6 +122,16 @@ router.post(
   // ValidateJoi(Schemas.autoAnswer.list),
   Device_controller.requestHeartRate
 );
+
+// Request both heart rate and body temperature from the device in one call.
+// Sends hrtstart,1 (heart rate) and bodytemp2 (temperature) commands.
+router.post(
+  "/request_all_health_data",
+  checkToken,
+  ValidateJoi(Schemas.bodyTemperature.request),
+  Device_controller.requestHeartRateAndBodyTemperature
+);
+
 // Outgoing Call (CALL) API — instruct the watch to dial a phone number.
 //
 // Wire protocol:

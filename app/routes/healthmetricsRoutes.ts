@@ -13,6 +13,13 @@ router.post(
 );
 
 router.post(
+  "/save_spo2",
+  checkToken,
+  ValidateJoi(Schemas.healthMetric.saveSpo2),
+  Healthmetrics_controller.saveSpO2
+);
+
+router.post(
   "/get_analytics",
   ValidateJoi(Schemas.healthMetric.analytics),
   Healthmetrics_controller.getAnalytics

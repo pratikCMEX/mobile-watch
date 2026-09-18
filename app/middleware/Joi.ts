@@ -1583,6 +1583,13 @@ export const Schemas = {
         .default("daily"),
       date: Joi.string().optional().allow(null, ""),
     }),
+    saveSpo2: Joi.object({
+      device_id: Joi.string().required(),
+      spo2: Joi.number().integer().min(0).max(100).required(),
+      measurement_type: Joi.number().integer().valid(0, 1).optional(),
+      unit: Joi.string().optional().default("%"),
+      recorded_at: Joi.date().iso().optional().allow(null, ""),
+    }),
   },
   snapshot: {
     add: Joi.object({
