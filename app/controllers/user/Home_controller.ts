@@ -11,6 +11,7 @@ const formatDevice = (device: any) => {
     device_name: d.device_name,
     serialNumber: d.serial_number,
     profile_image: d.profile_image,
+    phone_number: d.phone_number,
     connection_status: d.connection_status,
     is_online: d.is_online,
     battery_percentage: d.battery_percentage,
