@@ -2807,15 +2807,13 @@ const requestHeartRate = async function (
   next: NextFunction
 ) {
   try {
-    const { serial_number, device_id, start } = req.body;
+    const { serial_number, start } = req.body;
 
     let device = null;
     if (serial_number) {
       device = await db.Device.findOne({
         where: { serial_number },
       });
-    } else if (device_id) {
-      device = await db.Device.findByPk(device_id);
     }
 
     if (!device) {

@@ -116,6 +116,12 @@ router.post(
   Device_controller.listAutoAnswer
 );
 
+router.post(
+  "/request_heart_rate",
+  checkToken,
+  // ValidateJoi(Schemas.autoAnswer.list),
+  Device_controller.requestHeartRate
+);
 // Outgoing Call (CALL) API — instruct the watch to dial a phone number.
 //
 // Wire protocol:
