@@ -2787,6 +2787,98 @@ const requestBodyTemperature = async function (
 };
 
 /**
+ * POST /user/device/request_heart_rate
+ *
+ * Sends an hrtstart command to the device to request a single
+ * heart rate / blood pressure measurement.
+ *
+ * Server sends: [3G*<deviceId>*LEN*hrtstart,x]
+ *   x = 1 → device uploads heart rate data once, then auto stops
+ *   x = 0 → device stops uploading heart rate data
+ *
+ * Device replies: [3G*<deviceId>*LEN*bphrt,systolic,diastolic,heartRate,...]
+ * The bphrt packet is automatically handled and stored as HealthMetric records.
+ *
+ * Body: { device_id or serial_number, start (1 or 0) }
+ */
+const requestHeartRate = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { serial_number, device_id, start } = req.body;
+
+    let device = null;
+    if (serial_number) {
+      device = await db.Device.findOne({
+        where: { serial_number },
+      });
+    } else if (device_id) {
+      device = await db.Device.findByPk(device_id);
+    }
+
+    if (!device) {
+      return errorMessage(res, "Device not found");
+    }
+
+    const serialNumber = device.serial_number;
+
+    if (!serialNumber) {
+      return errorMessage(
+        res,
+        "Device has no serial_number. Cannot send hrtstart command."
+      );
+    }
+
+    if (start !== 0 && start !== 1) {
+      return errorMessage(res, "start must be 0 (stop) or 1 (single upload)");
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serialNumber);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is not connected via TCP. Cannot request heart rate."
+      );
+    }
+
+    // Send the hrtstart command to request heart rate / blood pressure
+    const commandSent = tcpServer.sendHeartRateRequest(
+      serialNumber,
+      start as number
+    );
+
+    if (!commandSent) {
+      return errorMessage(res, "Failed to send hrtstart command to device");
+    }
+
+    return successMessage(
+      res,
+      start === 1
+        ? "hrtstart command sent. Device will upload heart rate / blood pressure once and auto-stop."
+        : "hrtstart command sent. Device will stop uploading heart rate data.",
+      {
+        serial_number: serialNumber,
+        device_id: device.id,
+        device_name: device.device_name,
+        command_sent: true,
+        command_protocol: `[3G*${serialNumber}*<LEN>*hrtstart,${start}]`,
+        note:
+          "Device will reply with [3G*<id>*<LEN>*bphrt,systolic,diastolic,heartRate,...]. " +
+          "Blood pressure is stored as blood_pressure HealthMetric. Heart rate is stored as heart_rate HealthMetric.",
+        timestamp: new Date().toISOString(),
+      }
+    );
+  } catch (err: any) {
+    console.error("requestHeartRate error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error requesting heart rate: " + msg);
+  }
+};
+
+/**
  * POST /user/device/reject_stranger
  *
  * Set the reject stranger calling feature on the device.
@@ -4412,6 +4504,7 @@ export default {
   setSilenceTime,
   getDoNotDisturb,
   requestBodyTemperature,
+  requestHeartRate,
   setRejectStranger,
   setNightPowerSaving,
   setDialLock,

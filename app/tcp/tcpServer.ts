@@ -4043,6 +4043,54 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // Request heart rate / blood pressure from device (hrtstart command)
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Send an hrtstart command to request a single heart rate / blood
+   * pressure measurement from the device.
+   *
+   * Protocol format: [3G*YYYYYYYYYY*LEN*hrtstart,x]
+   *
+   *   x = 1 → device uploads heart rate data once, then auto stops
+   *   x = 0 → device stops uploading heart rate data
+   *
+   * Device reply: [3G*YYYYYYYYYY*LEN*bphrt,systolic,diastolic,heartRate,...]
+   *
+   * @param deviceId - The device ID (e.g., 8800000015)
+   * @param start - 1 to start single upload, 0 to stop
+   * @returns true if command sent successfully, false if device not connected
+   */
+  public sendHeartRateRequest(deviceId: string, start: number): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send hrtstart command.`
+      );
+      return false;
+    }
+
+    if (start !== 0 && start !== 1) {
+      Logging.error(
+        `Invalid hrtstart value for device ${deviceId}: ${start} (must be 0 or 1)`
+      );
+      return false;
+    }
+
+    // Content: "hrtstart,<start>"
+    const content = `hrtstart,${start}`;
+    const length = Buffer.byteLength(content, "utf8");
+    const lengthHex = length.toString(16).padStart(4, "0");
+    const command = `[3G*${deviceId}*${lengthHex}*${content}]`;
+
+    Logging.info(`Sending hrtstart command to device ${deviceId}: ${command}`);
+
+    this.send(client, command);
+    return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
 
   /**
    * Send scene mode command to a specific device.

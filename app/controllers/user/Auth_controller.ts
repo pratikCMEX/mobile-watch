@@ -38,6 +38,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
         "id",
         "device_name",
         "profile_image",
+        "phone_number",
         "connection_status",
         "last_updated_at",
       ],
