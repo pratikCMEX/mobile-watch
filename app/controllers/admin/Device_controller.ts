@@ -1503,7 +1503,7 @@ const addMembers = async function (
         device_id: device.id,
         // Never remove the owner — they are the primary owner of the
         // watch and must remain an admin member.
-        user_id: ownerId ? { [Op.ne]: ownerId } : undefined,
+        // user_id: ownerId ? { [Op.ne]: ownerId } : undefined,
       },
     });
 
