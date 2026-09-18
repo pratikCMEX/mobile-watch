@@ -1791,7 +1791,13 @@ class TcpServer {
     // Push the live location to Firebase Realtime Database so mobile
     // apps can subscribe to real-time position updates.
     Logging.info(`${tag} step 7: calling updateFirebaseLiveLocation()`);
-    await this.updateFirebaseLiveLocation(device.id, latitude, longitude);
+    await this.updateFirebaseLiveLocation(
+      device.id,
+      latitude,
+      longitude,
+      device.device_name,
+      device.battery_percentage
+    );
     Logging.info(`${tag} step 7 OK: updateFirebaseLiveLocation() completed`);
 
     // Save pedometer (cumulative step count) and tumbling count as
@@ -3585,7 +3591,9 @@ class TcpServer {
   private async updateFirebaseLiveLocation(
     deviceId: string,
     latitude: number,
-    longitude: number
+    longitude: number,
+    deviceName?: string | null,
+    batteryPercentage?: number | null
   ): Promise<void> {
     const tag = `[Firebase:${deviceId}]`;
 
@@ -3596,6 +3604,10 @@ class TcpServer {
         latitude,
         longitude,
         recorded_at: new Date().toISOString(),
+        ...(deviceName != null ? { device_name: deviceName } : {}),
+        ...(batteryPercentage != null
+          ? { battery_percentage: batteryPercentage }
+          : {}),
       });
 
       Logging.info(
@@ -3831,7 +3843,13 @@ class TcpServer {
     // Push the live location to Firebase Realtime Database so mobile
     // apps can subscribe to real-time position updates.
     Logging.info(`${tag} step 7: calling updateFirebaseLiveLocation()`);
-    await this.updateFirebaseLiveLocation(device.id, latitude, longitude);
+    await this.updateFirebaseLiveLocation(
+      device.id,
+      latitude,
+      longitude,
+      device.device_name,
+      device.battery_percentage
+    );
     Logging.info(`${tag} step 7 OK: updateFirebaseLiveLocation() completed`);
   }
 
