@@ -706,11 +706,81 @@ const listDevices = async function (
       ],
     }); // order: [["createdAt", "DESC"]],
 
-    // Ensure DeviceOwner is always present (even if null)
-    const devicesWithOwner = rows.map((device: any) => ({
-      ...device.toJSON(),
-      DeviceOwner: device.DeviceOwner || null,
-    }));
+    // Pull every member (DeviceMembers) for the returned devices so
+    // listings can show the full array of users assigned to each
+    // watch — not just the single owner_id column.
+    const deviceIds = rows.map((d: any) => d.id);
+    const memberRows =
+      deviceIds.length > 0
+        ? await db.DeviceMember.findAll({
+            where: { device_id: { [Op.in]: deviceIds } },
+            include: [
+              {
+                model: db.User,
+                as: "DeviceUser",
+                attributes: ["id", "name", "email", "phone_number"],
+                required: false,
+              },
+            ],
+            raw: false,
+          })
+        : [];
+
+    const membersByDevice = new Map<string, any[]>();
+    for (const m of memberRows) {
+      const arr = membersByDevice.get(m.device_id) || [];
+      const json = m.toJSON ? m.toJSON() : m;
+      const user = json.DeviceUser || {};
+      arr.push({
+        user_id: json.user_id,
+        role: json.role,
+        is_owner: false, // corrected below against owner_id
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          phone_number: user.phone_number,
+        },
+      });
+      membersByDevice.set(m.device_id, arr);
+    }
+
+    // Ensure DeviceOwner is always present (even if null) and tag the
+    // owner in the members array.
+    const devicesWithOwner = rows.map((device: any) => {
+      const json = device.toJSON();
+      const members = membersByDevice.get(device.id) || [];
+      // The owner is always an admin member — surface them in the
+      // array too so the UI never has to special-case owner_id.
+      const ownerAlreadyListed = members.some(
+        (mm: any) => mm.user_id === device.owner_id
+      );
+      if (device.owner_id && !ownerAlreadyListed) {
+        const owner = device.DeviceOwner || null;
+        members.unshift({
+          user_id: device.owner_id,
+          role: "admin",
+          is_owner: true,
+          user: owner
+            ? {
+                id: owner.id,
+                name: owner.name,
+                email: owner.email,
+                phone_number: null,
+              }
+            : null,
+        });
+      }
+      // Tag is_owner on every member that matches owner_id.
+      for (const mm of members) {
+        mm.is_owner = mm.user_id === device.owner_id;
+      }
+      return {
+        ...json,
+        DeviceOwner: device.DeviceOwner || null,
+        members,
+      };
+    });
 
     return successMessage(res, "Devices fetched successfully", {
       devices: devicesWithOwner,
