@@ -4106,11 +4106,16 @@ class TcpServer {
     }
     Logging.info(`${tag} step 1 OK: device.id=${device.id}`);
 
-    const latitude = this.convertCoordinate(
+    // UD packets report latitude/longitude as plain decimal degrees
+    // (e.g. 23.052520, 72.5172292 — near Mumbai). The old code used
+    // convertCoordinate() which assumes NMEA DDMM.MM format, producing
+    // wildly wrong values (e.g. 0.384, 1.208). Using convertDecimalCoordinate()
+    // correctly handles decimal degrees.
+    const latitude = this.convertDecimalCoordinate(
       location.latitude,
       location.latitudeDirection
     );
-    const longitude = this.convertCoordinate(
+    const longitude = this.convertDecimalCoordinate(
       location.longitude,
       location.longitudeDirection
     );
