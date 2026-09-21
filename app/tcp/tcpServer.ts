@@ -12,6 +12,8 @@ import {
   buildFallDownNotification,
 } from "../services/notification.service";
 
+type FirebaseHealthMetric = "spo2" | "heart_rate" | "temperature" | "oxygen";
+
 // ─────────────────────────────────────────────────────────────
 // Snapshot storage (absolute path so it works regardless of CWD
 // — same convention as app/middleware/Multer.ts and app.ts).
@@ -4001,6 +4003,10 @@ class TcpServer {
       unit: heartRate.unit,
       recorded_at: heartRate.recordedAt,
     });
+
+    await this.updateFirebaseHealthMetrics(device.id, {
+      heart_rate: heartRate.bpm,
+    });
   }
 
   private async saveHealthMetric(
@@ -4024,10 +4030,77 @@ class TcpServer {
       recorded_at: recordedAt,
     });
 
+    const firebaseUpdates: Partial<Record<FirebaseHealthMetric, number>> = {};
+
+    switch (metricType) {
+      case "heart_rate":
+        firebaseUpdates.heart_rate = valuePrimary;
+        break;
+      case "temperature":
+        firebaseUpdates.temperature = valuePrimary;
+        break;
+      case "spo2":
+        // The device's oxygen packet is the SpO2 reading. Keep both requested
+        // Firebase keys in sync while storing the canonical database type.
+        firebaseUpdates.spo2 = valuePrimary;
+        firebaseUpdates.oxygen = valuePrimary;
+        break;
+      default:
+        break;
+    }
+
+    if (Object.keys(firebaseUpdates).length > 0) {
+      await this.updateFirebaseHealthMetrics(device.id, firebaseUpdates);
+    }
+
     Logging.info(
       `HealthMetric saved | Device: ${deviceId} | Type: ${metricType} | ` +
         `Value: ${valuePrimary}${unit ? " " + unit : ""} | DB id: ${record.id}`
     );
+  }
+
+  /**
+   * Persist the latest supported health metrics for a device in Firebase RTDB.
+   * The first write creates all four values as zero; later writes update only
+   * the metrics present in the incoming log.
+   */
+  private async updateFirebaseHealthMetrics(
+    deviceId: string,
+    updates: Partial<Record<FirebaseHealthMetric, number>>
+  ): Promise<void> {
+    const tag = `[FirebaseHealth:${deviceId}]`;
+
+    try {
+      const dbRef = database().ref(`monitorimi/healthMetrics/${deviceId}`);
+      const result = await dbRef.transaction((current: any) => {
+        const existing =
+          current && typeof current === "object"
+            ? (current as Record<string, any>)
+            : {};
+        const numericValue = (value: unknown): number =>
+          typeof value === "number" && Number.isFinite(value) ? value : 0;
+
+        return {
+          spo2: numericValue(existing.spo2),
+          heart_rate: numericValue(existing.heart_rate),
+          temperature: numericValue(existing.temperature),
+          oxygen: numericValue(existing.oxygen),
+          ...updates,
+          updated_at: new Date().toISOString(),
+        };
+      });
+
+      if (!result.committed) {
+        Logging.warn(`${tag} transaction was not committed`);
+        return;
+      }
+
+      Logging.info(
+        `${tag} updated ${Object.keys(updates).join(", ")} successfully`
+      );
+    } catch (error: any) {
+      Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
+    }
   }
 
   private async saveAlarm(deviceId: string, payload: string): Promise<void> {
