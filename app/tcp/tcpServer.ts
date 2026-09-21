@@ -4556,16 +4556,21 @@ class TcpServer {
       };
       this.deviceRequestCache.set(serialNumber, entry);
 
-      // Auto-timeout after 60 seconds to prevent permanent lockout
+      // Auto-timeout after 120 seconds to prevent permanent lockout.
+      // Devices may be slow to respond (especially after reconnecting
+      // from an ECONNRESET), and the HR + bodytemp2 round-trip can
+      // take a while on cellular/LTE connections.
       entry.timeoutTimer = setTimeout(() => {
-        Logging.warn(`Device request for ${serialNumber} timed out after 60s.`);
+        Logging.warn(
+          `Device request for ${serialNumber} timed out after 120s.`
+        );
         this.cancelDeviceRequest(serialNumber);
         reject(
           new Error(
-            `Device ${serialNumber} request timed out. Device may be unresponsive.`
+            `Device ${serialNumber} request timed out after 120s. Device may be unresponsive.`
           )
         );
-      }, 60_000);
+      }, 120_000);
 
       Logging.info(
         `Device request started for ${serialNumber}. ` +
