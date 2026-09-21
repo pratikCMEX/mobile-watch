@@ -209,7 +209,7 @@ router.post(
 //                 (phrases contents in Unicode coding)
 //   Device reply: [CS*<id>*<LEN>*MESSAGE]  (bare ack = success)
 router.post(
-  "/phrases_display",
+  "/send_message",
   checkToken,
   ValidateJoi(Schemas.phrasesDisplay.set),
   Device_controller.setPhrasesDisplay
