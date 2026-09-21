@@ -522,9 +522,12 @@ class TcpServer {
     socket.on("close", () => {
       clearInterval(noProgressTimer);
 
-      // Cancel any pending device request for this device
+      // Cancel any pending device request for this device.
+      // If HR data was already received, resolve with partial data
+      // (HR + null temp) instead of rejecting — the device disconnected
+      // before temperature could be measured, but HR data is still valid.
       if (client.deviceId) {
-        this.cancelDeviceRequest(client.deviceId);
+        this.cancelOrResolveOnDisconnect(client.deviceId);
       }
 
       this.removeClient(client);
@@ -4702,6 +4705,43 @@ class TcpServer {
 
     Logging.warn(`Cancelling pending device request for ${serialNumber}.`);
     entry.reject(new Error(`Device request cancelled for ${serialNumber}.`));
+    this.deviceRequestCache.delete(serialNumber);
+  }
+
+  /**
+   * Handle device disconnect for a pending request.
+   *
+   * If HR data was already received, resolve the Promise with partial
+   * data (HR + null temp) instead of rejecting. The device disconnected
+   * before temperature could be measured, but HR data is still valid
+   * and useful.
+   *
+   * If no HR data was received, reject as before.
+   */
+  public cancelOrResolveOnDisconnect(serialNumber: string): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) return;
+
+    // Clear the timeout timer to prevent it firing after cleanup
+    if (entry.timeoutTimer) {
+      clearTimeout(entry.timeoutTimer);
+      entry.timeoutTimer = null;
+    }
+
+    if (entry.hrReceived) {
+      Logging.warn(
+        `Device ${serialNumber} disconnected. HR data already received — ` +
+          `resolving with partial data (HR only, temp null).`
+      );
+      entry.resolve({
+        hrData: entry.hrData,
+        tempData: null,
+      });
+    } else {
+      Logging.warn(`Cancelling pending device request for ${serialNumber}.`);
+      entry.reject(new Error(`Device request cancelled for ${serialNumber}.`));
+    }
+
     this.deviceRequestCache.delete(serialNumber);
   }
 
