@@ -1998,6 +1998,104 @@ const setCenterNumber = async (
 };
 
 // ────────────────────────────────────────────────────────────
+// Phrases Display (MESSAGE) — push phrases to the watch
+// and display them on the screen.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*<LEN>*MESSAGE,<unicode_hex>]
+//   Device reply: [CS*<id>*<LEN>*MESSAGE]  (bare ack = success)
+//
+// The <unicode_hex> is a UTF-16BE hex string where each
+// Unicode codepoint is 4 hex digits in big-endian order.
+// Example: "好123" → "597d003100320033"
+//
+// Server-side mirror: none (ephemeral display command)
+// ────────────────────────────────────────────────────────────
+
+const setPhrasesDisplay = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, phrases } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (!phrases) {
+      return errorMessage(res, "phrases is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendPhrasesDisplayCommand(
+      serial_number,
+      phrases
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Failed to send MESSAGE command. Device may be disconnected."
+      );
+    }
+
+    // Build the unicode hex for the response
+    let unicodeHex = "";
+    for (let i = 0; i < phrases.length; i++) {
+      unicodeHex += phrases.charCodeAt(i).toString(16).padStart(4, "0");
+    }
+
+    const content = `MESSAGE,${unicodeHex}`;
+    const lenHex = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[CS*${serial_number}*${lenHex}*${content}]`;
+
+    Logging.info(
+      `Phrases display (MESSAGE) command sent to device ${serial_number} ` +
+        `(device_id=${device.id})`
+    );
+
+    return successMessage(res, "Phrases display command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      phrases,
+      unicode_hex: unicodeHex,
+      command_sent: true,
+      command_message:
+        "MESSAGE command sent. Phrases will be displayed on the watch screen.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*<LEN>*MESSAGE] (bare ack = success). Phrases contents are sent in Unicode coding.",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setPhrasesDisplay error:", err);
+    return errorMessage(res, "Error sending phrases display command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
 // Low-Battery Alarm Alert (LOWBAT) — toggle the watch's
 // low-battery alarm SMS alert switch.
 //
@@ -4628,6 +4726,7 @@ const listVoiceMessages = async function (
     const pageNum = Math.max(1, parseInt(page as string, 10));
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10)));
     const offset = (pageNum - 1) * limitNum;
+    const VOICE_UPLOAD_DIR = "uploads/voice";
 
     const { count, rows } = await db.DeviceVoiceMessage.findAndCountAll({
       where: { device_id },
@@ -4645,8 +4744,19 @@ const listVoiceMessages = async function (
       ],
     });
 
+    // ...after findAndCountAll
+
     const totalPages = Math.ceil(count / limitNum);
 
+    const voiceMessages = rows.map((row: any) => {
+      const data = row.toJSON();
+      return {
+        ...data,
+        voice_file_path: data.voice_file_name
+          ? `${VOICE_UPLOAD_DIR}/${data.voice_file_name}`
+          : null,
+      };
+    });
     return successMessage(res, "Voice messages retrieved successfully", {
       device_id,
       device_name: device.device_name,
@@ -4681,6 +4791,7 @@ export default {
   setSosSms,
   setFallDownAlert,
   setLowBatteryAlert,
+  setPhrasesDisplay,
   setCenterNumber,
   setTakeOffAlert,
   setRemoveSmsAlert,

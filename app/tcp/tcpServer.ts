@@ -917,6 +917,10 @@ class TcpServer {
         this.handleCenterResponse(client, parsed);
         break;
 
+      case "MESSAGE":
+        this.handleMessageResponse(client, parsed);
+        break;
+
       case "LSSET":
         this.handleLssetResponse(client, parsed);
         break;
@@ -7428,6 +7432,92 @@ class TcpServer {
 
     this.send(client, command);
     return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Phrases Display (MESSAGE) — push phrases to the watch
+  // and display them on the screen.
+  //
+  // Wire protocol:
+  //   Server send : [CS*<id>*<LEN>*MESSAGE,<unicode_hex>]
+  //   Device reply: [CS*<id>*<LEN>*MESSAGE]  (bare ack = success)
+  //
+  // The <unicode_hex> is a UTF-16BE hex string where each
+  // Unicode codepoint is 4 hex digits in big-endian order.
+  // Example: "好123" → "597d003100320033"
+  //
+  // @param deviceId Protocol device ID (serial number)
+  // @param phrases Text phrases to display on the watch
+  // @returns true if command sent successfully, false if device not connected
+  //
+  // ───────────────────────────────────────────────────────────
+
+  public sendPhrasesDisplayCommand(deviceId: string, phrases: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send MESSAGE command.`
+      );
+      return false;
+    }
+
+    if (!phrases || phrases.length === 0) {
+      Logging.error(
+        `Invalid phrases for device ${deviceId} — phrases must not be empty`
+      );
+      return false;
+    }
+
+    // Convert phrases to Unicode hex string (UTF-16BE, each codepoint as 4 hex digits)
+    const unicodeHex = this.stringToUnicodeHex(phrases);
+
+    const content = `MESSAGE,${unicodeHex}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[CS*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending phrases display (MESSAGE) command to device ${deviceId}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Convert a string to a Unicode hex representation.
+   *
+   * Each character's Unicode code point is encoded as 4 hex digits
+   * in big-endian (UTF-16BE) order.
+   *
+   * Example: "Hi" → "00480069"
+   *          "好" → "597d"
+   *
+   * @param str Input string
+   * @returns Unicode hex string (lowercase)
+   */
+  private stringToUnicodeHex(str: string): string {
+    let result = "";
+    for (let i = 0; i < str.length; i++) {
+      const codePoint = str.charCodeAt(i);
+      result += codePoint.toString(16).padStart(4, "0");
+    }
+    return result;
+  }
+
+  /**
+   * Handle a MESSAGE reply from the device.
+   *
+   * Reply shape:
+   *   [CS*<id>*<LEN>*MESSAGE]   bare ack → success
+   */
+  private handleMessageResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `MESSAGE (phrases display) response from device ${packet.deviceId}: ` +
+        `status="${status || "(ack)"}" (${ok ? "OK" : "FAILED"})`
+    );
   }
 
   /**

@@ -952,6 +952,35 @@ export const Schemas = {
   },
 
   /**
+   * Phrases Display (MESSAGE) — push phrases to the watch
+   * and display them on the screen.
+   *
+   * Wire protocol:
+   *   Server send : [CS*<id>*<LEN>*MESSAGE,<unicode_hex>]
+   *   Device reply: [CS*<id>*<LEN>*MESSAGE]  (bare ack = success)
+   *
+   * The phrases contents are sent in Unicode coding (UTF-16BE hex).
+   *
+   * Request body:
+   *   {
+   *     "serial_number": "8800000015",
+   *     "phrases":      "Hello, World!"
+   *   }
+   */
+  phrasesDisplay: {
+    set: Joi.object({
+      serial_number: Joi.string().required().messages({
+        "string.empty": "serial_number is required",
+        "any.required": "serial_number is required",
+      }),
+      phrases: Joi.string().required().messages({
+        "string.empty": "phrases is required",
+        "any.required": "phrases is required (text to display on watch)",
+      }),
+    }),
+  },
+
+  /**
    * Set the watch's low-battery alarm SMS alert switch (LOWBAT command).
    *
    * Per the protocol spec:

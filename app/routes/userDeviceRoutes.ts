@@ -201,6 +201,20 @@ router.post(
   Device_controller.setCenterNumber
 );
 
+// Phrases Display (MESSAGE) API — push phrases to the watch
+// and display them on the screen.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*<LEN>*MESSAGE,<unicode_hex>]
+//                 (phrases contents in Unicode coding)
+//   Device reply: [CS*<id>*<LEN>*MESSAGE]  (bare ack = success)
+router.post(
+  "/phrases_display",
+  checkToken,
+  ValidateJoi(Schemas.phrasesDisplay.set),
+  Device_controller.setPhrasesDisplay
+);
+
 // Fall-Down Sensitivity (LSSET) API — set the watch's fall-down
 // detection sensitivity level.
 //
