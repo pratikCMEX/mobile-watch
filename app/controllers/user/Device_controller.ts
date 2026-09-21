@@ -2931,12 +2931,24 @@ const requestHeartRateAndBodyTemperature = async function (
     //   2. After HR response is received, bodytemp2 command is auto-sent
     //   3. API caller is blocked until BOTH responses are received
     //   4. No concurrent requests for the same device (cache lock)
-    //   5. Auto-times out after 60 seconds
+    //   5. Auto-times out after 120 seconds
     const result = await tcpServer.requestHRAndTemperature(serialNumber);
+
+    // Check if temperature data is valid or was an ACK (device echoed
+    // the command without measuring). Some devices send an ACK for
+    // bodytemp2 and take time to measure, or may not support on-demand
+    // temperature measurement at all.
+    const tempIsAck = result.tempData?.isAck === true;
+    const tempHasData =
+      result.tempData?.temp !== null && result.tempData?.temp !== undefined;
 
     return successMessage(
       res,
-      "Heart rate and body temperature data received from device.",
+      tempHasData
+        ? "Heart rate and body temperature data received from device."
+        : tempIsAck
+        ? "Heart rate data received. Body temperature command was sent but device returned an ACK (no measurement data yet)."
+        : "Heart rate data received. Body temperature data not available.",
       {
         serial_number: serialNumber,
         device_id: device.id,
@@ -2944,16 +2956,26 @@ const requestHeartRateAndBodyTemperature = async function (
         heart_rate: result.hrData?.heartRate ?? null,
         systolic: result.hrData?.systolic ?? null,
         diastolic: result.hrData?.diastolic ?? null,
-        body_temperature: result.tempData?.temp ?? null,
-        temperature_type: result.tempData?.type ?? null,
+        body_temperature: tempHasData ? result.tempData?.temp ?? null : null,
+        temperature_type: tempHasData ? result.tempData?.type ?? null : null,
+        temperature_is_ack: tempIsAck,
         hr_protocol: `[3G*${serialNumber}*<LEN>*hrtstart,1]`,
         hr_response_protocol: `[3G*${serialNumber}*<LEN>*bphrt,systolic,diastolic,heartRate,...]`,
         temp_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
         temp_response_protocol: `[3G*${serialNumber}*<LEN>*bodytemp2,type,temp]`,
-        note:
-          "HR command was sent first. After HR response was received, " +
-          "bodytemp2 command was auto-sent. Both responses were received " +
-          "and stored as HealthMetric records.",
+        note: tempHasData
+          ? "HR command was sent first. After HR response was received, " +
+            "bodytemp2 command was auto-sent. Both responses were received " +
+            "and stored as HealthMetric records."
+          : tempIsAck
+          ? "HR command was sent first. After HR response was received, " +
+            "bodytemp2 command was auto-sent. Device returned an ACK " +
+            "(echo of the command) but did not include temperature data. " +
+            "The device may need more time to measure or may not support " +
+            "on-demand temperature measurement."
+          : "HR command was sent first. After HR response was received, " +
+            "bodytemp2 command was auto-sent. Temperature data was not " +
+            "received from the device.",
         timestamp: new Date().toISOString(),
       }
     );

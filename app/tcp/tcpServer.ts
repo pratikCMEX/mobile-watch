@@ -2081,10 +2081,45 @@ class TcpServer {
     const measurementType = parseInt(parts[0], 10);
     const tempValue = parts[1] !== undefined ? parseFloat(parts[1]) : NaN;
 
+    // Check if this is an ACK/echo packet (empty or invalid payload)
+    // vs an actual temperature response (bodytemp2,type,temp format).
+    // Devices often echo back the bodytemp2 command as an ACK before
+    // measuring. The ACK has no comma in the payload.
+    const isAck = packet.payload.indexOf(",") === -1;
+
+    if (isAck) {
+      Logging.info(
+        `bodytemp2 ACK received from device ${packet.deviceId} ` +
+          `(payload="${packet.payload}"). ` +
+          `Marking temperature as received (waiting for actual data or timeout).`
+      );
+
+      // Update device request cache — ACK received.
+      // This unblocks the sequential request flow so the API can return.
+      // The actual temperature data may arrive later via a separate packet
+      // or may not arrive at all (device may not support on-demand measurement).
+      this.markTempReceived(packet.deviceId, {
+        type: null,
+        temp: null,
+        recordedAt: new Date(),
+        isAck: true,
+      });
+
+      // Don't save HealthMetric for ACK packets — no valid data
+      return;
+    }
+
     if (isNaN(tempValue)) {
       Logging.warn(
         `Invalid temperature value from device ${packet.deviceId}: ${parts[1]}`
       );
+
+      // Even with invalid data, mark temp as received to unblock the flow
+      this.markTempReceived(packet.deviceId, {
+        type: measurementType,
+        temp: null,
+        recordedAt: new Date(),
+      });
       return;
     }
 
