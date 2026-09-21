@@ -4760,7 +4760,7 @@ const listVoiceMessages = async function (
     return successMessage(res, "Voice messages retrieved successfully", {
       device_id,
       device_name: device.device_name,
-      voice_messages: rows,
+      voice_messages: voiceMessages,
       pagination: {
         current_page: pageNum,
         per_page: limitNum,
