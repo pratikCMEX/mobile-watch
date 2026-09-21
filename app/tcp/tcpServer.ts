@@ -10,6 +10,7 @@ import {
   buildSosNotification,
   buildGeoFenceNotification,
   buildFallDownNotification,
+  buildChatNotification,
 } from "../services/notification.service";
 
 interface FirebaseBloodPressure {
@@ -3196,6 +3197,47 @@ class TcpServer {
           `${tag} step 6 OK: DeviceVoiceMessage row created id=${row.id} ` +
             `device_id=${device.id} voice_file_name=${row.voice_file_name}`
         );
+
+        // ── 7. Notify watch members ──
+        // A shared watch must alert EVERY member, not just the
+        // (possibly stale) owner_id — same fan-out pattern used for
+        // SOS/alarm notifications elsewhere in this file.
+        try {
+          const members = (await db.DeviceMember.findAll({
+            where: { device_id: device.id },
+            attributes: ["user_id"],
+            raw: true,
+          })) as any[];
+          let memberUserIds = [...new Set(members.map((mem: any) => mem.user_id))];
+
+          if (memberUserIds.length === 0 && device.owner_id) {
+            memberUserIds = [device.owner_id];
+          }
+
+          if (memberUserIds.length === 0) {
+            Logging.warn(
+              `${tag} step 7 SKIPPED: no members/owner found for device ${device.id}, ` +
+                `no notification sent`
+            );
+          } else {
+            const notificationPayload = buildChatNotification(
+              device.id,
+              device.device_name || deviceId
+            );
+            await createNotification({
+              ...notificationPayload,
+              user_ids: memberUserIds,
+            });
+            Logging.info(
+              `${tag} step 7 OK: chat notification sent to ${memberUserIds.length} member(s)`
+            );
+          }
+        } catch (notifyErr: any) {
+          Logging.error(
+            `${tag} step 7 FAILED: could not send chat notification for device ${device.id}: ` +
+              (notifyErr?.message || String(notifyErr))
+          );
+        }
       } catch (dbErr: any) {
         Logging.error(
           `${tag} step 6 FAILED: DeviceVoiceMessage.create() threw for device ${deviceId} ` +

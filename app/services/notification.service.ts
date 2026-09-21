@@ -16,6 +16,7 @@ export type NotificationType =
   | "fall_detection"
   | "device_offline"
   | "health_alert"
+  | "chat"
   | "general";
 
 export interface NotificationPayload {
@@ -324,6 +325,29 @@ export const buildLowBatteryNotification = (
       kind: "low_battery",
       deviceId,
       batteryLevel,
+    },
+  };
+};
+
+/**
+ * Helper: build a voice-chat notification payload.
+ *
+ * Sent when the watch uploads a new voice-chat message so watch
+ * members are alerted to open the app and listen to it.
+ */
+export const buildChatNotification = (
+  deviceId: string,
+  deviceName: string
+): NotificationPayload => {
+  return {
+    device_id: deviceId,
+    type: "chat",
+    title: "New Voice Message",
+    body: `${deviceName} sent a voice message`,
+    metadata: {
+      kind: "chat",
+      deviceId,
+      deviceName,
     },
   };
 };
