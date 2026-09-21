@@ -4800,6 +4800,30 @@ const listVoiceMessages = async function (
     return errorMessage(res, "Error retrieving voice messages");
   }
 };
+
+const getDeviceStep = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id } = req.body;
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+    const device = await db.DeviceSetting.findOne({
+      where: { device_id: device_id },
+      attributes: ["device_id", "walk_time_step_target"],
+    });
+    if (!device) {
+      return errorMessage(res, `Device with id '${device_id}' not found`);
+    }
+    return successMessage(res, "Device step retrieved successfully", device);
+  } catch (err) {
+    console.error("getDeviceStep error:", err);
+    return errorMessage(res, "Error retrieving device step");
+  }
+};
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -4842,4 +4866,5 @@ export default {
   editDeviceName,
   updateDeviceNumber,
   listVoiceMessages,
+  getDeviceStep,
 };
