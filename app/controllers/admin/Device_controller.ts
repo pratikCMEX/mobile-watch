@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from "express";
+import fs from "fs";
 import db from "../../models";
 import {
   errorMessage,
@@ -327,6 +328,27 @@ const sendVoiceMessage = async function (
       return errorMessage(
         res,
         "Failed to send voice message. Device may be disconnected or AMR data is invalid."
+      );
+    }
+
+    // Store voice message record in DeviceVoiceMessages table
+    try {
+      const voiceBuffer = fs.readFileSync(voiceFile.path);
+      await db.DeviceVoiceMessage.create({
+        device_id: device.id,
+        voice_data: voiceBuffer,
+        voice_file_name: voiceFile.originalname,
+        is_send: 1,
+        status: null,
+      });
+      Logging.info(
+        `Voice message record stored in DeviceVoiceMessages for device ${serial_number}`
+      );
+    } catch (dbErr: any) {
+      Logging.error(
+        `Failed to store voice message record for device ${serial_number}: ${
+          dbErr?.message || dbErr
+        }`
       );
     }
 

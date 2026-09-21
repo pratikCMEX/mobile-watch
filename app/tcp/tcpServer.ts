@@ -307,6 +307,30 @@ export interface TcpServerOptions {
 // (e.g. parked for an hour) and keeps the locations table lean.
 const MIN_DISTANCE_METERS = 10;
 
+// ─────────────────────────────────────────────────────────────
+// Device Request Cache
+//
+// Used by requestHeartRateAndBodyTemperature to ensure:
+//   1. HR command is sent first and we wait for its response
+//   2. Only after HR response is received, temperature command is sent
+//   3. API caller is blocked (via Promise) until both responses arrive
+//   4. No concurrent requests for the same device
+// ─────────────────────────────────────────────────────────────
+
+interface DeviceRequestEntry {
+  serialNumber: string;
+  hrRequested: boolean;
+  tempRequested: boolean;
+  hrReceived: boolean;
+  tempReceived: boolean;
+  hrData: any;
+  tempData: any;
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+  createdAt: Date;
+  timeoutTimer: NodeJS.Timeout | null;
+}
+
 class TcpServer {
   private readonly server: net.Server;
 
@@ -324,6 +348,19 @@ class TcpServer {
    * commands to a particular GPS device.
    */
   private readonly devices: Map<string, TcpClient> = new Map();
+
+  /**
+   * Per-device request cache for sequential HR + Temperature.
+   *
+   * Key = serial_number
+   * Value = DeviceRequestEntry
+   *
+   * Prevents concurrent requests for the same device.
+   * The API caller awaits the Promise until both HR and temp
+   * responses are received from the device.
+   */
+  private readonly deviceRequestCache: Map<string, DeviceRequestEntry> =
+    new Map();
 
   private readonly port: number;
   private readonly host: string;
@@ -484,6 +521,11 @@ class TcpServer {
 
     socket.on("close", () => {
       clearInterval(noProgressTimer);
+
+      // Cancel any pending device request for this device
+      if (client.deviceId) {
+        this.cancelDeviceRequest(client.deviceId);
+      }
 
       this.removeClient(client);
 
@@ -1900,6 +1942,14 @@ class TcpServer {
         )
       );
     }
+
+    // Update device request cache — HR response received
+    this.markHRReceived(packet.deviceId, {
+      systolic,
+      diastolic,
+      heartRate,
+      recordedAt,
+    });
   }
 
   // ───────────────────────────────────────────────────────────
@@ -2111,6 +2161,13 @@ class TcpServer {
           )
         );
     }
+
+    // Update device request cache — Temperature response received
+    this.markTempReceived(packet.deviceId, {
+      type: measurementType,
+      temp: tempValue,
+      recordedAt: new Date(),
+    });
 
     // Server reply: [3G*YYYYYYYYYY*0009*bodytemp2]
     const reply = `[3G*${packet.deviceId}*0009*bodytemp2]`;
@@ -3478,6 +3535,24 @@ class TcpServer {
     const tag = `[cacheLatestLocationOnDevice:${
       device.serial_number || device.id
     }]`;
+
+    // Only update the device's "latest location" columns when we have
+    // a real GPS fix. When gpsStatus is "V" (no fix), the device is
+    // reporting LBS (cell tower / WiFi) coordinates which are often
+    // wildly inaccurate (e.g. default tower locations far from the
+    // device). Storing these as the "latest location" misleads
+    // dashboards and operators. The Location history table still
+    // records these points for auditing — only the Device row's
+    // cached latest position is gated on isValidFix.
+    if (!isValidFix) {
+      Logging.info(
+        `${tag} SKIP: isValidFix=false (gpsStatus is not "A"). ` +
+          `Not updating latest_lat/latest_lng on Device row. ` +
+          `Lat=${latitude} Lng=${longitude} will still be saved in Locations history.`
+      );
+      return;
+    }
+
     Logging.info(
       `${tag} step 1: caching latest_lat=${latitude} latest_lng=${longitude} ` +
         `isValidFix=${isValidFix}`
@@ -4429,6 +4504,231 @@ class TcpServer {
 
     this.send(client, command);
     return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Device Request Cache — Sequential HR + Temperature
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Start a sequential HR + Temperature request for a device.
+   *
+   * Creates a cache entry that:
+   *   - Prevents concurrent requests for the same device
+   *   - Returns a Promise that resolves when both HR and temp
+   *     responses are received from the device
+   *
+   * @param serialNumber Device serial number
+   * @returns Promise that resolves with { hrData, tempData } when both responses received
+   */
+  public startDeviceRequest(
+    serialNumber: string
+  ): Promise<{ hrData: any; tempData: any }> {
+    // Check if there's already a pending request for this device
+    if (this.deviceRequestCache.has(serialNumber)) {
+      const existing = this.deviceRequestCache.get(serialNumber)!;
+      const ageMs = Date.now() - existing.createdAt.getTime();
+      Logging.warn(
+        `Device ${serialNumber} already has a pending request ` +
+          `(age: ${Math.round(ageMs / 1000)}s). Rejecting new request.`
+      );
+      // Reject with a clear message so the controller can return an error
+      return Promise.reject(
+        new Error(
+          `Device ${serialNumber} request in progress. Please wait for the previous request to complete.`
+        )
+      );
+    }
+
+    return new Promise<{ hrData: any; tempData: any }>((resolve, reject) => {
+      const entry: DeviceRequestEntry = {
+        serialNumber,
+        hrRequested: false,
+        tempRequested: false,
+        hrReceived: false,
+        tempReceived: false,
+        hrData: null,
+        tempData: null,
+        resolve,
+        reject,
+        createdAt: new Date(),
+        timeoutTimer: null,
+      };
+      this.deviceRequestCache.set(serialNumber, entry);
+
+      // Auto-timeout after 60 seconds to prevent permanent lockout
+      entry.timeoutTimer = setTimeout(() => {
+        Logging.warn(`Device request for ${serialNumber} timed out after 60s.`);
+        this.cancelDeviceRequest(serialNumber);
+        reject(
+          new Error(
+            `Device ${serialNumber} request timed out. Device may be unresponsive.`
+          )
+        );
+      }, 60_000);
+
+      Logging.info(
+        `Device request started for ${serialNumber}. ` +
+          `Waiting for HR response, then temperature response.`
+      );
+    });
+  }
+
+  /**
+   * Mark HR command as sent and store HR response data when received.
+   *
+   * @param serialNumber Device serial number
+   * @param data HR response payload parts (from bphrt packet)
+   */
+  public markHRReceived(serialNumber: string, data: any): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) {
+      Logging.warn(
+        `HR response received for ${serialNumber} but no pending request found.`
+      );
+      return;
+    }
+
+    entry.hrRequested = true;
+    entry.hrReceived = true;
+    entry.hrData = data;
+
+    Logging.info(
+      `HR response received for ${serialNumber}. ` +
+        `HR received=${entry.hrReceived}, Temp received=${entry.tempReceived}`
+    );
+
+    // After receiving HR data, automatically send the bodytemp2 command
+    // so the device measures temperature while we have its attention.
+    const client = this.devices.get(serialNumber);
+    if (client && !entry.tempRequested) {
+      const command = `[3G*${serialNumber}*0009*bodytemp2]`;
+      this.send(client, command);
+      entry.tempRequested = true;
+      Logging.info(
+        `Auto-sent bodytemp2 command to ${serialNumber} after HR response.`
+      );
+    }
+
+    this.checkAndResolveDeviceRequest(serialNumber);
+  }
+
+  /**
+   * Mark Temperature command as sent and store temperature response data when received.
+   *
+   * @param serialNumber Device serial number
+   * @param data Temperature response payload parts (from bodytemp2 packet)
+   */
+  public markTempReceived(serialNumber: string, data: any): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) {
+      Logging.warn(
+        `Temperature response received for ${serialNumber} but no pending request found.`
+      );
+      return;
+    }
+
+    entry.tempRequested = true;
+    entry.tempReceived = true;
+    entry.tempData = data;
+
+    Logging.info(
+      `Temperature response received for ${serialNumber}. ` +
+        `HR received=${entry.hrReceived}, Temp received=${entry.tempReceived}`
+    );
+
+    this.checkAndResolveDeviceRequest(serialNumber);
+  }
+
+  /**
+   * Cancel/remove a pending device request (e.g., on device disconnect or error).
+   *
+   * @param serialNumber Device serial number
+   */
+  public cancelDeviceRequest(serialNumber: string): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) return;
+
+    // Clear the timeout timer to prevent it firing after cleanup
+    if (entry.timeoutTimer) {
+      clearTimeout(entry.timeoutTimer);
+      entry.timeoutTimer = null;
+    }
+
+    Logging.warn(`Cancelling pending device request for ${serialNumber}.`);
+    entry.reject(new Error(`Device request cancelled for ${serialNumber}.`));
+    this.deviceRequestCache.delete(serialNumber);
+  }
+
+  /**
+   * Check if both HR and temperature responses are received.
+   * If so, resolve the Promise and clean up the cache entry.
+   */
+  private checkAndResolveDeviceRequest(serialNumber: string): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) return;
+
+    if (entry.hrReceived && entry.tempReceived) {
+      Logging.info(
+        `Both HR and Temperature responses received for ${serialNumber}. ` +
+          `Resolving device request.`
+      );
+
+      // Clear the timeout timer since we have all data
+      if (entry.timeoutTimer) {
+        clearTimeout(entry.timeoutTimer);
+        entry.timeoutTimer = null;
+      }
+
+      entry.resolve({
+        hrData: entry.hrData,
+        tempData: entry.tempData,
+      });
+      this.deviceRequestCache.delete(serialNumber);
+    }
+  }
+
+  /**
+   * Orchestrate sequential HR + Temperature request for a device.
+   *
+   * Flow:
+   *   1. Creates a cache entry (prevents concurrent requests)
+   *   2. Sends HR command (hrtstart,1)
+   *   3. Waits for HR response → auto-sends bodytemp2 command
+   *   4. Waits for temperature response
+   *   5. Resolves with both hrData and tempData
+   *
+   * @param serialNumber Device serial number
+   * @returns Promise resolving with { hrData, tempData } when both responses received
+   */
+  public async requestHRAndTemperature(
+    serialNumber: string
+  ): Promise<{ hrData: any; tempData: any }> {
+    // Step 1: Create cache entry and get the Promise
+    const promise = this.startDeviceRequest(serialNumber);
+
+    // Step 2: Verify device is connected
+    const client = this.devices.get(serialNumber);
+    if (!client) {
+      this.cancelDeviceRequest(serialNumber);
+      throw new Error(`Device ${serialNumber} is not connected via TCP.`);
+    }
+
+    // Step 3: Send HR command (hrtstart,1)
+    const hrSent = this.sendHeartRateRequest(serialNumber, 1);
+    if (!hrSent) {
+      this.cancelDeviceRequest(serialNumber);
+      throw new Error(`Failed to send HR command to device ${serialNumber}.`);
+    }
+
+    Logging.info(
+      `Sequential request started for ${serialNumber}. ` +
+        `Waiting for HR response (auto-sends temperature next).`
+    );
+
+    // Step 4 & 5: Wait for both responses
+    // HR response triggers auto-send of bodytemp2, then both resolve.
+    return promise;
   }
 
   // ───────────────────────────────────────────────────────────
@@ -6535,10 +6835,10 @@ class TcpServer {
    *
    * We treat "1" as success and "0" as failure.
    */
-  private handleVoiceMessageResponse(
+  private async handleVoiceMessageResponse(
     client: TcpClient,
     packet: ParsedPacket
-  ): void {
+  ): Promise<void> {
     const status = (packet.payload || "").trim();
     const ok = status === "1";
     Logging.info(
@@ -6546,6 +6846,34 @@ class TcpServer {
         status || "(ack)"
       }" (${ok ? "OK - received" : "FAILED"})`
     );
+
+    // Update the voice message record with the device ACK status
+    try {
+      const voiceMessage = await db.DeviceVoiceMessage.findOne({
+        where: {
+          device_id: packet.deviceId,
+          status: null,
+        },
+        order: [["createdAt", "DESC"]],
+      });
+
+      if (voiceMessage) {
+        await voiceMessage.update({
+          status,
+          updatedAt: new Date(),
+        });
+        Logging.info(
+          `Updated DeviceVoiceMessages record for device ${packet.deviceId}: status=${status}`
+        );
+      }
+    } catch (dbErr: any) {
+      Logging.error(
+        `Failed to update voice message record for device ${packet.deviceId}: ${
+          dbErr?.message || dbErr
+        }`
+      );
+    }
+
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from TK: ${error.message}`

@@ -2925,44 +2925,35 @@ const requestHeartRateAndBodyTemperature = async function (
       );
     }
 
-    // Send the bodytemp2 command to request real-time temperature measurement
-    // const tempCommandSent = tcpServer.requestBodyTemperature(serialNumber);
-    const tempCommandSent = tcpServer.sendHeartRateRequest(serialNumber, 1);
-    const hrCommandSent = tcpServer.requestBodyTemperature(serialNumber);
-
-    console.log("Temperature command sent:", tempCommandSent);
-
-    if (!tempCommandSent) {
-      return errorMessage(res, "Failed to send temperature command to device");
-    }
-
-    // Wait 15s before sending the HR command, and actually wait for it
-    // to be sent before responding, so the response reflects reality.
-    await new Promise((resolve) => setTimeout(resolve, 15 * 1000));
-
-    console.log("HR command sent after 15 seconds:", hrCommandSent);
-
-    if (!hrCommandSent) {
-      console.error("Failed to send HR command to device");
-    }
+    // Use the sequential request flow with cache-based deduplication.
+    // This ensures:
+    //   1. HR command is sent first
+    //   2. After HR response is received, bodytemp2 command is auto-sent
+    //   3. API caller is blocked until BOTH responses are received
+    //   4. No concurrent requests for the same device (cache lock)
+    //   5. Auto-times out after 60 seconds
+    const result = await tcpServer.requestHRAndTemperature(serialNumber);
 
     return successMessage(
       res,
-      "Commands sent to device. The device will measure and respond with heart rate / blood pressure and body temperature readings.",
+      "Heart rate and body temperature data received from device.",
       {
         serial_number: serialNumber,
         device_id: device.id,
         device_name: device.device_name,
-        bodytemp2_command_sent: tempCommandSent,
-        hrtstart_command_sent: hrCommandSent,
-        bodytemp2_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
-        hrtstart_protocol: `[3G*${serialNumber}*<LEN>*hrtstart,1]`,
+        heart_rate: result.hrData?.heartRate ?? null,
+        systolic: result.hrData?.systolic ?? null,
+        diastolic: result.hrData?.diastolic ?? null,
+        body_temperature: result.tempData?.temp ?? null,
+        temperature_type: result.tempData?.type ?? null,
+        hr_protocol: `[3G*${serialNumber}*<LEN>*hrtstart,1]`,
+        hr_response_protocol: `[3G*${serialNumber}*<LEN>*bphrt,systolic,diastolic,heartRate,...]`,
+        temp_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
+        temp_response_protocol: `[3G*${serialNumber}*<LEN>*bodytemp2,type,temp]`,
         note:
-          "Device will reply with [3G*<id>*<LEN>*bodytemp2,type,temp] and " +
-          "[3G*<id>*<LEN>*bphrt,systolic,diastolic,heartRate,...]. " +
-          "Temperature is stored as temperature HealthMetric. " +
-          "Blood pressure is stored as blood_pressure HealthMetric. " +
-          "Heart rate is stored as heart_rate HealthMetric.",
+          "HR command was sent first. After HR response was received, " +
+          "bodytemp2 command was auto-sent. Both responses were received " +
+          "and stored as HealthMetric records.",
         timestamp: new Date().toISOString(),
       }
     );
