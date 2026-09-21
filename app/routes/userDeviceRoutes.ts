@@ -132,6 +132,13 @@ router.post(
   Device_controller.requestHeartRateAndBodyTemperature
 );
 
+router.post(
+  "/list_voice_messages",
+  checkToken,
+  ValidateJoi(Schemas.bodyTemperature.request),
+  Device_controller.listVoiceMessages
+);
+
 // Outgoing Call (CALL) API — instruct the watch to dial a phone number.
 //
 // Wire protocol:

@@ -4605,6 +4605,66 @@ const updateDeviceNumber = async function (
   }
 };
 
+const listVoiceMessages = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, page = 1, limit = 20 } = req.body;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    // Verify device exists
+    const device = await db.Device.findOne({
+      where: { id: device_id },
+    });
+    if (!device) {
+      return errorMessage(res, `Device with id '${device_id}' not found`);
+    }
+
+    const pageNum = Math.max(1, parseInt(page as string, 10));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10)));
+    const offset = (pageNum - 1) * limitNum;
+
+    const { count, rows } = await db.DeviceVoiceMessage.findAndCountAll({
+      where: { device_id },
+      order: [["createdAt", "DESC"]],
+      limit: limitNum,
+      offset,
+      attributes: [
+        "id",
+        "device_id",
+        "voice_file_name",
+        "is_send",
+        "status",
+        "createdAt",
+        "updatedAt",
+      ],
+    });
+
+    const totalPages = Math.ceil(count / limitNum);
+
+    return successMessage(res, "Voice messages retrieved successfully", {
+      device_id,
+      device_name: device.device_name,
+      voice_messages: rows,
+      pagination: {
+        current_page: pageNum,
+        per_page: limitNum,
+        total_items: count,
+        total_pages: totalPages,
+        has_next_page: pageNum < totalPages,
+        has_prev_page: pageNum > 1,
+      },
+    });
+  } catch (err) {
+    console.error("listVoiceMessages error:", err);
+    return errorMessage(res, "Error retrieving voice messages");
+  }
+};
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -4645,4 +4705,5 @@ export default {
   registerDeviceByImei,
   editDeviceName,
   updateDeviceNumber,
+  listVoiceMessages,
 };

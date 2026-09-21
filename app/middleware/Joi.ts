@@ -262,6 +262,14 @@ export const Schemas = {
         "any.required": "serial_number is required",
       }),
     }),
+    listVoiceMessages: Joi.object({
+      device_id: Joi.string().required().messages({
+        "string.empty": "device_id is required",
+        "any.required": "device_id is required",
+      }),
+      page: Joi.number().integer().min(1).default(1),
+      limit: Joi.number().integer().min(1).max(100).default(20),
+    }),
     sendReminder: Joi.object({
       id: Joi.string().optional().allow(null, ""),
       serial_number: Joi.string().required().messages({
