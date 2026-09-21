@@ -781,6 +781,10 @@ class TcpServer {
         this.handleLteLocation(client, parsed);
         break;
 
+      case "hrtstart":
+        this.handleHrtStartAck(client, parsed);
+        break;
+
       case "bphrt":
         this.handleBloodPressureHeartRate(client, parsed);
         break;
@@ -1892,6 +1896,26 @@ class TcpServer {
       device.battery_percentage
     );
     Logging.info(`${tag} step 8 OK: updateFirebaseLiveLocation() completed`);
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // hrtstart - Heart rate start command acknowledgment
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle hrtstart acknowledgment from device.
+   *
+   * When the server sends an hrtstart command (e.g., [3G*<id>*<LEN>*hrtstart,1]),
+   * the device acknowledges by echoing the command name: [3G*<id>*<LEN>*hrtstart].
+   * This is NOT the actual heart rate data - that comes later via the bphrt packet.
+   *
+   * This handler simply logs the acknowledgment for debugging purposes.
+   */
+  private handleHrtStartAck(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `hrtstart acknowledgment received from device ${packet.deviceId}: ${packet.payload}`
+    );
+    // No further action needed - actual HR data comes via bphrt packet
   }
 
   // ───────────────────────────────────────────────────────────
