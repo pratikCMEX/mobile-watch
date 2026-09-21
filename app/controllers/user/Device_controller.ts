@@ -2059,6 +2059,29 @@ const setPhrasesDisplay = async (
       );
     }
 
+    // Store the text message in the DeviceVoiceMessages table.
+    // Phrases Display is a text-to-display message, so is_text = 1.
+    try {
+      await db.DeviceVoiceMessage.create({
+        device_id: device.id,
+        voice_data: null,
+        voice_file_name: null,
+        is_send: 1,
+        is_text: 1,
+        message: phrases,
+        status: null,
+      });
+      Logging.info(
+        `Text message record stored in DeviceVoiceMessages for device ${serial_number} (phrases="${phrases}")`
+      );
+    } catch (dbErr: any) {
+      Logging.error(
+        `Failed to store text message record for device ${serial_number}: ${
+          dbErr?.message || dbErr
+        }`
+      );
+    }
+
     // Build the unicode hex for the response
     let unicodeHex = "";
     for (let i = 0; i < phrases.length; i++) {
@@ -4738,6 +4761,8 @@ const listVoiceMessages = async function (
         "device_id",
         "voice_file_name",
         "is_send",
+        "is_text",
+        "message",
         "status",
         "createdAt",
         "updatedAt",

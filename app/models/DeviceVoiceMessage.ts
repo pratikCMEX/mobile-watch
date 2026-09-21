@@ -7,6 +7,8 @@ export interface DeviceVoiceMessageAttributes {
   voice_data: Buffer | null;
   voice_file_name: string | null;
   is_send: number;
+  is_text: number;
+  message: string | null;
   status: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -14,7 +16,7 @@ export interface DeviceVoiceMessageAttributes {
 
 type DeviceVoiceMessageCreationAttributes = Optional<
   DeviceVoiceMessageAttributes,
-  "id" | "voice_data" | "voice_file_name" | "status"
+  "id" | "voice_data" | "voice_file_name" | "is_text" | "message" | "status"
 >;
 
 // ── Model Class ──────────────────────────────────────
@@ -30,6 +32,8 @@ class DeviceVoiceMessage
   public voice_data!: Buffer | null;
   public voice_file_name!: string | null;
   public is_send!: number;
+  public is_text!: number;
+  public message!: string | null;
   public status!: string | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -72,6 +76,17 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         type: DataTypes.INTEGER(1),
         allowNull: false,
         defaultValue: 1,
+      },
+      is_text: {
+        type: DataTypes.INTEGER(1),
+        allowNull: false,
+        defaultValue: 0,
+        comment: "1 = text-to-speech message, 0 = raw audio voice message",
+      },
+      message: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        comment: "Text content used when is_text = 1 (TTS payload)",
       },
       status: {
         type: DataTypes.STRING(1),
