@@ -3574,23 +3574,6 @@ class TcpServer {
       device.serial_number || device.id
     }]`;
 
-    // Only update the device's "latest location" columns when we have
-    // a real GPS fix. When gpsStatus is "V" (no fix), the device is
-    // reporting LBS (cell tower / WiFi) coordinates which are often
-    // wildly inaccurate (e.g. default tower locations far from the
-    // device). Storing these as the "latest location" misleads
-    // dashboards and operators. The Location history table still
-    // records these points for auditing — only the Device row's
-    // cached latest position is gated on isValidFix.
-    if (!isValidFix) {
-      Logging.info(
-        `${tag} SKIP: isValidFix=false (gpsStatus is not "A"). ` +
-          `Not updating latest_lat/latest_lng on Device row. ` +
-          `Lat=${latitude} Lng=${longitude} will still be saved in Locations history.`
-      );
-      return;
-    }
-
     Logging.info(
       `${tag} step 1: caching latest_lat=${latitude} latest_lng=${longitude} ` +
         `isValidFix=${isValidFix}`
