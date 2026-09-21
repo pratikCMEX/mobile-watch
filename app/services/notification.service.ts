@@ -161,7 +161,7 @@ export const pushToUser = async (
   if (user.device_type === "ios") {
     response = await messaging().sendEachForMulticast({
       tokens,
-      // notification: { title: data.title, body: data.body },
+      notification: { title: data.title, body: data.body },
       apns: {
         /* unchanged */
       },
