@@ -366,6 +366,10 @@ router.post(
   Device_controller.getWalkTime
 );
 
+// Configure the pedometer's sleep-time (SLEEPTIME command).
+// The time section uses HH:MM-HH:MM and may cross midnight.
+router.post("/get_target_step", checkToken, Device_controller.getDeviceStep);
+
 // Configure sleep/body-tumbling detection (SLEEPTIME command).
 // The time section uses HH:MM-HH:MM and may cross midnight.
 router.post(

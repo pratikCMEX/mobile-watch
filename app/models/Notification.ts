@@ -78,7 +78,8 @@ export default (sequelize: Sequelize, DataTypes: any) => {
           "network",
           "fall_detection",
           "device_offline",
-          "general"
+          "general",
+          "chat"
         ),
         allowNull: false,
       },

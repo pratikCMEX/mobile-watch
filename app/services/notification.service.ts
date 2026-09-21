@@ -16,7 +16,8 @@ export type NotificationType =
   | "fall_detection"
   | "device_offline"
   | "health_alert"
-  | "general";
+  | "general"
+  | "chat";
 
 export interface NotificationPayload {
   device_id: string;
