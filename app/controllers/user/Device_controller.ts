@@ -4747,13 +4747,13 @@ const listVoiceMessages = async function (
     // ...after findAndCountAll
 
     const totalPages = Math.ceil(count / limitNum);
-
+    const BASE_URL = process.env.BASE_URL;
     const voiceMessages = rows.map((row: any) => {
       const data = row.toJSON();
       return {
         ...data,
         voice_file_path: data.voice_file_name
-          ? `${VOICE_UPLOAD_DIR}/${data.voice_file_name}`
+          ? `${BASE_URL}/uploads/voice/${data.voice_file_name}`
           : null,
       };
     });
