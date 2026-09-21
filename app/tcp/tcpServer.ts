@@ -48,6 +48,24 @@ const ensureDir = (dir: string) => {
 ensureDir(SNAPSHOTS_DIR);
 
 // ─────────────────────────────────────────────────────────────
+// Voice-chat storage (device → server, watch-originated audio).
+// Stored under uploads/voice/chat so the existing
+// listVoiceMessages endpoint (which builds URLs as
+// `${BASE_URL}/uploads/voice/${voice_file_name}`) serves these
+// files without any controller changes, as long as
+// voice_file_name is saved as "chat/<filename>".
+// ─────────────────────────────────────────────────────────────
+const VOICE_CHAT_DIR = path.resolve(
+  __dirname,
+  "..",
+  "..",
+  "uploads",
+  "voice",
+  "chat"
+);
+ensureDir(VOICE_CHAT_DIR);
+
+// ─────────────────────────────────────────────────────────────
 // Optional JPEG normalization via ffmpeg
 //
 // Some watch firmwares emit JPEGs that Chrome/ImageMagick open fine
@@ -659,6 +677,44 @@ class TcpServer {
         continue;
       }
 
+      // Check if this is a voice-chat packet (device-originated AMR
+      // audio over TK). Same binary-data problem as images: raw AMR
+      // bytes can contain unescaped '[' / ']' / newlines that break
+      // the generic bracket/regex-based parser below, and the
+      // declared LEN can understate the real on-wire size.
+      // Format: [3G*DEVICEID*LENGTH*TK,#!AMR<binary AMR bytes>]
+      const voiceChatMatch = buffer.match(/^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*TK,#!AMR/);
+      if (voiceChatMatch) {
+        const packetLength = parseInt(voiceChatMatch[2], 16);
+        const minExpected = packetLength + 2;
+
+        if (buffer.length < minExpected) {
+          // Not even the declared length has arrived yet.
+          return {
+            packets,
+            remaining: buffer,
+          };
+        }
+
+        const closeIdx = buffer.indexOf("]", minExpected - 1);
+        if (closeIdx === -1) {
+          // LEN understated the real packet size and the terminator
+          // hasn't arrived yet — wait for more data.
+          return {
+            packets,
+            remaining: buffer,
+          };
+        }
+
+        const packet = buffer.slice(0, closeIdx + 1);
+        buffer = buffer.slice(closeIdx + 1);
+
+        if (packet.length > 0) {
+          packets.push(packet);
+        }
+        continue;
+      }
+
       const endIndex = buffer.indexOf("]");
 
       /**
@@ -713,6 +769,23 @@ class TcpServer {
       };
 
       this.handleImageResponse(client, parsed);
+      return;
+    }
+
+    // Check if this is a voice-chat packet (device-originated AMR
+    // audio). Binary data breaks the generic regex parser (it can
+    // contain raw newlines etc.), so handle it directly.
+    const voiceChatMatch = message.match(
+      /^\[3G\*(\d+)\*[0-9A-Fa-f]+\*TK,#!AMR/
+    );
+    if (voiceChatMatch) {
+      const deviceId = voiceChatMatch[1];
+      client.deviceId = deviceId;
+
+      void this.processVoiceChatPacket(message, deviceId).catch(
+        (error: Error) =>
+          Logging.error(`processVoiceChatPacket error: ${error.message}`)
+      );
       return;
     }
 
@@ -2963,6 +3036,169 @@ class TcpServer {
       } catch (dbErr: any) {
         Logging.error(
           `${tag} step 6 FAILED: Snapshot.create() threw for device ${deviceId} ` +
+            `(file IS on disk at ${filepath}): ` +
+            (dbErr?.message || String(dbErr))
+        );
+      }
+    } catch (error: any) {
+      Logging.error(
+        `${tag} UNCAUGHT: ${error?.message || String(error)}` +
+          (error?.stack ? `\nStack: ${error.stack}` : "")
+      );
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Shared voice-chat packet processor (device → server). This is
+  // the ONLY place that writes voice-chat files and DB rows.
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Parse a complete voice-chat packet and persist the AMR audio to
+   * disk + DB.
+   *
+   * Wire format (len excludes the brackets):
+   *   [3G*<deviceId>*<len>*TK,<AMR bytes>]
+   *
+   * Mirrors processImagePacket() — same binary-safe framing
+   * reasoning applies (header parsed via ASCII-only regex, escaped
+   * region extracted via latin1 to preserve bytes 1:1, declared LEN
+   * treated as a lower bound only).
+   */
+  private async processVoiceChatPacket(
+    rawPacket: string,
+    fallbackDeviceId: string
+  ): Promise<void> {
+    const tag = `[VOICECHAT:${fallbackDeviceId}]`;
+
+    try {
+      Logging.info(
+        `${tag} step 1: received voice-chat packet, raw length=${rawPacket.length}`
+      );
+
+      // ── 1. Parse ASCII header up to (and including) "TK," ──
+      const headerRe = /^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*TK,/;
+      const m = rawPacket.match(headerRe);
+      if (!m) {
+        Logging.error(
+          `${tag} step 1 FAILED: header did not match expected pattern. ` +
+            `First 40 chars: ${JSON.stringify(rawPacket.substring(0, 40))}`
+        );
+        return;
+      }
+
+      const deviceId = m[1];
+      const packetLength = parseInt(m[2], 16); // bytes inside the brackets
+
+      Logging.info(
+        `${tag} step 2: parsed header deviceId=${deviceId} ` +
+          `packetLength=${packetLength} (expected raw length=${
+            packetLength + 2
+          })`
+      );
+
+      // ── 2. Compute the AMR byte range ──
+      const headerEnd = m[0].length;
+      const closingBracketAt = packetLength + 1;
+
+      if (rawPacket.length < closingBracketAt) {
+        Logging.error(
+          `${tag} step 2 FAILED: packet shorter than declared LEN. ` +
+            `raw.length=${rawPacket.length}, expected>=${closingBracketAt}`
+        );
+        return;
+      }
+
+      // Same LEN-is-unreliable caveat as images: trust the packet's
+      // actual last "]" first, since extractPackets() already scans
+      // forward for it rather than trusting LEN.
+      let regionEnd: number;
+      if (rawPacket[rawPacket.length - 1] === "]") {
+        regionEnd = rawPacket.length - 1;
+      } else if (rawPacket[closingBracketAt] === "]") {
+        regionEnd = closingBracketAt;
+      } else {
+        Logging.warn(
+          `${tag} step 2 WARNING: no closing ']' found (neither at the ` +
+            `packet's last char nor at declared-LEN index ${closingBracketAt}). ` +
+            `Falling back to the full buffer as the voice-chat region. ` +
+            `raw length=${rawPacket.length}`
+        );
+        regionEnd = rawPacket.length;
+      }
+
+      const amrCharCount = regionEnd - headerEnd;
+      Logging.info(
+        `${tag} step 3: AMR region headerEnd=${headerEnd} regionEnd=${regionEnd} ` +
+          `bytes=${amrCharCount}`
+      );
+
+      // ── 3. Build the on-wire (escaped) AMR Buffer ──
+      const escapedBuffer = Buffer.from(
+        rawPacket.substring(headerEnd, regionEnd),
+        "latin1"
+      );
+
+      // ── 3b. Decode the escape sequences per the protocol spec ──
+      const amrBuffer = unescape(escapedBuffer);
+      Logging.info(
+        `${tag} step 3b: decoded AMR = ${amrBuffer.length} bytes ` +
+          `(removed ${escapedBuffer.length - amrBuffer.length} escape bytes)`
+      );
+
+      // ── 4. Validate AMR magic bytes ("#!AMR") ──
+      const magic = amrBuffer.subarray(0, 5).toString("ascii");
+      if (magic !== "#!AMR") {
+        Logging.error(
+          `${tag} step 4 FAILED: data does not start with AMR magic bytes. ` +
+            `Got: ${JSON.stringify(magic)}`
+        );
+        return;
+      }
+
+      // ── 5. Write file ──
+      ensureDir(VOICE_CHAT_DIR);
+      const timestamp = Date.now();
+      const filename = `${deviceId}_${timestamp}.amr`;
+      const filepath = path.join(VOICE_CHAT_DIR, filename);
+
+      try {
+        fs.writeFileSync(filepath, amrBuffer);
+        const stat = fs.statSync(filepath);
+        Logging.info(
+          `${tag} step 5 OK: wrote ${stat.size} bytes to ${filepath}`
+        );
+      } catch (writeErr: any) {
+        Logging.error(
+          `${tag} step 5 FAILED: could not write file ${filepath}: ` +
+            (writeErr?.message || String(writeErr))
+        );
+        return;
+      }
+
+      // ── 6. Insert DB row ──
+      try {
+        const device = await this.findDevice(deviceId);
+        if (!device) {
+          Logging.error(
+            `${tag} step 6 FAILED: no Device row found for deviceId=${deviceId} ` +
+              `(file is on disk at ${filepath} but no DB row was created)`
+          );
+          return;
+        }
+        const row = await db.DeviceVoiceMessage.create({
+          device_id: device.id,
+          voice_file_name: `chat/${filename}`,
+          is_send: 0,
+          is_text: 0,
+        });
+        Logging.info(
+          `${tag} step 6 OK: DeviceVoiceMessage row created id=${row.id} ` +
+            `device_id=${device.id} voice_file_name=${row.voice_file_name}`
+        );
+      } catch (dbErr: any) {
+        Logging.error(
+          `${tag} step 6 FAILED: DeviceVoiceMessage.create() threw for device ${deviceId} ` +
             `(file IS on disk at ${filepath}): ` +
             (dbErr?.message || String(dbErr))
         );
