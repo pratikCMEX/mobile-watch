@@ -135,7 +135,6 @@ router.post(
 router.post(
   "/list_voice_messages",
   checkToken,
-  ValidateJoi(Schemas.bodyTemperature.request),
   Device_controller.listVoiceMessages
 );
 
