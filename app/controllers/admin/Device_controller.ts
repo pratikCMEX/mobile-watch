@@ -271,7 +271,7 @@ const sendVoiceMessage = async function (
     const { serial_number } = req.body;
     // uploadVoice.single("voice_file") stores the file in req.file (singular)
     const voiceFile = (req as any).file as
-      | { path: string; originalname: string; size: number }
+      | { path: string; originalname: string; filename: string; size: number }
       | undefined;
 
     if (!serial_number) {
@@ -337,7 +337,7 @@ const sendVoiceMessage = async function (
       await db.DeviceVoiceMessage.create({
         device_id: device.id,
         voice_data: voiceBuffer,
-        voice_file_name: voiceFile.originalname,
+        voice_file_name: voiceFile.filename,
         is_send: 1,
         status: null,
       });
@@ -391,7 +391,7 @@ const sendReminder = async function (
       reminder_text,
     } = req.body;
     const voiceFile = (req as any).file as
-      | { path: string; originalname: string; size: number }
+      | { path: string; originalname: string; filename: string; size: number }
       | undefined;
 
     if (!serial_number) {
@@ -540,7 +540,7 @@ const sendReminder = async function (
       reminder_settings,
       number: num,
       reminder_text: reminder_text || null,
-      voice_file: voiceFile ? voiceFile.originalname : null,
+      voice_file: voiceFile ? voiceFile.filename : null,
       command_sent: true,
       command_message:
         "TAKEPILLS command sent to device. The device will set the reminder.",
