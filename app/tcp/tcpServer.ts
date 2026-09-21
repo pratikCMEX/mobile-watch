@@ -12,7 +12,22 @@ import {
   buildFallDownNotification,
 } from "../services/notification.service";
 
-type FirebaseHealthMetric = "spo2" | "heart_rate" | "temperature" | "oxygen";
+interface FirebaseBloodPressure {
+  systolic: number;
+  diastolic: number;
+}
+
+interface FirebaseHealthSnapshot {
+  heart_rate: number;
+  blood_pressure: FirebaseBloodPressure;
+  sleep: number;
+  spo2: number;
+  oxygen: number;
+  calories: number;
+  temperature: number;
+  distance: number;
+  steps: number;
+}
 
 // ─────────────────────────────────────────────────────────────
 // Snapshot storage (absolute path so it works regardless of CWD
@@ -1814,9 +1829,16 @@ class TcpServer {
     );
     Logging.info(`${tag} step 6 OK: cacheLatestLocationOnDevice() completed`);
 
-    // Push the live location to Firebase Realtime Database so mobile
-    // apps can subscribe to real-time position updates.
-    Logging.info(`${tag} step 7: calling updateFirebaseLiveLocation()`);
+    // Save pedometer (cumulative step count) and tumbling count as
+    // HealthMetric rows so they can be queried via the health API before
+    // the combined Firebase snapshot is written.
+    Logging.info(`${tag} step 7: saving step count to HealthMetric`);
+    await this.saveStepCount(device.id, location, recordedAt, false);
+    Logging.info(`${tag} step 7 OK: step count saved`);
+
+    // Push the live location and database-backed health values to the
+    // existing Firebase liveLocation document.
+    Logging.info(`${tag} step 8: calling updateFirebaseLiveLocation()`);
     await this.updateFirebaseLiveLocation(
       device.id,
       latitude,
@@ -1824,13 +1846,7 @@ class TcpServer {
       device.device_name,
       device.battery_percentage
     );
-    Logging.info(`${tag} step 7 OK: updateFirebaseLiveLocation() completed`);
-
-    // Save pedometer (cumulative step count) and tumbling count as
-    // HealthMetric rows so they can be queried via the health API.
-    Logging.info(`${tag} step 8: saving step count to HealthMetric`);
-    await this.saveStepCount(device.id, location, recordedAt);
-    Logging.info(`${tag} step 8 OK: step count saved`);
+    Logging.info(`${tag} step 8 OK: updateFirebaseLiveLocation() completed`);
   }
 
   // ───────────────────────────────────────────────────────────
@@ -3669,8 +3685,9 @@ class TcpServer {
   }
 
   /**
-   * Push the latest lat/lng to the Firebase Realtime Database so that
-   * mobile apps can subscribe to live location updates in real time.
+   * Push the latest location and database-backed health values to the existing
+   * Firebase liveLocation document. Health data is never written to a separate
+   * Firebase path.
    *
    * Firebase structure:
    *
@@ -3678,11 +3695,16 @@ class TcpServer {
    *   └── liveLocation
    *       └── <device.id (UUID)>
    *           ├── latitude
-   *           └── longitude
-   *
-   * This is a fire-and-forget call: any Firebase error is logged but
-   * never thrown, so a transient RTDB outage can never break the TCP
-   * location pipeline.
+   *           ├── longitude
+   *           ├── heart_rate
+   *           ├── blood_pressure
+   *           ├── sleep
+   *           ├── spo2
+   *           ├── oxygen
+   *           ├── calories
+   *           ├── temperature
+   *           ├── distance
+   *           └── steps
    */
   private async updateFirebaseLiveLocation(
     deviceId: string,
@@ -3694,9 +3716,8 @@ class TcpServer {
     const tag = `[Firebase:${deviceId}]`;
 
     try {
-      const dbRef = database().ref(`monitorimi/liveLocation/${deviceId}`);
-
-      await dbRef.set({
+      const healthSnapshot = await this.getFirebaseHealthSnapshot(deviceId);
+      const liveLocationUpdates: Record<string, any> = {
         latitude,
         longitude,
         recorded_at: new Date().toISOString(),
@@ -3704,7 +3725,21 @@ class TcpServer {
         ...(batteryPercentage != null
           ? { battery_percentage: batteryPercentage }
           : {}),
-      });
+      };
+
+      if (healthSnapshot) {
+        Object.assign(liveLocationUpdates, healthSnapshot);
+      }
+
+      const merged = await this.mergeFirebaseLiveLocation(
+        deviceId,
+        liveLocationUpdates
+      );
+
+      if (!merged) {
+        Logging.error(`${tag} FAILED: liveLocation merge was not committed`);
+        return;
+      }
 
       Logging.info(
         `${tag} step OK: liveLocation updated | lat=${latitude} lng=${longitude}`
@@ -3743,6 +3778,70 @@ class TcpServer {
   }
 
   /**
+   * Return the server-local day boundaries used by health_overview.
+   */
+  private localDayBounds(date: Date): { start: Date; end: Date } {
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
+
+  /**
+   * Calculate the same daily step-derived values returned by health_overview:
+   * today's cumulative value minus the last cumulative value before today,
+   * then distance and calories using the overview's conversion factors.
+   */
+  private async calculateDailyStepMetrics(deviceId: string): Promise<{
+    steps: number;
+    calories: number;
+    distance: number;
+  }> {
+    const { start, end } = this.localDayBounds(new Date());
+    const [todayRecord, previousRecord] = await Promise.all([
+      db.HealthMetric.findOne({
+        where: {
+          device_id: deviceId,
+          metric_type: "steps_cumulative",
+          recorded_at: {
+            [db.Sequelize.Op.between]: [start, end],
+          },
+        },
+        attributes: ["value_primary"],
+        order: [["recorded_at", "DESC"]],
+      }),
+      db.HealthMetric.findOne({
+        where: {
+          device_id: deviceId,
+          metric_type: "steps_cumulative",
+          recorded_at: { [db.Sequelize.Op.lt]: start },
+        },
+        attributes: ["value_primary"],
+        order: [["recorded_at", "DESC"]],
+      }),
+    ]);
+
+    const latestValue = todayRecord ? Number(todayRecord.value_primary) : null;
+    const previousValue = previousRecord
+      ? Number(previousRecord.value_primary)
+      : null;
+    let stepsToday = 0;
+
+    if (latestValue !== null && Number.isFinite(latestValue)) {
+      stepsToday =
+        previousValue !== null && Number.isFinite(previousValue)
+          ? Math.max(latestValue - previousValue, 0)
+          : Math.max(latestValue, 0);
+    }
+
+    return {
+      steps: stepsToday,
+      distance: Number((stepsToday * 0.000762).toFixed(2)),
+      calories: Number((stepsToday * 0.04).toFixed(2)),
+    };
+  }
+  /**
    * Persist the pedometer (cumulative step count) and tumbling count
    * from a UD_LTE packet as a HealthMetric row.
    *
@@ -3766,66 +3865,74 @@ class TcpServer {
   private async saveStepCount(
     deviceId: string,
     location: GpsLocation,
-    recordedAt: Date
+    recordedAt: Date,
+    syncFirebase = true
   ): Promise<void> {
     const tag = `[saveStepCount:${deviceId}]`;
 
     try {
       const steps = parseInt(location.steps || "", 10);
       const tumbling = parseInt(location.tumbling || "", 10);
+      const hasSteps = Number.isInteger(steps);
+      const hasTumbling = Number.isInteger(tumbling);
 
-      if (isNaN(steps)) {
-        Logging.info(`${tag} SKIPPED: no valid step count in payload`);
+      if (!hasSteps && !hasTumbling) {
+        Logging.info(`${tag} SKIPPED: no valid step or sleep data in payload`);
         return;
       }
 
       const dateStr = recordedAt.toISOString().split("T")[0];
+      let shouldUpdateFirebaseHealth = false;
 
       // ── Steps (steps_cumulative) ──────────────────────
       // Hourly upsert in device-local time (IST, UTC+5:30).
-      const { hourStart, hourEnd } = this.istHourBucket(recordedAt);
+      if (hasSteps) {
+        const { hourStart, hourEnd } = this.istHourBucket(recordedAt);
 
-      const existingSteps = await db.HealthMetric.findOne({
-        where: {
-          device_id: deviceId,
-          metric_type: "steps_cumulative",
-          recorded_at: {
-            [db.Sequelize.Op.between]: [hourStart, hourEnd],
+        const existingSteps = await db.HealthMetric.findOne({
+          where: {
+            device_id: deviceId,
+            metric_type: "steps_cumulative",
+            recorded_at: {
+              [db.Sequelize.Op.between]: [hourStart, hourEnd],
+            },
           },
-        },
-      });
-
-      if (existingSteps) {
-        await existingSteps.update({
-          value_primary: steps,
-          value_secondary: null,
-          unit: "steps",
-          recorded_at: recordedAt,
         });
 
-        Logging.info(
-          `${tag} OK (updated): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
-        );
-      } else {
-        await db.HealthMetric.create({
-          device_id: deviceId,
-          metric_type: "steps_cumulative",
-          value_primary: steps,
-          value_secondary: null,
-          unit: "steps",
-          recorded_at: recordedAt,
-        });
+        if (existingSteps) {
+          await existingSteps.update({
+            value_primary: steps,
+            value_secondary: null,
+            unit: "steps",
+            recorded_at: recordedAt,
+          });
 
-        Logging.info(
-          `${tag} OK (created): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
-        );
+          Logging.info(
+            `${tag} OK (updated): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
+          );
+        } else {
+          await db.HealthMetric.create({
+            device_id: deviceId,
+            metric_type: "steps_cumulative",
+            value_primary: steps,
+            value_secondary: null,
+            unit: "steps",
+            recorded_at: recordedAt,
+          });
+
+          Logging.info(
+            `${tag} OK (created): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
+          );
+        }
+
+        shouldUpdateFirebaseHealth = true;
       }
 
       // ── Sleep (tumbling value from device) ──────────────
       // Tumbling value from the UD_LTE packet is stored as sleep data.
       // Stored as metric_type "sleep" so it appears in analytics
       // alongside steps, heart_rate, etc.
-      if (!isNaN(tumbling)) {
+      if (hasTumbling) {
         const existingSleep = await db.HealthMetric.findOne({
           where: {
             device_id: deviceId,
@@ -3859,6 +3966,12 @@ class TcpServer {
 
           Logging.info(`${tag} OK (created): sleep=${tumbling} tumbling`);
         }
+
+        shouldUpdateFirebaseHealth = true;
+      }
+
+      if (shouldUpdateFirebaseHealth && syncFirebase) {
+        await this.updateFirebaseHealthMetrics(deviceId);
       }
     } catch (error: any) {
       Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
@@ -4004,9 +4117,7 @@ class TcpServer {
       recorded_at: heartRate.recordedAt,
     });
 
-    await this.updateFirebaseHealthMetrics(device.id, {
-      heart_rate: heartRate.bpm,
-    });
+    await this.updateFirebaseHealthMetrics(device.id);
   }
 
   private async saveHealthMetric(
@@ -4030,27 +4141,17 @@ class TcpServer {
       recorded_at: recordedAt,
     });
 
-    const firebaseUpdates: Partial<Record<FirebaseHealthMetric, number>> = {};
+    const shouldSyncToFirebase = [
+      "heart_rate",
+      "blood_pressure",
+      "sleep",
+      "spo2",
+      "temperature",
+      "steps_cumulative",
+    ].includes(metricType);
 
-    switch (metricType) {
-      case "heart_rate":
-        firebaseUpdates.heart_rate = valuePrimary;
-        break;
-      case "temperature":
-        firebaseUpdates.temperature = valuePrimary;
-        break;
-      case "spo2":
-        // The device's oxygen packet is the SpO2 reading. Keep both requested
-        // Firebase keys in sync while storing the canonical database type.
-        firebaseUpdates.spo2 = valuePrimary;
-        firebaseUpdates.oxygen = valuePrimary;
-        break;
-      default:
-        break;
-    }
-
-    if (Object.keys(firebaseUpdates).length > 0) {
-      await this.updateFirebaseHealthMetrics(device.id, firebaseUpdates);
+    if (shouldSyncToFirebase) {
+      await this.updateFirebaseHealthMetrics(device.id);
     }
 
     Logging.info(
@@ -4059,48 +4160,131 @@ class TcpServer {
     );
   }
 
+  private firebaseNumber(value: unknown): number {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  }
+
+  private emptyFirebaseHealthSnapshot(): FirebaseHealthSnapshot {
+    return {
+      heart_rate: 0,
+      blood_pressure: { systolic: 0, diastolic: 0 },
+      sleep: 0,
+      spo2: 0,
+      oxygen: 0,
+      calories: 0,
+      temperature: 0,
+      distance: 0,
+      steps: 0,
+    };
+  }
+
   /**
-   * Persist the latest supported health metrics for a device in Firebase RTDB.
-   * The first write creates all four values as zero; later writes update only
-   * the metrics present in the incoming log.
+   * Build the complete health payload from HealthMetrics. Missing database
+   * readings fall back to zero, matching the initial-value requirement.
    */
-  private async updateFirebaseHealthMetrics(
-    deviceId: string,
-    updates: Partial<Record<FirebaseHealthMetric, number>>
-  ): Promise<void> {
-    const tag = `[FirebaseHealth:${deviceId}]`;
+  private async getFirebaseHealthSnapshot(
+    deviceId: string
+  ): Promise<FirebaseHealthSnapshot | null> {
+    const tag = `[FirebaseHealthSnapshot:${deviceId}]`;
 
     try {
-      const dbRef = database().ref(`monitorimi/healthMetrics/${deviceId}`);
+      const [
+        heartRateRecord,
+        bloodPressureRecord,
+        sleepRecord,
+        spo2Record,
+        temperatureRecord,
+      ] = await Promise.all([
+        db.HealthMetric.findOne({
+          where: { device_id: deviceId, metric_type: "heart_rate" },
+          order: [["recorded_at", "DESC"]],
+        }),
+        db.HealthMetric.findOne({
+          where: { device_id: deviceId, metric_type: "blood_pressure" },
+          order: [["recorded_at", "DESC"]],
+        }),
+        db.HealthMetric.findOne({
+          where: { device_id: deviceId, metric_type: "sleep" },
+          order: [["recorded_at", "DESC"]],
+        }),
+        db.HealthMetric.findOne({
+          where: { device_id: deviceId, metric_type: "spo2" },
+          order: [["recorded_at", "DESC"]],
+        }),
+        db.HealthMetric.findOne({
+          where: { device_id: deviceId, metric_type: "temperature" },
+          order: [["recorded_at", "DESC"]],
+        }),
+      ]);
+      const dailySteps = await this.calculateDailyStepMetrics(deviceId);
+      const bloodPressure = bloodPressureRecord
+        ? {
+            systolic: this.firebaseNumber(bloodPressureRecord.value_primary),
+            diastolic: this.firebaseNumber(bloodPressureRecord.value_secondary),
+          }
+        : { systolic: 0, diastolic: 0 };
+
+      return {
+        heart_rate: this.firebaseNumber(heartRateRecord?.value_primary),
+        blood_pressure: bloodPressure,
+        sleep: this.firebaseNumber(sleepRecord?.value_primary),
+        spo2: this.firebaseNumber(spo2Record?.value_primary),
+        oxygen: this.firebaseNumber(spo2Record?.value_primary),
+        calories: dailySteps.calories,
+        temperature: this.firebaseNumber(temperatureRecord?.value_primary),
+        distance: dailySteps.distance,
+        steps: dailySteps.steps,
+      };
+    } catch (error: any) {
+      Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Merge data into the existing liveLocation document. This intentionally
+   * does not create a separate health-metrics Firebase path.
+   */
+  private async mergeFirebaseLiveLocation(
+    deviceId: string,
+    updates: Record<string, any>
+  ): Promise<boolean> {
+    const tag = `[FirebaseLiveLocation:${deviceId}]`;
+
+    try {
+      const dbRef = database().ref(`monitorimi/liveLocation/${deviceId}`);
       const result = await dbRef.transaction((current: any) => {
         const existing =
           current && typeof current === "object"
             ? (current as Record<string, any>)
             : {};
-        const numericValue = (value: unknown): number =>
-          typeof value === "number" && Number.isFinite(value) ? value : 0;
 
         return {
-          spo2: numericValue(existing.spo2),
-          heart_rate: numericValue(existing.heart_rate),
-          temperature: numericValue(existing.temperature),
-          oxygen: numericValue(existing.oxygen),
+          ...existing,
           ...updates,
-          updated_at: new Date().toISOString(),
         };
       });
 
       if (!result.committed) {
         Logging.warn(`${tag} transaction was not committed`);
-        return;
+        return false;
       }
-
-      Logging.info(
-        `${tag} updated ${Object.keys(updates).join(", ")} successfully`
-      );
+      return true;
     } catch (error: any) {
       Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
+      return false;
     }
+  }
+
+  /**
+   * Refresh all supported health fields in the existing liveLocation document
+   * from the database after a health log has been persisted.
+   */
+  private async updateFirebaseHealthMetrics(deviceId: string): Promise<void> {
+    const snapshot = await this.getFirebaseHealthSnapshot(deviceId);
+    if (!snapshot) return;
+    await this.mergeFirebaseLiveLocation(deviceId, snapshot);
   }
 
   private async saveAlarm(deviceId: string, payload: string): Promise<void> {
