@@ -3065,7 +3065,7 @@ const requestHeartRateAndBodyTemperature = async function (
       res,
       alreadyInProgress
         ? "Health data request already in progress."
-        : "Fetching heart rate and temperature data from device.",
+        : "Fetching health data from device.",
       {
         status: "processing",
         request_id: requestId,
