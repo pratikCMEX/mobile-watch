@@ -366,9 +366,12 @@ const getAnalytics = async (
       range !== "daily" &&
       AVERAGE_METRIC_TYPES.includes(dbMetricType)
     ) {
-      // Weekly/monthly for heart_rate, blood_pressure, spo2, temperature:
-      // one averaged point per bucket (day for weekly, week for monthly).
       const secondaryIsAveragable = dbMetricType !== "temperature";
+
+      // Exclude abnormal-flag rows (unit contains "abnormal") from the
+      // numeric average — they store 0/1 as a flag, not a real reading.
+      const excludeAbnormal =
+        dbMetricType === "temperature" ? `AND unit NOT LIKE '%abnormal%'` : "";
 
       const avgBuckets: any[] = await db.sequelize.query(
         `
@@ -377,11 +380,13 @@ const getAnalytics = async (
                ${
                  secondaryIsAveragable ? "AVG(value_secondary)" : "NULL"
                } AS value_secondary,
-               MAX(unit) AS unit
+               MAX(unit) AS unit,
+               COUNT(*) AS reading_count
         FROM "HealthMetrics"
         WHERE device_id = :device_id
           AND metric_type = :dbMetricType
           AND recorded_at BETWEEN :start AND :end
+          ${excludeAbnormal}
         GROUP BY bucket
         ORDER BY bucket ASC
         `,
