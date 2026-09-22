@@ -3064,7 +3064,7 @@ const requestHeartRateAndBodyTemperature = async function (
     return successMessage(
       res,
       alreadyInProgress
-        ? "Health data request already in progress. Polling existing request."
+        ? "Health data request already in progress."
         : "Fetching heart rate and temperature data from device.",
       {
         status: "processing",
