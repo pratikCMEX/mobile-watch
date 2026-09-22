@@ -31,6 +31,8 @@ interface FirebaseHealthSnapshot {
   temperature: number;
   distance: number;
   steps: number;
+  total_steps: number;
+  target_step: number | null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -3893,6 +3895,35 @@ class TcpServer {
       Logging.warn(`${tag} step 1 FAILED: ` + (err?.message || String(err)));
     }
 
+    // Refresh DeviceSetting.total_steps from the latest cumulative step
+    // reading so the live dashboard always reflects the current total
+    // without a separate HealthMetrics query. This runs on every fix,
+    // i.e. whenever the lat/long columns above are updated.
+    Logging.info(`${tag} step 1b: syncing total_steps to DeviceSetting`);
+    try {
+      const latestSteps = await db.HealthMetric.findOne({
+        where: {
+          device_id: device.id,
+          metric_type: "steps_cumulative",
+        },
+        order: [["recorded_at", "DESC"]],
+        attributes: ["value_primary"],
+      });
+
+      const totalSteps =
+        latestSteps && latestSteps.value_primary != null
+          ? Number(latestSteps.value_primary)
+          : null;
+
+      await db.DeviceSetting.upsert({
+        device_id: device.id,
+        total_steps: totalSteps,
+      });
+      Logging.info(`${tag} step 1b OK: total_steps=${totalSteps}`);
+    } catch (err: any) {
+      Logging.warn(`${tag} step 1b FAILED: ` + (err?.message || String(err)));
+    }
+
     // Run geofencing on every reported location, not just GPS-grade
     // fixes. Many LTE/RTOS watches report gpsStatus "V" (no satellite
     // fix) on essentially every packet — they rely on WiFi/cell (LBS)
@@ -4592,7 +4623,42 @@ class TcpServer {
       temperature: 0,
       distance: 0,
       steps: 0,
+      total_steps: 0,
+      target_step: null,
     };
+  }
+
+  /**
+   * Latest cumulative step count from HealthMetrics (steps_cumulative),
+   * plus the configured step target from DeviceSetting.
+   *
+   * `total_steps` is the raw cumulative pedometer value the watch last
+   * reported (it only ever goes up). `target_step` is the user-configured
+   * walk_time_step_target; null when no target has been set.
+   */
+  private async getStepTotalAndTarget(
+    deviceId: string
+  ): Promise<{ total_steps: number; target_step: number | null }> {
+    const [latestSteps, setting] = await Promise.all([
+      db.HealthMetric.findOne({
+        where: { device_id: deviceId, metric_type: "steps_cumulative" },
+        order: [["recorded_at", "DESC"]],
+        attributes: ["value_primary"],
+      }),
+      db.DeviceSetting.findOne({ where: { device_id: deviceId } }),
+    ]);
+
+    const totalSteps =
+      latestSteps && latestSteps.value_primary != null
+        ? this.firebaseNumber(latestSteps.value_primary)
+        : 0;
+
+    const targetStep =
+      setting && setting.walk_time_step_target != null
+        ? Number(setting.walk_time_step_target)
+        : null;
+
+    return { total_steps: totalSteps, target_step: targetStep };
   }
 
   /**
@@ -4611,6 +4677,7 @@ class TcpServer {
         sleepRecord,
         spo2Record,
         temperatureRecord,
+        stepTotalAndTarget,
       ] = await Promise.all([
         db.HealthMetric.findOne({
           where: { device_id: deviceId, metric_type: "heart_rate" },
@@ -4632,6 +4699,7 @@ class TcpServer {
           where: { device_id: deviceId, metric_type: "temperature" },
           order: [["recorded_at", "DESC"]],
         }),
+        this.getStepTotalAndTarget(deviceId),
       ]);
       const dailySteps = await this.calculateDailyStepMetrics(deviceId);
       const bloodPressure = bloodPressureRecord
@@ -4651,6 +4719,8 @@ class TcpServer {
         temperature: this.firebaseNumber(temperatureRecord?.value_primary),
         distance: dailySteps.distance,
         steps: dailySteps.steps,
+        total_steps: stepTotalAndTarget.total_steps,
+        target_step: stepTotalAndTarget.target_step,
       };
     } catch (error: any) {
       Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);

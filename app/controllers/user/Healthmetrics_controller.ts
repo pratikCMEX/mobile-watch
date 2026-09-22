@@ -257,6 +257,7 @@ const getAnalytics = async (
         device_id,
         metric_type: dbMetricType,
         recorded_at: { [Op.between]: [start, end] },
+        value_primary: { [Op.ne]: 0 },
       },
       attributes: ["value_primary", "value_secondary", "unit", "recorded_at"],
       order: [["recorded_at", "DESC"]],
