@@ -330,8 +330,8 @@ const MIN_DISTANCE_METERS = 10;
 // Device Request Cache
 //
 // Used by requestHeartRateAndBodyTemperature to ensure:
-//   1. HR command is sent first and we wait for its response
-//   2. Only after HR response is received, temperature command is sent
+//   1. Temperature command is sent first and we wait for its response
+//   2. Only after temperature response is received, HR command is sent
 //   3. API caller is blocked (via Promise) until both responses arrive
 //   4. No concurrent requests for the same device
 // ─────────────────────────────────────────────────────────────
@@ -369,13 +369,13 @@ class TcpServer {
   private readonly devices: Map<string, TcpClient> = new Map();
 
   /**
-   * Per-device request cache for sequential HR + Temperature.
+   * Per-device request cache for sequential Temperature + HR.
    *
    * Key = serial_number
    * Value = DeviceRequestEntry
    *
    * Prevents concurrent requests for the same device.
-   * The API caller awaits the Promise until both HR and temp
+   * The API caller awaits the Promise until both temp and HR
    * responses are received from the device.
    */
   private readonly deviceRequestCache: Map<string, DeviceRequestEntry> =
@@ -4918,6 +4918,9 @@ class TcpServer {
   /**
    * Mark HR command as sent and store HR response data when received.
    *
+   * Note: Temperature command was already sent before this HR response
+   * (reversed order: temperature first, then heart rate).
+   *
    * @param serialNumber Device serial number
    * @param data HR response payload parts (from bphrt packet)
    */
@@ -4939,23 +4942,17 @@ class TcpServer {
         `HR received=${entry.hrReceived}, Temp received=${entry.tempReceived}`
     );
 
-    // After receiving HR data, automatically send the bodytemp2 command
-    // so the device measures temperature while we have its attention.
-    const client = this.devices.get(serialNumber);
-    if (client && !entry.tempRequested) {
-      const command = `[3G*${serialNumber}*0009*bodytemp2]`;
-      this.send(client, command);
-      entry.tempRequested = true;
-      Logging.info(
-        `Auto-sent bodytemp2 command to ${serialNumber} after HR response.`
-      );
-    }
+    // Temperature was already sent before HR (reversed order).
+    // No need to auto-send bodytemp2 here.
 
     this.checkAndResolveDeviceRequest(serialNumber);
   }
 
   /**
    * Mark Temperature command as sent and store temperature response data when received.
+   *
+   * After temperature response is received, auto-sends the HR command (hrtstart,1)
+   * so the device measures heart rate while we have its attention.
    *
    * @param serialNumber Device serial number
    * @param data Temperature response payload parts (from bodytemp2 packet)
@@ -4977,6 +4974,23 @@ class TcpServer {
       `Temperature response received for ${serialNumber}. ` +
         `HR received=${entry.hrReceived}, Temp received=${entry.tempReceived}`
     );
+
+    // After receiving temperature data, automatically send the hrtstart command
+    // so the device measures heart rate while we have its attention.
+    const client = this.devices.get(serialNumber);
+    if (client && !entry.hrRequested) {
+      const hrSent = this.sendHeartRateRequest(serialNumber, 1);
+      if (hrSent) {
+        entry.hrRequested = true;
+        Logging.info(
+          `Auto-sent hrtstart command to ${serialNumber} after temperature response.`
+        );
+      } else {
+        Logging.error(
+          `Failed to auto-send hrtstart command to ${serialNumber} after temperature response.`
+        );
+      }
+    }
 
     this.checkAndResolveDeviceRequest(serialNumber);
   }
@@ -5067,13 +5081,13 @@ class TcpServer {
   }
 
   /**
-   * Orchestrate sequential HR + Temperature request for a device.
+   * Orchestrate sequential Temperature + HR request for a device.
    *
-   * Flow:
+   * Flow (reversed order):
    *   1. Creates a cache entry (prevents concurrent requests)
-   *   2. Sends HR command (hrtstart,1)
-   *   3. Waits for HR response → auto-sends bodytemp2 command
-   *   4. Waits for temperature response
+   *   2. Sends bodytemp2 command (temperature first)
+   *   3. Waits for temperature response → auto-sends hrtstart command
+   *   4. Waits for HR response
    *   5. Resolves with both hrData and tempData
    *
    * @param serialNumber Device serial number
@@ -5092,20 +5106,22 @@ class TcpServer {
       throw new Error(`Device ${serialNumber} is not connected via TCP.`);
     }
 
-    // Step 3: Send HR command (hrtstart,1)
-    const hrSent = this.sendHeartRateRequest(serialNumber, 1);
-    if (!hrSent) {
+    // Step 3: Send bodytemp2 command FIRST (temperature before heart rate)
+    const tempSent = this.requestBodyTemperature(serialNumber);
+    if (!tempSent) {
       this.cancelDeviceRequest(serialNumber);
-      throw new Error(`Failed to send HR command to device ${serialNumber}.`);
+      throw new Error(
+        `Failed to send temperature command to device ${serialNumber}.`
+      );
     }
 
     Logging.info(
       `Sequential request started for ${serialNumber}. ` +
-        `Waiting for HR response (auto-sends temperature next).`
+        `Temperature command sent first, waiting for temp response (auto-sends HR next).`
     );
 
     // Step 4 & 5: Wait for both responses
-    // HR response triggers auto-send of bodytemp2, then both resolve.
+    // Temperature response triggers auto-send of hrtstart, then both resolve.
     return promise;
   }
 
