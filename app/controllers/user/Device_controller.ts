@@ -3056,7 +3056,7 @@ const requestHeartRateAndBodyTemperature = async function (
 
     Logging.info(
       `Health data request ${
-        alreadyInProgress ? "already in progress" : "initiated"
+        alreadyInProgress ? "already in progresss" : "initiated"
       } for ${serialNumber}. ` +
         `Request ID: ${requestId}. Use GET /user/device/health-result?request_id=${requestId} to poll for results.`
     );
