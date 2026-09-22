@@ -176,10 +176,10 @@ async function createOrUpdateEmergencyContact(
     // ── Compatibility shim ──
     // If the caller sent the plural body shape
     //   { serial_number, contacts: [{id, name, phone_number, priority}, ...] }
-    // (common from the mobile app), transparently unwrap the FIRST
-    // contact so this singular endpoint works the same way. If the
-    // caller actually wanted to save multiple contacts, they should
-    // use POST /emergency_contact/save_contacts (plural).
+    // (common from the mobile app), delegate to saveEmergencyContacts
+    // which handles ALL contacts in the array. Previously this shim
+    // only unwrapped the FIRST contact, causing subsequent contacts
+    // to be silently ignored.
     if (
       Array.isArray((req.body as any).contacts) &&
       (req.body as any).contacts.length > 0 &&
@@ -187,12 +187,7 @@ async function createOrUpdateEmergencyContact(
         phone_number === undefined ||
         priority === undefined)
     ) {
-      const c = (req.body as any).contacts[0];
-      id = id ?? c.id;
-      name = name ?? c.name;
-      phone_number = phone_number ?? c.phone_number;
-      country_code = country_code ?? c.country_code;
-      priority = priority ?? c.priority;
+      return saveEmergencyContacts(req, res, next);
     }
 
     // Treat empty-string id as "no id" so mobile clients that always
