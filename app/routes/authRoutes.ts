@@ -8,7 +8,6 @@ const router = express.Router();
 
 router.post("/user_login", ValidateJoi(Schemas.login), Auth_controller.login);
 
-// Register a new user — requires email and password
 router.post(
   "/user_register",
   ValidateJoi(Schemas.auth.createUser),
@@ -17,12 +16,8 @@ router.post(
 
 router.delete("/delete_account", checkToken, Auth_controller.deleteAccount);
 
-// Logout — invalidates the current session by clearing the stored token
 router.post("/logout", checkToken, Auth_controller.logout);
 
-// Update authenticated user's profile (name, email, phone, password, profile image)
-// Uses multipart/form-data when uploading a profile image; the "profile_image"
-// field carries the file and text fields (name, email, etc.) travel as form fields.
 router.post(
   "/update_profile",
   uploadProfile.single("profile_image"),
@@ -31,7 +26,6 @@ router.post(
   Auth_controller.updateProfile
 );
 
-// Get authenticated user's profile
 router.get("/get_profile", checkToken, Auth_controller.getProfile);
 
 module.exports = router;
