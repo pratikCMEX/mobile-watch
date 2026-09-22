@@ -24,10 +24,8 @@ export interface NotificationPayload {
   device_id: string;
   user_id?: string | null;
   /**
-   * When set, the notification is created once per recipient and the
-   * FCM push is fanned out to every member of the watch. This is what
-   * makes alarms on a shared watch reach all members instead of only
-   * the (possibly stale) owner_id.
+   * Optional pre-resolved recipient list. When omitted, recipients are
+   * resolved from DeviceMembers for the supplied device_id.
    */
   user_ids?: string[] | null;
   type: NotificationType;
@@ -37,13 +35,36 @@ export interface NotificationPayload {
 }
 
 /**
- * Create a notification record in the database and (optionally) push
- * it to the device owner's / members' Firebase Cloud Messaging tokens.
+ * Return every user that is currently assigned to a device. DeviceMembers is
+ * the canonical recipient list for shared watches; Devices.owner_id is only a
+ * legacy ownership pointer and must not be used to select push recipients.
+ */
+export const getDeviceMemberUserIds = async (
+  deviceId: string
+): Promise<string[]> => {
+  const members = await db.DeviceMember.findAll({
+    where: { device_id: deviceId },
+    attributes: ["user_id"],
+    raw: true,
+  });
+
+  return [
+    ...new Set(
+      (members as Array<{ user_id?: string | null }>)
+        .map((member) => member.user_id)
+        .filter((userId): userId is string => Boolean(userId))
+    ),
+  ];
+};
+
+/**
+ * Create a notification record and push it to every DeviceMember assigned
+ * to the supplied device. DeviceMembers is the canonical recipient source.
  *
- * - `user_id`  → single-recipient notification (legacy callers).
- * - `user_ids` → one Notification row per recipient, FCM fanned out to
- *   every member of the watch (used by the TCP alarm pipeline so a
- *   shared watch alerts all members).
+ * - `user_ids` → optional pre-resolved recipients; one row and FCM push
+ *   are created per user.
+ * - `user_id`  → legacy direct recipient, used only when no device_id
+ *   membership lookup applies.
  *
  * @param payload - Notification data
  * @returns The created Notification record (or the last one when
@@ -54,15 +75,32 @@ export const createNotification = async (
 ): Promise<any> => {
   const { device_id, user_id, user_ids, type, title, body, metadata } = payload;
 
-  // Normalise the recipient list. user_ids takes precedence so the TCP
-  // alarm path can fan out to every member; otherwise fall back to the
-  // single legacy user_id.
-  let recipients: string[] = [];
-  if (user_ids && user_ids.length) {
-    recipients = [...new Set(user_ids.filter(Boolean))];
-  } else if (user_id) {
-    recipients = [user_id];
-  }
+  // Resolve recipients from DeviceMembers for device-scoped notifications.
+  // An explicit user_ids list is accepted for callers that have already
+  // resolved the membership set; user_id remains available only for direct
+  // single-recipient notifications without a device membership lookup.
+  const resolveRecipients = async (): Promise<string[]> => {
+    if (user_ids !== undefined && user_ids !== null) {
+      return [...new Set(user_ids.filter(Boolean))];
+    }
+
+    if (device_id) {
+      try {
+        return await getDeviceMemberUserIds(device_id);
+      } catch (err: any) {
+        Logging.warn(
+          `Could not resolve DeviceMembers for notification device=${device_id}: ${
+            err?.message || err
+          }`
+        );
+        return [];
+      }
+    }
+
+    return user_id ? [user_id] : [];
+  };
+
+  const recipients = await resolveRecipients();
 
   if (recipients.length === 0) {
     // No recipient known — still persist the record so it is visible to
@@ -429,15 +467,12 @@ export const checkStepTarget = async (deviceId: string): Promise<void> => {
       const device = await db.Device.findByPk(deviceId);
       const deviceName = device?.device_name || deviceId;
 
-      // Get user_id from DeviceMember table
-      const deviceMember = await db.DeviceMember.findOne({
-        where: { device_id: deviceId },
-      });
-      const userId = deviceMember?.user_id || null;
+      // Every assigned watch member receives the step-target notification.
+      const userIds = await getDeviceMemberUserIds(deviceId);
 
       await createNotification({
         device_id: deviceId,
-        user_id: userId,
+        user_ids: userIds,
         type: "general",
         title: "Steps target achieved",
         body: `You've reached your step target of ${targetSteps} steps! Current: ${currentSteps} steps.`,

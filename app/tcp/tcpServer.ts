@@ -1461,7 +1461,7 @@ class TcpServer {
 
   /**
    * Parse the alarm-status bitmask from an AL / AL_LTE payload and
-   * dispatch the appropriate notifications to the device owner via FCM.
+   * dispatch the appropriate notifications to every DeviceMember via FCM.
    *
    * The alarm-status field is the 16th comma-separated value
    * (index 15) and is a hex string, e.g. "00010000" for SOS or
@@ -1507,13 +1507,11 @@ class TcpServer {
       return;
     }
 
-    const ownerId = device.owner_id;
     const deviceIdDb = device.id;
     const deviceName = device.device_name;
 
-    // A shared watch must alert EVERY member, not just the (possibly
-    // stale) owner_id. Resolve the member list once and fan the alarm
-    // notifications out to all of them.
+    // A shared watch must alert EVERY assigned member. DeviceMembers is
+    // the canonical recipient list; Devices.owner_id is not a recipient.
     let memberUserIds: string[] = [];
     try {
       const members = (await db.DeviceMember.findAll({
@@ -1528,11 +1526,6 @@ class TcpServer {
           memberErr?.message || memberErr
         }`
       );
-    }
-    if (memberUserIds.length === 0 && ownerId) {
-      // No membership rows yet — fall back to the legacy owner_id so
-      // single-owner watches still get their alarms.
-      memberUserIds = [ownerId];
     }
 
     // ── SOS alarm (bit 16) ──────────────────────────────────────
@@ -1613,7 +1606,7 @@ class TcpServer {
     // ── Remove the watch alarm (bit 20) ─────────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_WATCH_REMOVE) !== 0) {
       Logging.info(
-        `${tag} Watch-remove alarm detected — sending notification to owner`
+        `${tag} Watch-remove alarm detected — notification handling is not configured`
       );
 
       Logging.info(
@@ -1627,9 +1620,8 @@ class TcpServer {
         `${tag} Fall-down alarm detected — checking fall-detection setting`
       );
 
-      // Respect the owner's fall-down alert toggle. If the watch
-      // has fall-down alerts disabled, we still record the alarm but
-      // do NOT push a notification to the owner.
+      // Respect the device's fall-down alert setting. If fall-down
+      // alerts are disabled, do NOT push a notification to any member.
       let fallDownAlertEnabled = true;
       try {
         const deviceSetting = await db.DeviceSetting.findOne({
@@ -1657,7 +1649,7 @@ class TcpServer {
         );
         await createNotification({
           ...notificationPayload,
-          user_id: ownerId,
+          user_ids: memberUserIds,
         });
         Logging.info(
           `${tag} Fall-detection notification created for device ${deviceIdDb}`
@@ -1668,7 +1660,7 @@ class TcpServer {
     // ── Abnormal heart rate alarm (bit 22) ──────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_ABNORMAL_HEART_RATE) !== 0) {
       Logging.info(
-        `${tag} Abnormal heart-rate alarm detected — sending notification to owner`
+        `${tag} Abnormal heart-rate alarm detected — notification handling is not configured`
       );
 
       Logging.info(
@@ -3206,9 +3198,8 @@ class TcpServer {
         );
 
         // ── 7. Notify watch members ──
-        // A shared watch must alert EVERY member, not just the
-        // (possibly stale) owner_id — same fan-out pattern used for
-        // SOS/alarm notifications elsewhere in this file.
+        // A shared watch must alert EVERY assigned member. DeviceMembers
+        // is the canonical recipient list; Devices.owner_id is not a recipient.
         try {
           const members = (await db.DeviceMember.findAll({
             where: { device_id: device.id },
@@ -3219,13 +3210,9 @@ class TcpServer {
             ...new Set(members.map((mem: any) => mem.user_id)),
           ];
 
-          if (memberUserIds.length === 0 && device.owner_id) {
-            memberUserIds = [device.owner_id];
-          }
-
           if (memberUserIds.length === 0) {
             Logging.warn(
-              `${tag} step 7 SKIPPED: no members/owner found for device ${device.id}, ` +
+              `${tag} step 7 SKIPPED: no DeviceMembers found for device ${device.id}, ` +
                 `no notification sent`
             );
           } else {
@@ -3927,7 +3914,7 @@ class TcpServer {
   // in/out status differs from Device.geofence_status (this
   // includes the very first-ever check for a device — if it's
   // already outside the fence the first time we look, that's still
-  // something the owner should be told about).
+  // something every DeviceMember should be told about).
   // ───────────────────────────────────────────────────────────
 
   private async checkGeofence(
@@ -4027,9 +4014,8 @@ class TcpServer {
         newStatus
       );
 
-      // A shared watch must alert EVERY member, not just the
-      // (possibly stale) owner_id. Resolve the member list and fan
-      // the geofence notification out to all of them.
+      // A shared watch must alert EVERY assigned member. Resolve the
+      // DeviceMembers list and fan the geofence notification out to all of them.
       let memberUserIds: string[] = [];
       try {
         const members = (await db.DeviceMember.findAll({
@@ -4045,14 +4031,8 @@ class TcpServer {
           }: ${memberErr?.message || memberErr}`
         );
       }
-      if (memberUserIds.length === 0 && device.owner_id) {
-        memberUserIds = [device.owner_id];
-      }
-
       Logging.info(
-        `${tag} step 5: device.owner_id=${
-          device.owner_id ?? "null"
-        } member_count=${memberUserIds.length} -> calling createNotification()`
+        `${tag} step 5: member_count=${memberUserIds.length} -> calling createNotification()`
       );
 
       const notification = await createNotification({
@@ -7449,8 +7429,8 @@ class TcpServer {
    * Handle an SOS trigger from the device.
    *
    * The device sends SOS1, SOS2, or SOS3 when the user presses the
-   * SOS button.  We persist a notification and push it to the device
-   * owner via FCM.
+   * SOS button. We persist a notification and push it to every
+   * DeviceMember via FCM.
    *
    * Device reply: none (fire-and-forget from the device side).
    */
@@ -7511,9 +7491,8 @@ class TcpServer {
           return;
         }
 
-        // A shared watch must alert EVERY member, not just the
-        // (possibly stale) owner_id. Resolve the member list and fan
-        // the SOS notification out to all of them.
+        // A shared watch must alert EVERY assigned member. Resolve the
+        // DeviceMembers list and fan the SOS notification out to all of them.
         let memberUserIds: string[] = [];
         try {
           const members = (await db.DeviceMember.findAll({
@@ -7529,13 +7508,9 @@ class TcpServer {
             }: ${memberErr?.message || memberErr}`
           );
         }
-        if (memberUserIds.length === 0 && device.owner_id) {
-          // No membership rows yet — fall back to the legacy owner_id.
-          memberUserIds = [device.owner_id];
-        }
         if (memberUserIds.length === 0) {
           Logging.warn(
-            `SOS trigger from device ${packet.deviceId} but no owner_id or members set`
+            `SOS trigger from device ${packet.deviceId} but no DeviceMembers found`
           );
           return;
         }
