@@ -20,6 +20,7 @@ export interface DeviceSettingAttributes {
   walk_time_enabled: string;
   walk_time_sections: string[] | null;
   walk_time_step_target: number | null;
+  step_target_achieved: string;
   dial_lock_enabled: string;
   low_battery_alert: string;
   createdAt: Date;
@@ -51,6 +52,7 @@ class DeviceSetting
   public walk_time_enabled!: string;
   public walk_time_sections!: string[] | null;
   public walk_time_step_target!: number | null;
+  public step_target_achieved!: string;
   public dial_lock_enabled!: string;
   public low_battery_alert!: string;
 
@@ -179,6 +181,13 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         validate: {
           min: 0,
         },
+      },
+      step_target_achieved: {
+        type: DataTypes.ENUM("0", "1"),
+        allowNull: false,
+        defaultValue: "0",
+        comment:
+          "Set to 1 when step target notification has been sent. Reset to 0 when steps go below target.",
       },
       dial_lock_enabled: {
         type: DataTypes.ENUM("1", "0"),

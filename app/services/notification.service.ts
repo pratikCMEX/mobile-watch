@@ -353,6 +353,78 @@ export const buildChatNotification = (
 };
 
 /**
+ * Check if a device's step count has reached its target and send a
+ * one-time "Steps target achieved" notification.
+ *
+ * Logic:
+ *   - If currentSteps >= target AND step_target_achieved is "0":
+ *       → Send notification (type: "general")
+ *       → Set step_target_achieved to "1"
+ *   - If currentSteps < target:
+ *       → Reset step_target_achieved to "0" (ready for next achievement)
+ *
+ * @param deviceId The device whose steps are being checked
+ * @param currentSteps The current step count (from latest metric)
+ */
+export const checkStepTarget = async (
+  deviceId: string,
+  currentSteps: number
+): Promise<void> => {
+  const deviceSetting = await db.DeviceSetting.findOne({
+    where: { device_id: deviceId },
+  });
+
+  if (!deviceSetting) return;
+
+  const targetSteps = deviceSetting.walk_time_step_target;
+
+  // No target set — nothing to check
+  if (targetSteps === null || targetSteps === undefined) return;
+
+  if (currentSteps >= targetSteps) {
+    // Steps reached or exceeded target
+    if (deviceSetting.step_target_achieved === "0") {
+      // First time achieving target — send notification
+      const device = await db.Device.findByPk(deviceId);
+      const deviceName = device?.device_name || deviceId;
+
+      await createNotification({
+        device_id: deviceId,
+        user_id: device?.owner_id || null,
+        type: "general",
+        title: "Steps target achieved",
+        body: `You've reached your step target of ${targetSteps} steps! Current: ${currentSteps} steps.`,
+        metadata: {
+          kind: "step_target",
+          deviceId,
+          deviceName,
+          targetSteps,
+          currentSteps,
+        },
+      });
+
+      // Mark as achieved so notification is not sent again
+      deviceSetting.step_target_achieved = "1";
+      await deviceSetting.save();
+
+      Logging.info(
+        `Step target notification sent for device ${deviceId}: target=${targetSteps}, current=${currentSteps}`
+      );
+    }
+  } else {
+    // Steps below target — reset so next achievement triggers notification
+    if (deviceSetting.step_target_achieved === "1") {
+      deviceSetting.step_target_achieved = "0";
+      await deviceSetting.save();
+
+      Logging.info(
+        `Step target reset for device ${deviceId}: steps=${currentSteps} below target=${targetSteps}`
+      );
+    }
+  }
+};
+
+/**
  * Helper: build a fall-down / fall-detection notification payload.
  */
 export const buildFallDownNotification = (

@@ -3,6 +3,7 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { QueryTypes, Op } from "sequelize";
 import HealthMetricService from "../../services/HealthMetricService";
+import { checkStepTarget } from "../../services/notification.service";
 import {
   sendProcessing,
   sendFetching,
@@ -81,6 +82,18 @@ const AddMetrics = async function (
       unit: unit,
       recorded_at: new Date(),
     });
+
+    // Check step target when steps are inserted (steps, steps_daily, steps_cumulative)
+    const stepMetricTypes = ["steps", "steps_daily", "steps_cumulative"];
+    if (stepMetricTypes.includes(metric_type)) {
+      const stepValue = Number(value_primary);
+      if (!Number.isNaN(stepValue)) {
+        await checkStepTarget(device_id, stepValue).catch((err) =>
+          console.error("checkStepTarget error:", err)
+        );
+      }
+    }
+
     return successMessage(res, "Healthmetric added successfully", healthmetric);
   } catch (err) {
     return errorMessage(res, "Error adding healthmetric");

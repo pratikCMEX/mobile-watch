@@ -13,6 +13,7 @@ import {
   buildGeoFenceNotification,
   buildFallDownNotification,
   buildChatNotification,
+  checkStepTarget,
 } from "../services/notification.service";
 
 interface FirebaseBloodPressure {
@@ -4336,6 +4337,13 @@ class TcpServer {
         }
 
         shouldUpdateFirebaseHealth = true;
+
+        // Check if step target has been reached and send notification if so
+        await checkStepTarget(deviceId, steps).catch((err: any) =>
+          Logging.error(
+            `${tag} checkStepTarget FAILED: ${err?.message || String(err)}`
+          )
+        );
       }
 
       // ── Sleep (tumbling value from device) ──────────────
