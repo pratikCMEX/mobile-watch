@@ -89,7 +89,10 @@ const AddMetrics = async function (
       await checkStepTarget(
         device_id,
         Number(value_primary),
-        metric_type
+        metric_type,
+        healthmetric.recorded_at,
+        healthmetric.id,
+        true
       ).catch((err) => console.error("checkStepTarget error:", err));
     }
 

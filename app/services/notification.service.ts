@@ -392,6 +392,7 @@ export const buildChatNotification = (
 };
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const STEP_METRIC_TYPES = ["steps", "steps_daily", "steps_cumulative"] as const;
 
 /**
  * Return the device-local (IST, UTC+5:30) day boundaries as UTC Dates.
@@ -412,11 +413,67 @@ const getIstDayBounds = (date: Date = new Date()) => {
   };
 };
 
+const getIstDateKey = (date: Date) =>
+  new Date(date.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+
+/**
+ * Reset the achievement flag when a newly inserted step row is the first step
+ * log for a newer device-local day. Late backfills for older dates do not
+ * disturb the current day's achievement state.
+ */
+const resetAchievementForNewStepDay = async (
+  deviceId: string,
+  recordedAt: Date,
+  healthMetricId?: string,
+  isNewMetric = true
+): Promise<void> => {
+  if (!isNewMetric) return;
+
+  const latestStep = await db.HealthMetric.findOne({
+    where: {
+      device_id: deviceId,
+      metric_type: { [Op.in]: STEP_METRIC_TYPES },
+      ...(healthMetricId ? { id: { [Op.ne]: healthMetricId } } : {}),
+    },
+    attributes: ["recorded_at"],
+    order: [["recorded_at", "DESC"]],
+  });
+
+  const incomingDateKey = getIstDateKey(recordedAt);
+  const latestDateKey = latestStep
+    ? getIstDateKey(latestStep.recorded_at)
+    : null;
+
+  if (
+    !latestStep ||
+    (latestDateKey !== null && latestDateKey < incomingDateKey)
+  ) {
+    const [updated] = (await db.DeviceSetting.update(
+      { step_target_achieved: "0" },
+      {
+        where: {
+          device_id: deviceId,
+          step_target_achieved: "1",
+        },
+      }
+    )) as [number];
+
+    if (updated) {
+      Logging.info(
+        `Step target achievement reset for device ${deviceId}: new step day=${incomingDateKey}`
+      );
+    }
+  }
+};
+
 /**
  * Calculate the current daily step total from the cumulative pedometer stream.
  */
-const getCurrentStepCount = async (deviceId: string): Promise<number> => {
-  const { start, end } = getIstDayBounds();
+const getCurrentStepCount = async (
+  deviceId: string,
+  dayBounds = getIstDayBounds()
+): Promise<number> => {
+  const { start, end } = dayBounds;
   const [todayRecord, previousRecord] = await Promise.all([
     db.HealthMetric.findOne({
       where: {
@@ -457,11 +514,16 @@ const getCurrentStepCount = async (deviceId: string): Promise<number> => {
  *
  * `incomingSteps` is used for explicit daily step uploads. Cumulative uploads
  * continue to use the daily delta calculated from the pedometer stream.
+ * `recordedAt` and `healthMetricId` identify the step log used for the daily
+ * reset check.
  */
 export const checkStepTarget = async (
   deviceId: string,
   incomingSteps?: number | null,
-  metricType?: string
+  metricType?: string,
+  recordedAt: Date = new Date(),
+  healthMetricId?: string,
+  isNewMetric = true
 ): Promise<void> => {
   const deviceSetting = await db.DeviceSetting.findOne({
     where: { device_id: deviceId },
@@ -472,6 +534,14 @@ export const checkStepTarget = async (
   const targetSteps = Number(deviceSetting.walk_time_step_target);
   if (!Number.isFinite(targetSteps) || targetSteps <= 0) return;
 
+  const dayBounds = getIstDayBounds(recordedAt);
+  await resetAchievementForNewStepDay(
+    deviceId,
+    recordedAt,
+    healthMetricId,
+    isNewMetric
+  );
+
   const isDailyStepUpload =
     metricType === "steps_daily" &&
     incomingSteps !== undefined &&
@@ -479,7 +549,7 @@ export const checkStepTarget = async (
     Number.isFinite(Number(incomingSteps));
   const currentSteps = isDailyStepUpload
     ? Math.max(Number(incomingSteps), 0)
-    : await getCurrentStepCount(deviceId);
+    : await getCurrentStepCount(deviceId, dayBounds);
 
   if (currentSteps < targetSteps) {
     if (deviceSetting.step_target_achieved === "1") {

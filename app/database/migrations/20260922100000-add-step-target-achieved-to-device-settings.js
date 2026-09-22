@@ -8,7 +8,7 @@ module.exports = {
       allowNull: false,
       defaultValue: "0",
       comment:
-        "Set to 1 when step target notification has been sent. Reset to 0 when steps go below target.",
+        "Set to 1 when step target notification has been sent. Reset to 0 on the first step log of a new day, when steps go below target, or when the target changes.",
     });
   },
 

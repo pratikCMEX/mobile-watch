@@ -4279,6 +4279,8 @@ class TcpServer {
       // Hourly upsert in device-local time (IST, UTC+5:30).
       if (hasSteps) {
         const { hourStart, hourEnd } = this.istHourBucket(recordedAt);
+        let stepHealthMetricId: string | undefined;
+        let isStepMetricNew = false;
 
         const existingSteps = await db.HealthMetric.findOne({
           where: {
@@ -4291,6 +4293,8 @@ class TcpServer {
         });
 
         if (existingSteps) {
+          stepHealthMetricId = existingSteps.id;
+
           await existingSteps.update({
             value_primary: steps,
             value_secondary: null,
@@ -4302,7 +4306,7 @@ class TcpServer {
             `${tag} OK (updated): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
           );
         } else {
-          await db.HealthMetric.create({
+          const createdStep = await db.HealthMetric.create({
             device_id: deviceId,
             metric_type: "steps_cumulative",
             value_primary: steps,
@@ -4310,6 +4314,8 @@ class TcpServer {
             unit: "steps",
             recorded_at: recordedAt,
           });
+          stepHealthMetricId = createdStep.id;
+          isStepMetricNew = true;
 
           Logging.info(
             `${tag} OK (created): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
@@ -4318,12 +4324,18 @@ class TcpServer {
 
         shouldUpdateFirebaseHealth = true;
 
-        // Check the daily target after the cumulative step row is persisted.
-        await checkStepTarget(deviceId, undefined, "steps_cumulative").catch(
-          (err: any) =>
-            Logging.error(
-              `${tag} checkStepTarget FAILED: ${err?.message || String(err)}`
-            )
+        // The first new-day step log resets the achievement flag before the target check.
+        await checkStepTarget(
+          deviceId,
+          undefined,
+          "steps_cumulative",
+          recordedAt,
+          stepHealthMetricId,
+          isStepMetricNew
+        ).catch((err: any) =>
+          Logging.error(
+            `${tag} checkStepTarget FAILED: ${err?.message || String(err)}`
+          )
         );
       }
 
