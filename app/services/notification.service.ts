@@ -1,6 +1,7 @@
 import db from "../models";
 import Logging from "../library/Logging";
 import { messaging } from "../config/firebase";
+import { Op } from "sequelize";
 
 // firebase-admin v14 is ESM-only; require() directly to avoid CJS interop issues.
 /**
@@ -366,10 +367,7 @@ export const buildChatNotification = (
  * @param deviceId The device whose steps are being checked
  * @param currentSteps The current step count (from latest metric)
  */
-export const checkStepTarget = async (
-  deviceId: string,
-  currentSteps: number
-): Promise<void> => {
+export const checkStepTarget = async (deviceId: string): Promise<void> => {
   const deviceSetting = await db.DeviceSetting.findOne({
     where: { device_id: deviceId },
   });
@@ -381,6 +379,49 @@ export const checkStepTarget = async (
   // No target set — nothing to check
   if (targetSteps === null || targetSteps === undefined) return;
 
+  // Calculate today's steps from cumulative pedometer readings.
+  // The watch reports a cumulative step count that never resets; today's
+  // actual steps = today's cumulative − the last cumulative reading before today.
+  const now = new Date();
+  const startOfDay = new Date(now);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(startOfDay);
+  endOfDay.setHours(23, 59, 59, 999);
+
+  const [todayRecord, previousRecord] = await Promise.all([
+    db.HealthMetric.findOne({
+      where: {
+        device_id: deviceId,
+        metric_type: "steps_cumulative",
+        recorded_at: { [Op.between]: [startOfDay, endOfDay] },
+      },
+      attributes: ["value_primary"],
+      order: [["recorded_at", "DESC"]],
+    }),
+    db.HealthMetric.findOne({
+      where: {
+        device_id: deviceId,
+        metric_type: "steps_cumulative",
+        recorded_at: { [Op.lt]: startOfDay },
+      },
+      attributes: ["value_primary"],
+      order: [["recorded_at", "DESC"]],
+    }),
+  ]);
+
+  const todayValue = todayRecord ? Number(todayRecord.value_primary) : null;
+  const previousValue = previousRecord
+    ? Number(previousRecord.value_primary)
+    : null;
+
+  let currentSteps = 0;
+  if (todayValue !== null && Number.isFinite(todayValue)) {
+    currentSteps =
+      previousValue !== null && Number.isFinite(previousValue)
+        ? Math.max(todayValue - previousValue, 0)
+        : Math.max(todayValue, 0);
+  }
+
   if (currentSteps >= targetSteps) {
     // Steps reached or exceeded target
     if (deviceSetting.step_target_achieved === "0") {
@@ -388,9 +429,15 @@ export const checkStepTarget = async (
       const device = await db.Device.findByPk(deviceId);
       const deviceName = device?.device_name || deviceId;
 
+      // Get user_id from DeviceMember table
+      const deviceMember = await db.DeviceMember.findOne({
+        where: { device_id: deviceId },
+      });
+      const userId = deviceMember?.user_id || null;
+
       await createNotification({
         device_id: deviceId,
-        user_id: device?.owner_id || null,
+        user_id: userId,
         type: "general",
         title: "Steps target achieved",
         body: `You've reached your step target of ${targetSteps} steps! Current: ${currentSteps} steps.`,

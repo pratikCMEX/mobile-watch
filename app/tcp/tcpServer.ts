@@ -4339,7 +4339,7 @@ class TcpServer {
         shouldUpdateFirebaseHealth = true;
 
         // Check if step target has been reached and send notification if so
-        await checkStepTarget(deviceId, steps).catch((err: any) =>
+        await checkStepTarget(deviceId).catch((err: any) =>
           Logging.error(
             `${tag} checkStepTarget FAILED: ${err?.message || String(err)}`
           )

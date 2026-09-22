@@ -86,12 +86,9 @@ const AddMetrics = async function (
     // Check step target when steps are inserted (steps, steps_daily, steps_cumulative)
     const stepMetricTypes = ["steps", "steps_daily", "steps_cumulative"];
     if (stepMetricTypes.includes(metric_type)) {
-      const stepValue = Number(value_primary);
-      if (!Number.isNaN(stepValue)) {
-        await checkStepTarget(device_id, stepValue).catch((err) =>
-          console.error("checkStepTarget error:", err)
-        );
-      }
+      await checkStepTarget(device_id).catch((err) =>
+        console.error("checkStepTarget error:", err)
+      );
     }
 
     return successMessage(res, "Healthmetric added successfully", healthmetric);
