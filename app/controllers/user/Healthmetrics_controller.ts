@@ -156,8 +156,6 @@ const AVERAGE_METRIC_TYPES = [
   "temperature",
 ];
 
-let chart;
-
 function startOfDay(d: Date) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -167,17 +165,6 @@ function endOfDay(d: Date) {
   const x = new Date(d);
   x.setHours(23, 59, 59, 999);
   return x;
-}
-function startOfWeek(d: Date) {
-  const x = startOfDay(d);
-  const day = x.getDay(); // 0 = Sunday, matches the S M T W T F S strip
-  x.setDate(x.getDate() - day);
-  return x;
-}
-function endOfWeek(d: Date) {
-  const x = startOfWeek(d);
-  x.setDate(x.getDate() + 6);
-  return endOfDay(x);
 }
 function startOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
@@ -224,15 +211,19 @@ const getAnalytics = async (
     if (range === "daily") {
       start = startOfDay(targetDate);
       end = endOfDay(targetDate);
-      truncUnit = "hour"; // 9AM, 10AM, 11AM... buckets, matching the Daily chart
+      truncUnit = "hour"; // hourly buckets within the day
     } else if (range === "weekly") {
-      start = startOfWeek(targetDate);
-      end = endOfWeek(targetDate);
-      truncUnit = "day"; // one point per day, matching the S M T W T F S strip
+      // Sent `date` is used as-is as the start of the 7-day window
+      start = startOfDay(targetDate);
+      end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      end = endOfDay(end);
+      truncUnit = "day"; // one point per day
     } else {
+      // monthly = full calendar month containing the sent date
       start = startOfMonth(targetDate);
       end = endOfMonth(targetDate);
-      truncUnit = "week"; // one point per week across the month
+      truncUnit = "week"; // one point per week within that month
     }
 
     console.log(
@@ -240,6 +231,8 @@ const getAnalytics = async (
       device_id,
       "metric_type:",
       dbMetricType,
+      "range:",
+      range,
       "start:",
       start,
       "end:",
@@ -272,21 +265,28 @@ const getAnalytics = async (
           (sum: number, r: any) => sum + Number(r.value_primary),
           0
         ) / readings.length;
+
+      // value_secondary is only a real numeric quantity to average for
+      // blood_pressure (diastolic). For temperature it's a measurement-type
+      // flag (0=forehead, 1=wrist), not something to average.
+      const secondaryIsAveragable = dbMetricType !== "temperature";
+
       const secondaryReadings = readings.filter(
         (r: any) => r.value_secondary !== null
       );
-      const avgSecondary = secondaryReadings.length
-        ? secondaryReadings.reduce(
-            (sum: number, r: any) => sum + Number(r.value_secondary),
-            0
-          ) / secondaryReadings.length
-        : null;
+      const avgSecondary =
+        secondaryIsAveragable && secondaryReadings.length
+          ? secondaryReadings.reduce(
+              (sum: number, r: any) => sum + Number(r.value_secondary),
+              0
+            ) / secondaryReadings.length
+          : null;
 
       summary = {
         low: {
           primary: Number(lowest.value_primary),
           secondary:
-            lowest.value_secondary !== null
+            secondaryIsAveragable && lowest.value_secondary !== null
               ? Number(lowest.value_secondary)
               : null,
         },
@@ -298,7 +298,7 @@ const getAnalytics = async (
         max: {
           primary: Number(highest.value_primary),
           secondary:
-            highest.value_secondary !== null
+            secondaryIsAveragable && highest.value_secondary !== null
               ? Number(highest.value_secondary)
               : null,
         },
@@ -366,11 +366,17 @@ const getAnalytics = async (
       range !== "daily" &&
       AVERAGE_METRIC_TYPES.includes(dbMetricType)
     ) {
+      // Weekly/monthly for heart_rate, blood_pressure, spo2, temperature:
+      // one averaged point per bucket (day for weekly, week for monthly).
+      const secondaryIsAveragable = dbMetricType !== "temperature";
+
       const avgBuckets: any[] = await db.sequelize.query(
         `
         SELECT date_trunc(:truncUnit, recorded_at) AS bucket,
                AVG(value_primary) AS value_primary,
-               AVG(value_secondary) AS value_secondary,
+               ${
+                 secondaryIsAveragable ? "AVG(value_secondary)" : "NULL"
+               } AS value_secondary,
                MAX(unit) AS unit
         FROM "HealthMetrics"
         WHERE device_id = :device_id
@@ -398,6 +404,8 @@ const getAnalytics = async (
         bucket: r.bucket,
       }));
     } else {
+      // daily range, or any metric type not in AVERAGE_METRIC_TYPES:
+      // return every raw reading as-is.
       chart = readings.map((r: any) => ({
         value_primary: Number(r.value_primary),
         value_secondary:
