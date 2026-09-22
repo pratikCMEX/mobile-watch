@@ -684,7 +684,9 @@ class TcpServer {
       // the generic bracket/regex-based parser below, and the
       // declared LEN can understate the real on-wire size.
       // Format: [3G*DEVICEID*LENGTH*TK,#!AMR<binary AMR bytes>]
-      const voiceChatMatch = buffer.match(/^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*TK,#!AMR/);
+      const voiceChatMatch = buffer.match(
+        /^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*TK,#!AMR/
+      );
       if (voiceChatMatch) {
         const packetLength = parseInt(voiceChatMatch[2], 16);
         const minExpected = packetLength + 2;
@@ -2203,12 +2205,12 @@ class TcpServer {
       // This unblocks the sequential request flow so the API can return.
       // The actual temperature data may arrive later via a separate packet
       // or may not arrive at all (device may not support on-demand measurement).
-      this.markTempReceived(packet.deviceId, {
-        type: null,
-        temp: null,
-        recordedAt: new Date(),
-        isAck: true,
-      });
+      // this.markTempReceived(packet.deviceId, {
+      //   type: null,
+      //   temp: null,
+      //   recordedAt: new Date(),
+      //   isAck: true,
+      // });
 
       // Don't save HealthMetric for ACK packets — no valid data
       return;
@@ -3208,7 +3210,9 @@ class TcpServer {
             attributes: ["user_id"],
             raw: true,
           })) as any[];
-          let memberUserIds = [...new Set(members.map((mem: any) => mem.user_id))];
+          let memberUserIds = [
+            ...new Set(members.map((mem: any) => mem.user_id)),
+          ];
 
           if (memberUserIds.length === 0 && device.owner_id) {
             memberUserIds = [device.owner_id];
