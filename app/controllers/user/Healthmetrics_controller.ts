@@ -328,6 +328,7 @@ const getAnalytics = async (
           device_id,
           metric_type: dbMetricType,
           recorded_at: { [Op.lt]: start },
+          value_primary: { [Op.ne]: 0 },
         },
         order: [["recorded_at", "DESC"]],
         attributes: ["value_primary"],
@@ -353,6 +354,7 @@ const getAnalytics = async (
           WHERE device_id = :device_id
             AND metric_type = :dbMetricType
             AND recorded_at BETWEEN :start AND :end
+            AND value_primary <> 0
         ) t
         WHERE rn = 1
         ORDER BY bucket ASC
@@ -399,6 +401,7 @@ const getAnalytics = async (
         WHERE device_id = :device_id
           AND metric_type = :dbMetricType
           AND recorded_at BETWEEN :start AND :end
+          AND value_primary <> 0
           ${excludeAbnormal}
         GROUP BY bucket
         ORDER BY bucket ASC
@@ -435,7 +438,11 @@ const getAnalytics = async (
 
     // Last synced — most recent reading ever recorded, not limited to the window
     const latest = await db.HealthMetric.findOne({
-      where: { device_id, metric_type: dbMetricType },
+      where: {
+        device_id,
+        metric_type: dbMetricType,
+        value_primary: { [Op.ne]: 0 },
+      },
       order: [["recorded_at", "DESC"]],
     });
 
