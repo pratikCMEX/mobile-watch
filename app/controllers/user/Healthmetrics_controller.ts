@@ -102,14 +102,6 @@ const AddMetrics = async function (
   }
 };
 
-// POST /health/save_spo2
-// Save a SpO2 (blood oxygen saturation) reading.
-//
-// SPO2 data rating (server-side):
-//   90%–100% → Good   → status 1 (normal)
-//   70%–89%  → Average → status 1 (normal)
-//   <70%     → Poor    → status 0 (abnormal)
-//   invalid  → error   → status 2 (error)
 const saveSpO2 = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { device_id, spo2, measurement_type, unit, recorded_at } = req.body;
@@ -157,6 +149,15 @@ const METRIC_TYPES = [
   "turnovers",
 ];
 
+const AVERAGE_METRIC_TYPES = [
+  "heart_rate",
+  "blood_pressure",
+  "spo2",
+  "temperature",
+];
+
+let chart;
+
 function startOfDay(d: Date) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -185,8 +186,6 @@ function endOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
 }
 
-// POST /health/analytics
-// body: { device_id, metric_type, range: "daily"|"weekly"|"monthly", date? }
 const getAnalytics = async (
   req: Request,
   res: Response,
@@ -363,6 +362,41 @@ const getAnalytics = async (
           bucket: r.bucket,
         };
       });
+    } else if (
+      range !== "daily" &&
+      AVERAGE_METRIC_TYPES.includes(dbMetricType)
+    ) {
+      const avgBuckets: any[] = await db.sequelize.query(
+        `
+        SELECT date_trunc(:truncUnit, recorded_at) AS bucket,
+               AVG(value_primary) AS value_primary,
+               AVG(value_secondary) AS value_secondary,
+               MAX(unit) AS unit
+        FROM "HealthMetrics"
+        WHERE device_id = :device_id
+          AND metric_type = :dbMetricType
+          AND recorded_at BETWEEN :start AND :end
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        `,
+        {
+          replacements: { truncUnit, device_id, dbMetricType, start, end },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      chart = avgBuckets.map((r: any) => ({
+        value_primary:
+          r.value_primary !== null
+            ? Math.round(Number(r.value_primary) * 100) / 100
+            : null,
+        value_secondary:
+          r.value_secondary !== null
+            ? Math.round(Number(r.value_secondary) * 100) / 100
+            : null,
+        unit: r.unit,
+        bucket: r.bucket,
+      }));
     } else {
       chart = readings.map((r: any) => ({
         value_primary: Number(r.value_primary),
@@ -511,9 +545,6 @@ const getHealthOverview = async (
   }
 };
 
-// GET /health/today_steps/:device_id
-// Returns the total step count for today based on cumulative pedometer
-// readings stored as HealthMetric rows (metric_type = "steps_cumulative").
 const getTodaySteps = async (
   req: Request,
   res: Response,
@@ -591,18 +622,6 @@ const getTodaySteps = async (
     return errorMessage(res, "Error fetching today's step count");
   }
 };
-
-// ─── Streaming Health Overview ────────────────────────────────────────────────
-// This version sends progressive updates as each metric type is fetched,
-// instead of waiting for all data to be gathered before responding.
-//
-// Response flow (SSE chunks):
-//   1. { status: "processing", progress: 0,  message: "Starting health overview..." }
-//   2. { status: "fetching",   progress: N,  message: "Fetched heart_rate", data: { ... } }
-//   3. { status: "fetching",   progress: N,  message: "Fetched blood_pressure", data: { ... } }
-//   ...  (one per metric type)
-//   N. { status: "completed", progress: 100, message: "Health overview complete", data: { ... } }
-//
 
 const getHealthOverviewStreamed = async (
   req: Request,
