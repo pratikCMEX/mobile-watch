@@ -109,7 +109,7 @@ router.post(
   Device_controller.requestHeartRateAndBodyTemperature
 );
 
-router.get("/health-result", checkToken, Device_controller.getHealthResult);
+// router.get("/health-result", checkToken, Device_controller.getHealthResult);
 
 router.post(
   "/list_voice_messages",
