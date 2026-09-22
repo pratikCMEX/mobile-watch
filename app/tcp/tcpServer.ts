@@ -4318,11 +4318,12 @@ class TcpServer {
 
         shouldUpdateFirebaseHealth = true;
 
-        // Check if step target has been reached and send notification if so
-        await checkStepTarget(deviceId).catch((err: any) =>
-          Logging.error(
-            `${tag} checkStepTarget FAILED: ${err?.message || String(err)}`
-          )
+        // Check the daily target after the cumulative step row is persisted.
+        await checkStepTarget(deviceId, undefined, "steps_cumulative").catch(
+          (err: any) =>
+            Logging.error(
+              `${tag} checkStepTarget FAILED: ${err?.message || String(err)}`
+            )
         );
       }
 

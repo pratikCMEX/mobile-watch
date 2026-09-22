@@ -391,47 +391,38 @@ export const buildChatNotification = (
   };
 };
 
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
 /**
- * Check if a device's step count has reached its target and send a
- * one-time "Steps target achieved" notification.
- *
- * Logic:
- *   - If currentSteps >= target AND step_target_achieved is "0":
- *       → Send notification (type: "general")
- *       → Set step_target_achieved to "1"
- *   - If currentSteps < target:
- *       → Reset step_target_achieved to "0" (ready for next achievement)
- *
- * @param deviceId The device whose steps are being checked
- * @param currentSteps The current step count (from latest metric)
+ * Return the device-local (IST, UTC+5:30) day boundaries as UTC Dates.
+ * The watch timestamps are protocol UTC values, while step targets are daily
+ * values in the device's local timezone.
  */
-export const checkStepTarget = async (deviceId: string): Promise<void> => {
-  const deviceSetting = await db.DeviceSetting.findOne({
-    where: { device_id: deviceId },
-  });
+const getIstDayBounds = (date: Date = new Date()) => {
+  const istDate = new Date(date.getTime() + IST_OFFSET_MS);
+  const startUtc = Date.UTC(
+    istDate.getUTCFullYear(),
+    istDate.getUTCMonth(),
+    istDate.getUTCDate()
+  );
 
-  if (!deviceSetting) return;
+  return {
+    start: new Date(startUtc - IST_OFFSET_MS),
+    end: new Date(startUtc + 24 * 60 * 60 * 1000 - 1),
+  };
+};
 
-  const targetSteps = deviceSetting.walk_time_step_target;
-
-  // No target set — nothing to check
-  if (targetSteps === null || targetSteps === undefined) return;
-
-  // Calculate today's steps from cumulative pedometer readings.
-  // The watch reports a cumulative step count that never resets; today's
-  // actual steps = today's cumulative − the last cumulative reading before today.
-  const now = new Date();
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(startOfDay);
-  endOfDay.setHours(23, 59, 59, 999);
-
+/**
+ * Calculate the current daily step total from the cumulative pedometer stream.
+ */
+const getCurrentStepCount = async (deviceId: string): Promise<number> => {
+  const { start, end } = getIstDayBounds();
   const [todayRecord, previousRecord] = await Promise.all([
     db.HealthMetric.findOne({
       where: {
         device_id: deviceId,
         metric_type: "steps_cumulative",
-        recorded_at: { [Op.between]: [startOfDay, endOfDay] },
+        recorded_at: { [Op.between]: [start, end] },
       },
       attributes: ["value_primary"],
       order: [["recorded_at", "DESC"]],
@@ -440,7 +431,7 @@ export const checkStepTarget = async (deviceId: string): Promise<void> => {
       where: {
         device_id: deviceId,
         metric_type: "steps_cumulative",
-        recorded_at: { [Op.lt]: startOfDay },
+        recorded_at: { [Op.lt]: start },
       },
       attributes: ["value_primary"],
       order: [["recorded_at", "DESC"]],
@@ -452,58 +443,99 @@ export const checkStepTarget = async (deviceId: string): Promise<void> => {
     ? Number(previousRecord.value_primary)
     : null;
 
-  let currentSteps = 0;
-  if (todayValue !== null && Number.isFinite(todayValue)) {
-    currentSteps =
-      previousValue !== null && Number.isFinite(previousValue)
-        ? Math.max(todayValue - previousValue, 0)
-        : Math.max(todayValue, 0);
-  }
+  if (todayValue === null || !Number.isFinite(todayValue)) return 0;
 
-  if (currentSteps >= targetSteps) {
-    // Steps reached or exceeded target
-    if (deviceSetting.step_target_achieved === "0") {
-      // First time achieving target — send notification
-      const device = await db.Device.findByPk(deviceId);
-      const deviceName = device?.device_name || deviceId;
+  return previousValue !== null && Number.isFinite(previousValue)
+    ? Math.max(todayValue - previousValue, 0)
+    : Math.max(todayValue, 0);
+};
 
-      // Every assigned watch member receives the step-target notification.
-      const userIds = await getDeviceMemberUserIds(deviceId);
+/**
+ * Check if a device's daily step count has reached its target and send one
+ * notification to every DeviceMember. The achievement flag is claimed with a
+ * conditional update so concurrent step uploads cannot send duplicates.
+ *
+ * `incomingSteps` is used for explicit daily step uploads. Cumulative uploads
+ * continue to use the daily delta calculated from the pedometer stream.
+ */
+export const checkStepTarget = async (
+  deviceId: string,
+  incomingSteps?: number | null,
+  metricType?: string
+): Promise<void> => {
+  const deviceSetting = await db.DeviceSetting.findOne({
+    where: { device_id: deviceId },
+  });
 
-      await createNotification({
-        device_id: deviceId,
-        user_ids: userIds,
-        type: "general",
-        title: "Steps target achieved",
-        body: `You've reached your step target of ${targetSteps} steps! Current: ${currentSteps} steps.`,
-        metadata: {
-          kind: "step_target",
-          deviceId,
-          deviceName,
-          targetSteps,
-          currentSteps,
-        },
-      });
+  if (!deviceSetting) return;
 
-      // Mark as achieved so notification is not sent again
-      deviceSetting.step_target_achieved = "1";
-      await deviceSetting.save();
+  const targetSteps = Number(deviceSetting.walk_time_step_target);
+  if (!Number.isFinite(targetSteps) || targetSteps <= 0) return;
 
-      Logging.info(
-        `Step target notification sent for device ${deviceId}: target=${targetSteps}, current=${currentSteps}`
-      );
-    }
-  } else {
-    // Steps below target — reset so next achievement triggers notification
+  const isDailyStepUpload =
+    metricType === "steps_daily" &&
+    incomingSteps !== undefined &&
+    incomingSteps !== null &&
+    Number.isFinite(Number(incomingSteps));
+  const currentSteps = isDailyStepUpload
+    ? Math.max(Number(incomingSteps), 0)
+    : await getCurrentStepCount(deviceId);
+
+  if (currentSteps < targetSteps) {
     if (deviceSetting.step_target_achieved === "1") {
-      deviceSetting.step_target_achieved = "0";
-      await deviceSetting.save();
+      await db.DeviceSetting.update(
+        { step_target_achieved: "0" },
+        {
+          where: {
+            device_id: deviceId,
+            step_target_achieved: "1",
+          },
+        }
+      );
 
       Logging.info(
         `Step target reset for device ${deviceId}: steps=${currentSteps} below target=${targetSteps}`
       );
     }
+    return;
   }
+
+  // Only one concurrent step upload may claim this achievement.
+  const [claimed] = (await db.DeviceSetting.update(
+    { step_target_achieved: "1" },
+    {
+      where: {
+        device_id: deviceId,
+        step_target_achieved: "0",
+        walk_time_step_target: targetSteps,
+      },
+    }
+  )) as [number];
+
+  if (!claimed) return;
+
+  const device = await db.Device.findByPk(deviceId);
+  const deviceName = device?.device_name || deviceId;
+  const userIds = await getDeviceMemberUserIds(deviceId);
+
+  await createNotification({
+    device_id: deviceId,
+    user_ids: userIds,
+    type: "general",
+    title: "Steps target achieved",
+    body: `You've reached your step target of ${targetSteps} steps! Current: ${currentSteps} steps.`,
+    metadata: {
+      kind: "step_target",
+      deviceId,
+      deviceName,
+      targetSteps,
+      currentSteps,
+    },
+  });
+
+  Logging.info(
+    `Step target notification sent for device ${deviceId}: target=${targetSteps}, current=${currentSteps}`
+  );
 };
 
 /**

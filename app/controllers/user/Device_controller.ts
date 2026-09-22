@@ -3738,6 +3738,14 @@ const setWalkTime = async function (
       ? req.body.sections
       : [];
     const stepTargetRaw = req.body.step_target;
+    const parsedStepTarget =
+      stepTargetRaw === undefined || stepTargetRaw === null
+        ? null
+        : Number(stepTargetRaw);
+    const requestedStepTarget =
+      parsedStepTarget === null || !Number.isFinite(parsedStepTarget)
+        ? null
+        : Math.max(0, Math.floor(parsedStepTarget));
 
     if (!serial_number) {
       return errorMessage(res, "serial_number is required");
@@ -3803,19 +3811,20 @@ const setWalkTime = async function (
         upload_interval_seconds: null,
         walk_time_enabled: sections.length > 0 ? "1" : "0",
         walk_time_sections: sections,
-        walk_time_step_target:
-          stepTargetRaw === undefined || stepTargetRaw === null
-            ? null
-            : Math.max(0, Math.floor(Number(stepTargetRaw))),
+        walk_time_step_target: requestedStepTarget,
       });
     } else {
       deviceSetting.walk_time_enabled = sections.length > 0 ? "1" : "0";
       deviceSetting.walk_time_sections = sections;
-      if (stepTargetRaw !== undefined && stepTargetRaw !== null) {
-        deviceSetting.walk_time_step_target = Math.max(
-          0,
-          Math.floor(Number(stepTargetRaw))
-        );
+      if (stepTargetRaw !== undefined) {
+        const targetChanged =
+          deviceSetting.walk_time_step_target !== requestedStepTarget;
+
+        deviceSetting.walk_time_step_target = requestedStepTarget;
+        if (targetChanged) {
+          // A new target starts a new achievement cycle.
+          deviceSetting.step_target_achieved = "0";
+        }
       }
       await deviceSetting.save();
     }

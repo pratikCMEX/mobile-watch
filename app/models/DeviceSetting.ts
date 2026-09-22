@@ -187,7 +187,7 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         allowNull: false,
         defaultValue: "0",
         comment:
-          "Set to 1 when step target notification has been sent. Reset to 0 when steps go below target.",
+          "Set to 1 when step target notification has been sent. Reset to 0 when steps go below target or the target changes.",
       },
       dial_lock_enabled: {
         type: DataTypes.ENUM("1", "0"),

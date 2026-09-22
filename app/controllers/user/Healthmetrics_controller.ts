@@ -83,12 +83,14 @@ const AddMetrics = async function (
       recorded_at: new Date(),
     });
 
-    // Check step target when steps are inserted (steps, steps_daily, steps_cumulative)
+    // Check the configured daily target immediately after a step metric is persisted.
     const stepMetricTypes = ["steps", "steps_daily", "steps_cumulative"];
     if (stepMetricTypes.includes(metric_type)) {
-      await checkStepTarget(device_id).catch((err) =>
-        console.error("checkStepTarget error:", err)
-      );
+      await checkStepTarget(
+        device_id,
+        Number(value_primary),
+        metric_type
+      ).catch((err) => console.error("checkStepTarget error:", err));
     }
 
     return successMessage(res, "Healthmetric added successfully", healthmetric);
