@@ -2198,21 +2198,13 @@ class TcpServer {
       Logging.info(
         `bodytemp2 ACK received from device ${packet.deviceId} ` +
           `(payload="${packet.payload}"). ` +
-          `Marking temperature as received (waiting for actual data or timeout).`
+          `Waiting for actual temperature data (btemp2 packet) before proceeding.`
       );
 
-      // Update device request cache — ACK received.
-      // This unblocks the sequential request flow so the API can return.
-      // The actual temperature data may arrive later via a separate packet
-      // or may not arrive at all (device may not support on-demand measurement).
-      // this.markTempReceived(packet.deviceId, {
-      //   type: null,
-      //   temp: null,
-      //   recordedAt: new Date(),
-      //   isAck: true,
-      // });
-
-      // Don't save HealthMetric for ACK packets — no valid data
+      // Do NOT mark temp as received yet — the device will send actual
+      // temperature data via a separate btemp2 packet.
+      // markTempReceived will be called from handleTemperature when
+      // the actual data arrives.
       return;
     }
 
@@ -2388,6 +2380,15 @@ class TcpServer {
         `Failed to save temperature for device ${packet.deviceId}: ${error.message}`
       )
     );
+
+    // Update device request cache — actual temperature data received.
+    // This will auto-send the hrtstart command if a sequential
+    // request is pending (temperature-first flow).
+    this.markTempReceived(packet.deviceId, {
+      type: measurementType,
+      temp: tempValue,
+      recordedAt: new Date(),
+    });
 
     // Create notification for abnormal temperatures
     if (isAbnormal && abnormalType) {
@@ -4910,7 +4911,7 @@ class TcpServer {
 
       Logging.info(
         `Device request started for ${serialNumber}. ` +
-          `Waiting for HR response, then temperature response.`
+          `Waiting for temperature response, then HR response.`
       );
     });
   }
