@@ -6,6 +6,7 @@ import Logging from "../library/Logging";
 import { buildServerPortalCommand } from "./protocol";
 import db from "../models";
 import { database } from "../config/firebase";
+import { config } from "../config/config";
 import {
   createNotification,
   buildSosNotification,
@@ -4897,21 +4898,24 @@ class TcpServer {
       };
       this.deviceRequestCache.set(serialNumber, entry);
 
-      // Auto-timeout after 120 seconds to prevent permanent lockout.
-      // Devices may be slow to respond (especially after reconnecting
-      // from an ECONNRESET), and the HR + bodytemp2 round-trip can
-      // take a while on cellular/LTE connections.
+      // Auto-timeout to prevent permanent lockout.
+      // Devices may be slow to respond (especially on cellular/LTE connections).
+      // Configurable via DEVICE_REQUEST_TIMEOUT_MS env var (default: 300s = 5 min).
       entry.timeoutTimer = setTimeout(() => {
         Logging.warn(
-          `Device request for ${serialNumber} timed out after 120s.`
+          `Device request for ${serialNumber} timed out after ${
+            config.deviceRequestTimeoutMs / 1000
+          }s.`
         );
         this.cancelDeviceRequest(serialNumber);
         reject(
           new Error(
-            `Device ${serialNumber} request timed out after 120s. Device may be unresponsive.`
+            `Device ${serialNumber} request timed out after ${
+              config.deviceRequestTimeoutMs / 1000
+            }s. Device may be unresponsive.`
           )
         );
-      }, 120_000);
+      }, config.deviceRequestTimeoutMs);
 
       Logging.info(
         `Device request started for ${serialNumber}. ` +
