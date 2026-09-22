@@ -1,6 +1,7 @@
 import net from "net";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import Logging from "../library/Logging";
 import { buildServerPortalCommand } from "./protocol";
 import db from "../models";
@@ -332,12 +333,13 @@ const MIN_DISTANCE_METERS = 10;
 // Used by requestHeartRateAndBodyTemperature to ensure:
 //   1. Temperature command is sent first and we wait for its response
 //   2. Only after temperature response is received, HR command is sent
-//   3. API caller is blocked (via Promise) until both responses arrive
+//   3. requestId is returned immediately for polling (non-blocking)
 //   4. No concurrent requests for the same device
 // ─────────────────────────────────────────────────────────────
 
 interface DeviceRequestEntry {
   serialNumber: string;
+  requestId: string;
   hrRequested: boolean;
   tempRequested: boolean;
   hrReceived: boolean;
@@ -4859,7 +4861,8 @@ class TcpServer {
    * @returns Promise that resolves with { hrData, tempData } when both responses received
    */
   public startDeviceRequest(
-    serialNumber: string
+    serialNumber: string,
+    requestId: string
   ): Promise<{ hrData: any; tempData: any }> {
     // Check if there's already a pending request for this device
     if (this.deviceRequestCache.has(serialNumber)) {
@@ -4880,6 +4883,7 @@ class TcpServer {
     return new Promise<{ hrData: any; tempData: any }>((resolve, reject) => {
       const entry: DeviceRequestEntry = {
         serialNumber,
+        requestId,
         hrRequested: false,
         tempRequested: false,
         hrReceived: false,
@@ -5091,14 +5095,19 @@ class TcpServer {
    *   4. Waits for HR response
    *   5. Resolves with both hrData and tempData
    *
+   * This method is NON-BLOCKING: it starts the request in the background
+   * and immediately returns a requestId. Use getHealthRequestStatus()
+   * to check when both responses are received.
+   *
    * @param serialNumber Device serial number
-   * @returns Promise resolving with { hrData, tempData } when both responses received
+   * @returns { requestId } immediately; background promise resolves with { hrData, tempData }
    */
-  public async requestHRAndTemperature(
-    serialNumber: string
-  ): Promise<{ hrData: any; tempData: any }> {
-    // Step 1: Create cache entry and get the Promise
-    const promise = this.startDeviceRequest(serialNumber);
+  public requestHRAndTemperature(serialNumber: string): { requestId: string } {
+    // Generate unique request ID for polling
+    const requestId = crypto.randomUUID();
+
+    // Step 1: Create cache entry and start the background promise
+    const promise = this.startDeviceRequest(serialNumber, requestId);
 
     // Step 2: Verify device is connected
     const client = this.devices.get(serialNumber);
@@ -5118,12 +5127,56 @@ class TcpServer {
 
     Logging.info(
       `Sequential request started for ${serialNumber}. ` +
-        `Temperature command sent first, waiting for temp response (auto-sends HR next).`
+        `Temperature command sent first, waiting for temp response (auto-sends HR next). ` +
+        `Request ID: ${requestId}`
     );
 
-    // Step 4 & 5: Wait for both responses
-    // Temperature response triggers auto-send of hrtstart, then both resolve.
-    return promise;
+    // Do NOT await the promise — return immediately with requestId.
+    // The background promise resolves when both HR and temp are received.
+    // Use getHealthRequestStatus(requestId) to check progress.
+    return { requestId };
+  }
+
+  /**
+   * Check the status of a health data request.
+   *
+   * @param requestId The request ID returned by requestHRAndTemperature
+   * @returns Object with status ("processing" | "completed" | "failed") and data if available
+   */
+  public getHealthRequestStatus(requestId: string): {
+    status: "processing" | "completed" | "failed";
+    requestId: string;
+    serialNumber?: string;
+    hrData?: any;
+    tempData?: any;
+    error?: string;
+  } {
+    // Search cache for the requestId
+    for (const [serialNumber, entry] of this.deviceRequestCache) {
+      if (entry.requestId === requestId) {
+        if (entry.hrReceived && entry.tempReceived) {
+          return {
+            status: "completed",
+            requestId,
+            serialNumber: entry.serialNumber,
+            hrData: entry.hrData,
+            tempData: entry.tempData,
+          };
+        }
+        return {
+          status: "processing",
+          requestId,
+          serialNumber: entry.serialNumber,
+        };
+      }
+    }
+
+    // Request not found — may have timed out or been cancelled
+    return {
+      status: "failed",
+      requestId,
+      error: "Request not found. It may have timed out or been cancelled.",
+    };
   }
 
   // ───────────────────────────────────────────────────────────

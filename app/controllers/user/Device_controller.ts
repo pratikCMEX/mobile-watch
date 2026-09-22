@@ -3046,57 +3046,27 @@ const requestHeartRateAndBodyTemperature = async function (
       );
     }
 
-    // Use the sequential request flow with cache-based deduplication.
-    // This ensures:
-    //   1. HR command is sent first
-    //   2. After HR response is received, bodytemp2 command is auto-sent
-    //   3. API caller is blocked until BOTH responses are received
-    //   4. No concurrent requests for the same device (cache lock)
-    //   5. Auto-times out after 120 seconds
-    const result = await tcpServer.requestHRAndTemperature(serialNumber);
+    // Start the sequential request (temperature first, then HR).
+    // This is NON-BLOCKING — returns a requestId immediately.
+    // The client polls GET /user/device/health-result?request_id=xxx for the final data.
+    const { requestId } = tcpServer.requestHRAndTemperature(serialNumber);
 
-    // Check if temperature data is valid or was an ACK (device echoed
-    // the command without measuring). Some devices send an ACK for
-    // bodytemp2 and take time to measure, or may not support on-demand
-    // temperature measurement at all.
-    const tempIsAck = result.tempData?.isAck === true;
-    const tempHasData =
-      result.tempData?.temp !== null && result.tempData?.temp !== undefined;
+    Logging.info(
+      `Health data request initiated for ${serialNumber}. ` +
+        `Request ID: ${requestId}. Use GET /user/device/health-result?request_id=${requestId} to poll for results.`
+    );
 
     return successMessage(
       res,
-      tempHasData
-        ? "Heart rate and body temperature data received from device."
-        : tempIsAck
-        ? "Heart rate data received. Body temperature command was sent but device returned an ACK (no measurement data yet)."
-        : "Heart rate data received. Body temperature data not available.",
+      "Fetching heart rate and temperature data from device.",
       {
+        status: "processing",
+        request_id: requestId,
         serial_number: serialNumber,
         device_id: device.id,
         device_name: device.device_name,
-        heart_rate: result.hrData?.heartRate ?? null,
-        systolic: result.hrData?.systolic ?? null,
-        diastolic: result.hrData?.diastolic ?? null,
-        body_temperature: tempHasData ? result.tempData?.temp ?? null : null,
-        temperature_type: tempHasData ? result.tempData?.type ?? null : null,
-        temperature_is_ack: tempIsAck,
-        hr_protocol: `[3G*${serialNumber}*<LEN>*hrtstart,1]`,
-        hr_response_protocol: `[3G*${serialNumber}*<LEN>*bphrt,systolic,diastolic,heartRate,...]`,
-        temp_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
-        temp_response_protocol: `[3G*${serialNumber}*<LEN>*bodytemp2,type,temp]`,
-        note: tempHasData
-          ? "HR command was sent first. After HR response was received, " +
-            "bodytemp2 command was auto-sent. Both responses were received " +
-            "and stored as HealthMetric records."
-          : tempIsAck
-          ? "HR command was sent first. After HR response was received, " +
-            "bodytemp2 command was auto-sent. Device returned an ACK " +
-            "(echo of the command) but did not include temperature data. " +
-            "The device may need more time to measure or may not support " +
-            "on-demand temperature measurement."
-          : "HR command was sent first. After HR response was received, " +
-            "bodytemp2 command was auto-sent. Temperature data was not " +
-            "received from the device.",
+        message:
+          "Temperature command sent first, heart rate command will be sent after temperature response. Poll /user/device/health-result with the request_id to get the final result.",
         timestamp: new Date().toISOString(),
       }
     );
@@ -3107,6 +3077,69 @@ const requestHeartRateAndBodyTemperature = async function (
       res,
       "Error requesting heart rate and body temperature: " + msg
     );
+  }
+};
+
+/**
+ * GET /user/device/health-result?request_id=xxx
+ *
+ * Polling endpoint to check the status of a health data request.
+ *
+ * Returns:
+ *   - { status: "processing" } if still waiting for device responses
+ *   - { status: "completed", heart_rate, body_temperature, ... } when both HR and temp are received
+ *   - { status: "failed", error: "..." } if request not found or timed out
+ */
+const getHealthResult = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { request_id } = req.query;
+
+    if (!request_id || typeof request_id !== "string") {
+      return errorMessage(res, "request_id query parameter is required");
+    }
+
+    const status = tcpServer.getHealthRequestStatus(request_id);
+
+    if (status.status === "completed") {
+      return successMessage(
+        res,
+        "Heart rate and body temperature data received from device.",
+        {
+          status: "completed",
+          request_id: status.requestId,
+          serial_number: status.serialNumber,
+          heart_rate: status.hrData?.heartRate ?? null,
+          systolic: status.hrData?.systolic ?? null,
+          diastolic: status.hrData?.diastolic ?? null,
+          body_temperature: status.tempData?.temp ?? null,
+          temperature_type: status.tempData?.type ?? null,
+          temperature_is_ack: status.tempData?.isAck === true,
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
+    if (status.status === "failed") {
+      return errorMessage(res, status.error || "Request failed.");
+    }
+
+    // Processing
+    return successMessage(res, "Still fetching data from device.", {
+      status: "processing",
+      request_id: status.requestId,
+      serial_number: status.serialNumber,
+      message:
+        "Temperature and/or heart rate data not yet received. Poll again.",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error("getHealthResult error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error checking health result: " + msg);
   }
 };
 

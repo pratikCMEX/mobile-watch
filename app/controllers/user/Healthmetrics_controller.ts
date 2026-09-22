@@ -3,6 +3,12 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { QueryTypes, Op } from "sequelize";
 import HealthMetricService from "../../services/HealthMetricService";
+import {
+  sendProcessing,
+  sendFetching,
+  sendCompleted,
+  sendError,
+} from "../../library/Stream";
 
 const AddMetrics = async function (
   req: Request,
@@ -571,10 +577,152 @@ const getTodaySteps = async (
   }
 };
 
+// ─── Streaming Health Overview ────────────────────────────────────────────────
+// This version sends progressive updates as each metric type is fetched,
+// instead of waiting for all data to be gathered before responding.
+//
+// Response flow (SSE chunks):
+//   1. { status: "processing", progress: 0,  message: "Starting health overview..." }
+//   2. { status: "fetching",   progress: N,  message: "Fetched heart_rate", data: { ... } }
+//   3. { status: "fetching",   progress: N,  message: "Fetched blood_pressure", data: { ... } }
+//   ...  (one per metric type)
+//   N. { status: "completed", progress: 100, message: "Health overview complete", data: { ... } }
+//
+
+const getHealthOverviewStreamed = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id } = req.params;
+
+    if (!device_id) {
+      return sendError(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id as string);
+    if (!device) {
+      return sendError(res, "Device not found");
+    }
+
+    // Step 0: Immediate "processing" signal
+    sendProcessing(res, "Starting health overview fetch...");
+
+    const metricTypes = [
+      "heart_rate",
+      "blood_pressure",
+      "steps_cumulative",
+      "sleep",
+      "spo2",
+      "temperature",
+    ];
+
+    const overview: any = {};
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const totalMetrics = metricTypes.length;
+
+    for (let i = 0; i < metricTypes.length; i++) {
+      const metricType = metricTypes[i];
+
+      // Fetch latest reading for this metric type
+      const latest = await db.HealthMetric.findOne({
+        where: { device_id, metric_type: metricType },
+        order: [["recorded_at", "DESC"]],
+      });
+
+      // Fetch most recent reading strictly before today
+      const previousDayMetric = await db.HealthMetric.findOne({
+        where: {
+          device_id,
+          metric_type: metricType,
+          recorded_at: { [Op.lt]: todayStart },
+        },
+        order: [["recorded_at", "DESC"]],
+      });
+
+      const latestValue = latest ? Number(latest.value_primary) : null;
+      const previousValue = previousDayMetric
+        ? Number(previousDayMetric.value_primary)
+        : null;
+      const delta =
+        latestValue !== null && previousValue !== null
+          ? latestValue - previousValue
+          : null;
+      const direction =
+        delta !== null
+          ? delta > 0
+            ? "up"
+            : delta < 0
+            ? "down"
+            : "stable"
+          : null;
+
+      const responseKey =
+        metricType === "steps_cumulative" ? "steps" : metricType;
+
+      overview[responseKey] = {
+        latest: latestValue,
+        latest_secondary: latest
+          ? Number(latest.value_secondary) || null
+          : null,
+        unit: latest?.unit || null,
+        recorded_at: latest?.recorded_at || null,
+        previous_day_value: previousValue,
+        delta: delta,
+        direction: direction,
+      };
+
+      // Send progress chunk for this metric
+      const progress = Math.round(((i + 1) / totalMetrics) * 100);
+      sendFetching(
+        res,
+        `Fetched ${responseKey} data`,
+        overview[responseKey],
+        progress
+      );
+    }
+
+    // Steps actually taken TODAY
+    if (overview["steps"]) {
+      const stepsLatest = overview["steps"].latest;
+      const stepsPrevious = overview["steps"].previous_day_value;
+      const stepsToday =
+        stepsLatest !== null && stepsPrevious !== null
+          ? Math.max(stepsLatest - stepsPrevious, 0)
+          : stepsLatest || 0;
+
+      overview["steps"].latest = stepsToday;
+    }
+
+    const stepsToday = overview["steps"]?.latest || 0;
+    const totalDistanceKm = Number((stepsToday * 0.000762).toFixed(2));
+    const totalCalories = Number((stepsToday * 0.04).toFixed(2));
+
+    overview["distance"] = {
+      latest: totalDistanceKm,
+      unit: "km",
+    };
+
+    overview["calories"] = {
+      latest: totalCalories,
+      unit: "kcal",
+    };
+
+    // Final: completed
+    sendCompleted(res, "Health overview fetched successfully", overview);
+  } catch (err) {
+    console.error("getHealthOverviewStreamed error:", err);
+    return sendError(res, "Error fetching health overview");
+  }
+};
+
 export default {
   AddMetrics,
   getAnalytics,
   getHealthOverview,
+  getHealthOverviewStreamed,
   getTodaySteps,
   saveSpO2,
 };
