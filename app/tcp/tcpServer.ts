@@ -5103,11 +5103,29 @@ class TcpServer {
    * @returns { requestId } immediately; background promise resolves with { hrData, tempData }
    */
   public requestHRAndTemperature(serialNumber: string): { requestId: string } {
+    // Check if device already has a pending request.
+    // If so, return the EXISTING requestId so the client can poll the same request.
+    const existingEntry = this.deviceRequestCache.get(serialNumber);
+    if (existingEntry) {
+      Logging.warn(
+        `Device ${serialNumber} already has a pending request ` +
+          `(request_id: ${existingEntry.requestId}). Returning existing requestId.`
+      );
+      return { requestId: existingEntry.requestId };
+    }
+
     // Generate unique request ID for polling
     const requestId = crypto.randomUUID();
 
     // Step 1: Create cache entry and start the background promise
     const promise = this.startDeviceRequest(serialNumber, requestId);
+
+    // Prevent unhandled rejection if startDeviceRequest fails
+    promise.catch((err) => {
+      Logging.error(
+        `Background request for ${serialNumber} failed: ${err?.message || err}`
+      );
+    });
 
     // Step 2: Verify device is connected
     const client = this.devices.get(serialNumber);
@@ -5135,6 +5153,16 @@ class TcpServer {
     // The background promise resolves when both HR and temp are received.
     // Use getHealthRequestStatus(requestId) to check progress.
     return { requestId };
+  }
+
+  /**
+   * Check if a device has a pending health data request.
+   *
+   * @param serialNumber Device serial number
+   * @returns true if the device has an in-progress request
+   */
+  public hasPendingRequest(serialNumber: string): boolean {
+    return this.deviceRequestCache.has(serialNumber);
   }
 
   /**

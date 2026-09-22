@@ -3046,27 +3046,36 @@ const requestHeartRateAndBodyTemperature = async function (
       );
     }
 
+    // Check if device already has a pending request
+    const alreadyInProgress = tcpServer.hasPendingRequest(serialNumber);
+
     // Start the sequential request (temperature first, then HR).
     // This is NON-BLOCKING — returns a requestId immediately.
     // The client polls GET /user/device/health-result?request_id=xxx for the final data.
     const { requestId } = tcpServer.requestHRAndTemperature(serialNumber);
 
     Logging.info(
-      `Health data request initiated for ${serialNumber}. ` +
+      `Health data request ${
+        alreadyInProgress ? "already in progress" : "initiated"
+      } for ${serialNumber}. ` +
         `Request ID: ${requestId}. Use GET /user/device/health-result?request_id=${requestId} to poll for results.`
     );
 
     return successMessage(
       res,
-      "Fetching heart rate and temperature data from device.",
+      alreadyInProgress
+        ? "Health data request already in progress. Polling existing request."
+        : "Fetching heart rate and temperature data from device.",
       {
         status: "processing",
         request_id: requestId,
         serial_number: serialNumber,
         device_id: device.id,
         device_name: device.device_name,
-        message:
-          "Temperature command sent first, heart rate command will be sent after temperature response. Poll /user/device/health-result with the request_id to get the final result.",
+        already_in_progress: alreadyInProgress,
+        message: alreadyInProgress
+          ? "A previous request for this device is still being processed. The same request_id is returned — poll /user/device/health-result with it until you receive completed status."
+          : "Temperature command sent first, heart rate command will be sent after temperature response. Poll /user/device/health-result with the request_id to get the final result.",
         timestamp: new Date().toISOString(),
       }
     );
