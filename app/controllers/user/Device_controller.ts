@@ -255,10 +255,10 @@ const updateDeviceSettings = async function (
         "Settings pushed to device via TCP. Device will acknowledge.";
     } else if (device.serial_number) {
       response.command_message =
-        "Device is not connected via TCP. Settings saved to database only. They will be applied when the device reconnects.";
+        "Device is offline. Please ensure the device is connected.";
     } else {
       response.command_message =
-        "Device has no serial_number. Settings saved to database only.";
+        "Device is offline. Please ensure the device is connected.";
     }
 
     return successMessage(
@@ -439,7 +439,7 @@ const getDeviceStatus = async (
     const serialNumber = deviceData.serial_number;
 
     let commandSent = false;
-    let commandMessage = "Device is offline or not connected";
+    let commandMessage = "Device is offline. Please ensure the device is connected.";
 
     if (serialNumber) {
       const tcpClient = tcpServer.getDevice(serialNumber);
@@ -455,10 +455,10 @@ const getDeviceStatus = async (
         }
       } else {
         commandMessage =
-          "Device is not connected via TCP. Returning last known data.";
+          "Device is offline. Please ensure the device is connected.";
       }
     } else {
-      commandMessage = "Device has no serial_number. Cannot send TS command.";
+      commandMessage = "Device is offline. Please ensure the device is connected.";
     }
 
     let sceneMode: number | null = null;
@@ -557,7 +557,7 @@ const restartDevice = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send restart command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -757,7 +757,7 @@ const sendDeviceCommand = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -876,7 +876,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send find device command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1077,7 +1077,7 @@ const captureSnapshot = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send snapshot command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1169,7 +1169,7 @@ const setAutoAnswer = async (
     if (!commandSent) {
       const msg = enabled
         ? "Failed to send ACALL command. Ensure you provide 1–3 valid phone numbers (5–20 ASCII digits, no '+')."
-        : "Failed to send ACALL command. Device may be disconnected.";
+        : "Device is offline. Please ensure the device is connected.";
       return customMessage(res, 422, msg);
     }
 
@@ -1532,7 +1532,7 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send SOSSMS command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1620,7 +1620,7 @@ const setFallDownAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send FALLDOWN command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1738,7 +1738,7 @@ const setTakeOffAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send REMOVE command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1848,7 +1848,7 @@ const setRemoveSmsAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send REMOVESMS command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1958,7 +1958,7 @@ const setCenterNumber = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send CENTER command. Device may be disconnected or invalid center number."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2055,7 +2055,7 @@ const setPhrasesDisplay = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send MESSAGE command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2171,7 +2171,7 @@ const setLowBatteryAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send LOWBAT command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2309,7 +2309,7 @@ const setFallDownSensitivity = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send LSSET command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2425,7 +2425,7 @@ const setLanguageTimezone = async (
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is offline. LZ command NOT sent — try again once the watch is connected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2438,7 +2438,7 @@ const setLanguageTimezone = async (
     if (!result.sent) {
       return errorMessage(
         res,
-        "Failed to send LZ command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2553,7 +2553,7 @@ const setSilenceTime = async (
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        `Device is offline. ${mode} command NOT sent — try again once the watch is connected.`
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2566,7 +2566,7 @@ const setSilenceTime = async (
     if (!result.sent) {
       return errorMessage(
         res,
-        `Failed to send ${mode} command. Device may be disconnected or slots/weekdays are invalid.`
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2866,7 +2866,7 @@ const requestBodyTemperature = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device has no serial_number. Cannot send bodytemp2 command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2875,7 +2875,7 @@ const requestBodyTemperature = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot request body temperature."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2943,7 +2943,7 @@ const requestHeartRate = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device has no serial_number. Cannot send hrtstart command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2956,7 +2956,7 @@ const requestHeartRate = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot request heart rate."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3033,7 +3033,7 @@ const requestHeartRateAndBodyTemperature = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device has no serial_number. Cannot send commands."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3042,7 +3042,7 @@ const requestHeartRateAndBodyTemperature = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot request heart rate or body temperature."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3199,7 +3199,7 @@ const setRejectStranger = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send DEVREFUSEPHONESWITCH command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3316,7 +3316,7 @@ const setNightPowerSaving = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send APPLOCK command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3407,7 +3407,7 @@ const setDialLock = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send APPLOCK (dial lock) command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3509,7 +3509,7 @@ const voiceMonitor = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send MONITOR command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3613,7 +3613,7 @@ const setUploadInterval = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send UPLOAD command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3772,7 +3772,7 @@ const setWalkTime = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send WALKTIME command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3918,7 +3918,7 @@ const setSleepTime = async function (
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send SLEEPTIME command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -4281,7 +4281,7 @@ const locateDevice = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send CR command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 

@@ -60,7 +60,7 @@ const updateSceneMode = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send scene mode command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 

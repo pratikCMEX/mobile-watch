@@ -327,7 +327,7 @@ const sendVoiceMessage = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send voice message. Device may be disconnected or AMR data is invalid."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -472,7 +472,7 @@ const sendReminder = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send TAKEPILLS command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1317,7 +1317,7 @@ const sendDeviceCommand = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1432,7 +1432,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send find device command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
