@@ -220,10 +220,16 @@ const getAnalytics = async (
       end = endOfDay(end);
       truncUnit = "day"; // one point per day
     } else {
-      // monthly = full calendar month containing the sent date
+      // monthly = full calendar month containing the sent date. When a date is
+      // provided, average-based metrics return one daily value per day.
       start = startOfMonth(targetDate);
       end = endOfMonth(targetDate);
-      truncUnit = "week"; // one point per week within that month
+      truncUnit =
+        range === "monthly" &&
+        date &&
+        AVERAGE_METRIC_TYPES.includes(dbMetricType)
+          ? "day"
+          : "week";
     }
 
     console.log(
