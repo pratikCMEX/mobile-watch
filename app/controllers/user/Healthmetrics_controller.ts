@@ -220,16 +220,22 @@ const getAnalytics = async (
       end = endOfDay(end);
       truncUnit = "day"; // one point per day
     } else {
-      // monthly = full calendar month containing the sent date. When a date is
-      // provided, average-based metrics return one daily value per day.
+      // monthly = full calendar month containing the sent date.
       start = startOfMonth(targetDate);
       end = endOfMonth(targetDate);
-      truncUnit =
-        range === "monthly" &&
-        date &&
-        AVERAGE_METRIC_TYPES.includes(dbMetricType)
-          ? "day"
-          : "week";
+
+      // Bucket per day for:
+      //  - average-based metrics when a specific date is provided
+      //  - cumulative step counts, so each chart point is that day's total
+      //    steps (same granularity as the daily range). Everything else
+      //    buckets per week.
+      const bucketPerDay =
+        (range === "monthly" &&
+          date &&
+          AVERAGE_METRIC_TYPES.includes(dbMetricType)) ||
+        dbMetricType === "steps_cumulative";
+
+      truncUnit = bucketPerDay ? "day" : "week";
     }
 
     console.log(
