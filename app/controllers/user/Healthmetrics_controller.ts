@@ -260,7 +260,7 @@ const getAnalytics = async (
         value_primary: { [Op.ne]: 0 },
       },
       attributes: ["value_primary", "value_secondary", "unit", "recorded_at"],
-      order: [["recorded_at", "DESC"]],
+      order: [["recorded_at", "ASC"]],
     });
 
     let summary = {
