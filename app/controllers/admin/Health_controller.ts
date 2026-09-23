@@ -16,7 +16,7 @@ async function getAllHealthMetrics(
 ) {
   try {
     const body = req.body || {};
-    const { page = 1, limit = 10, imei, id,search } = body;
+    const { page = 1, limit = 10, imei, id, search } = body;
     const offset = (Number(page) - 1) * Number(limit);
 
     // If ID is provided, search by ID
@@ -177,138 +177,138 @@ async function getAllHealthMetrics(
 }
 
 // Get health metrics graph data with time period filter or specific date
-async function getHealthMetricsGraph(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
-  try {
-    const body = req.body || {};
-    const { imei, period = "daily", date, metric_type } = body;
+// async function getHealthMetricsGraph(
+//   req: Request,
+//   res: Response,
+//   next: NextFunction
+// ) {
+//   try {
+//     const body = req.body || {};
+//     const { imei, period = "daily", date, metric_type } = body;
 
-    const where: any = {};
+//     const where: any = {};
 
-    // If metric_type is provided and not empty/null, filter by metric_type.
-    // If metric_type is null or empty string, return all metric types.
-    if (metric_type && metric_type !== "" && metric_type !== null) {
-      where.metric_type = metric_type;
-    }
+//     // If metric_type is provided and not empty/null, filter by metric_type.
+//     // If metric_type is null or empty string, return all metric types.
+//     if (metric_type && metric_type !== "" && metric_type !== null) {
+//       where.metric_type = metric_type;
+//     }
 
-    // Apply date filter if provided (specific date)
-    if (date && date !== "") {
-      const targetDate = new Date(date);
-      const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
-      const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
-      where.recorded_at = { [Op.between]: [startOfDay, endOfDay] };
-    } else if (period && period !== "") {
-      // Otherwise, apply time period filter if period is provided
-      const now = new Date();
-      if (period === "daily") {
-        where.recorded_at = { [Op.gte]: new Date(now.setHours(0, 0, 0, 0)) };
-      } else if (period === "weekly") {
-        const weekAgo = new Date(now.setDate(now.getDate() - 7));
-        where.recorded_at = { [Op.gte]: weekAgo };
-      } else if (period === "monthly") {
-        const monthAgo = new Date(now.setMonth(now.getMonth() - 1));
-        where.recorded_at = { [Op.gte]: monthAgo };
-      }
-    }
-    // If no date or period is provided, show all data (no time filter) by device
-    if (imei && imei !== "") {
-      const device = await db.Device.findOne({
-        where: { imei: imei as string },
-        attributes: ["id", "imei", "device_name"],
-      });
+//     // Apply date filter if provided (specific date)
+//     if (date && date !== "") {
+//       const targetDate = new Date(date);
+//       const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+//       const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+//       where.recorded_at = { [Op.between]: [startOfDay, endOfDay] };
+//     } else if (period && period !== "") {
+//       // Otherwise, apply time period filter if period is provided
+//       const now = new Date();
+//       if (period === "daily") {
+//         where.recorded_at = { [Op.gte]: new Date(now.setHours(0, 0, 0, 0)) };
+//       } else if (period === "weekly") {
+//         const weekAgo = new Date(now.setDate(now.getDate() - 7));
+//         where.recorded_at = { [Op.gte]: weekAgo };
+//       } else if (period === "monthly") {
+//         const monthAgo = new Date(now.setMonth(now.getMonth() - 1));
+//         where.recorded_at = { [Op.gte]: monthAgo };
+//       }
+//     }
+//     // If no date or period is provided, show all data (no time filter) by device
+//     if (imei && imei !== "") {
+//       const device = await db.Device.findOne({
+//         where: { imei: imei as string },
+//         attributes: ["id", "imei", "device_name"],
+//       });
 
-      if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this IMEI");
-      }
+//       if (!device || !(await canAccessDevice(req, device.id))) {
+//         return errorMessage(res, "Device not found with this IMEI");
+//       }
 
-      where.device_id = device.id;
+//       where.device_id = device.id;
 
-      const metrics = await db.HealthMetric.findAll({
-        where,
-        include: [
-          {
-            model: db.Device,
-            as: "DeviceHealthMetric",
-            attributes: ["id", "imei", "device_name"],
-          },
-        ],
-        order: [["recorded_at", "ASC"]],
-      });
+//       const metrics = await db.HealthMetric.findAll({
+//         where,
+//         include: [
+//           {
+//             model: db.Device,
+//             as: "DeviceHealthMetric",
+//             attributes: ["id", "imei", "device_name"],
+//           },
+//         ],
+//         order: [["recorded_at", "ASC"]],
+//       });
 
-      const graphData = metrics.map((m: any) => ({
-        id: m.id,
-        device_id: m.device_id,
-        metric_type: m.metric_type,
-        value_primary: m.value_primary,
-        value_secondary: m.value_secondary,
-        unit: m.unit,
-        recorded_at: m.recorded_at,
-        createdAt: m.createdAt,
-        updatedAt: m.updatedAt,
-      }));
+//       const graphData = metrics.map((m: any) => ({
+//         id: m.id,
+//         device_id: m.device_id,
+//         metric_type: m.metric_type,
+//         value_primary: m.value_primary,
+//         value_secondary: m.value_secondary,
+//         unit: m.unit,
+//         recorded_at: m.recorded_at,
+//         createdAt: m.createdAt,
+//         updatedAt: m.updatedAt,
+//       }));
 
-      return successMessage(
-        res,
-        "Health metrics graph data retrieved successfully",
-        {
-          device: {
-            id: device.id,
-            imei: device.imei,
-            device_name: device.device_name,
-          },
-          graph_data: graphData,
-          period,
-        }
-      );
-    }
+//       return successMessage(
+//         res,
+//         "Health metrics graph data retrieved successfully",
+//         {
+//           device: {
+//             id: device.id,
+//             imei: device.imei,
+//             device_name: device.device_name,
+//           },
+//           graph_data: graphData,
+//           period,
+//         }
+//       );
+//     }
 
-    // Otherwise, get all devices' graph data for the period
-    const scope = await deviceIdScope(req);
-    if (scope) where.device_id = scope;
+//     // Otherwise, get all devices' graph data for the period
+//     const scope = await deviceIdScope(req);
+//     if (scope) where.device_id = scope;
 
-    const metrics = await db.HealthMetric.findAll({
-      where,
-      include: [
-        {
-          model: db.Device,
-          as: "DeviceHealthMetric",
-          attributes: ["id", "imei", "device_name"],
-          required: false,
-        },
-      ],
-      order: [["recorded_at", "ASC"]],
-    });
+//     const metrics = await db.HealthMetric.findAll({
+//       where,
+//       include: [
+//         {
+//           model: db.Device,
+//           as: "DeviceHealthMetric",
+//           attributes: ["id", "imei", "device_name"],
+//           required: false,
+//         },
+//       ],
+//       order: [["recorded_at", "ASC"]],
+//     });
 
-    const graphData = metrics.map((m: any) => ({
-      id: m.id,
-      device_id: m.device_id,
-      imei: m.DeviceHealthMetric?.imei,
-      device_name: m.DeviceHealthMetric?.device_name,
-      metric_type: m.metric_type,
-      value_primary: m.value_primary,
-      value_secondary: m.value_secondary,
-      unit: m.unit,
-      recorded_at: m.recorded_at,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-    }));
+//     const graphData = metrics.map((m: any) => ({
+//       id: m.id,
+//       device_id: m.device_id,
+//       imei: m.DeviceHealthMetric?.imei,
+//       device_name: m.DeviceHealthMetric?.device_name,
+//       metric_type: m.metric_type,
+//       value_primary: m.value_primary,
+//       value_secondary: m.value_secondary,
+//       unit: m.unit,
+//       recorded_at: m.recorded_at,
+//       createdAt: m.createdAt,
+//       updatedAt: m.updatedAt,
+//     }));
 
-    return successMessage(
-      res,
-      "Health metrics graph data retrieved successfully",
-      {
-        graph_data: graphData,
-        period,
-      }
-    );
-  } catch (err) {
-    console.error("getHealthMetricsGraph error:", err);
-    return errorMessage(res, "Error retrieving health metrics graph data");
-  }
-}
+//     return successMessage(
+//       res,
+//       "Health metrics graph data retrieved successfully",
+//       {
+//         graph_data: graphData,
+//         period,
+//       }
+//     );
+//   } catch (err) {
+//     console.error("getHealthMetricsGraph error:", err);
+//     return errorMessage(res, "Error retrieving health metrics graph data");
+//   }
+// }
 
 // Delete health metric by ID
 async function deleteHealthMetric(

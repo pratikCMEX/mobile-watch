@@ -13,6 +13,7 @@ import AppUpdate_controller from "../controllers/admin/AppUpdate_controller";
 import Notification_controller from "../controllers/admin/Notification_controller";
 import Staff_controller from "../controllers/admin/Staff_controller";
 import Contact_controller from "../controllers/admin/Contact_controller";
+import Healthmetrics_controller from "../controllers/user/Healthmetrics_controller";
 const router = express.Router();
 
 // Dashboard stats
@@ -112,8 +113,8 @@ router.post(
 router.post(
   "/get_health_graph",
   checkAdmin,
-  ValidateJoi(Schemas.getHealthMetricsGraph),
-  Health_controller.getHealthMetricsGraph
+  ValidateJoi(Schemas.healthMetric.analytics),
+  Healthmetrics_controller.getAnalytics
 );
 router.post(
   "/delete_health_metric",
