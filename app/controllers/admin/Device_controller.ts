@@ -1636,6 +1636,77 @@ const addMember = async function (
   }
 };
 
+// const addMembers = async function (
+//   req: Request,
+//   res: Response,
+//   next: NextFunction
+// ) {
+//   try {
+//     const {
+//       device_name,
+//       device_id,
+//       user_ids,
+//       role = "member",
+//     }: {
+//       device_id: string;
+//       user_ids: string[];
+//       role?: string;
+//       device_name?: string;
+//     } = req.body;
+
+//     if (!device_id || !Array.isArray(user_ids) || !user_ids.length) {
+//       return errorMessage(res, "device_id and user_ids array are required");
+//     }
+
+//     const device = await db.Device.findByPk(device_id);
+//     if (!device || !(await canAccessDevice(req, device.id))) {
+//       return errorMessage(res, "Device not found");
+//     }
+//     if (device_name !== undefined) {
+//       device.device_name = device_name;
+//       await device.save();
+//     }
+
+//     // ── Full replace semantics ──────────────────────────────────
+//     // The caller wants to set the watch's member list to EXACTLY the
+//     // supplied user_ids. So we wipe EVERY existing member row first
+//     // (owner, admin, member — all of them) and then re-add only the
+//     // supplied users. This guarantees the member list never
+//     // accumulates stale entries across repeated calls.
+//     const ownerId = device.owner_id;
+//     const removed = await db.DeviceMember.destroy({
+//       where: { device_id: device.id },
+//     });
+
+//     const added: any[] = [];
+//     const skipped: { user_id: string; reason: string }[] = [];
+
+//     for (const user_id of user_ids) {
+//       const user = await db.User.findByPk(user_id);
+//       if (!user) {
+//         skipped.push({ user_id, reason: "user not found" });
+//         continue;
+//       }
+//       // The owner is always an admin — never demote them.
+//       const isOwner = ownerId && ownerId === user_id;
+//       const finalRole = isOwner ? "admin" : role;
+//       await ensureDeviceMember(device.id, user_id, finalRole as any);
+//       added.push({ user_id, role: finalRole });
+//     }
+
+//     return successMessage(res, "Members added successfully", {
+//       removed_count: removed,
+//       added,
+//       skipped,
+//       total_added: added.length,
+//       total_skipped: skipped.length,
+//     });
+//   } catch (err) {
+//     console.error("addMembers error:", err);
+//     return errorMessage(res, "Error adding members");
+//   }
+// };
+
 const addMembers = async function (
   req: Request,
   res: Response,
@@ -1674,6 +1745,15 @@ const addMembers = async function (
     // supplied users. This guarantees the member list never
     // accumulates stale entries across repeated calls.
     const ownerId = device.owner_id;
+
+    // Capture who was a member BEFORE the wipe, so we know who was
+    // actually removed (existed before, not present in new user_ids).
+    const existingMembers = await db.DeviceMember.findAll({
+      where: { device_id: device.id },
+      attributes: ["user_id"],
+    });
+    const existingUserIds = existingMembers.map((m: any) => m.user_id);
+
     const removed = await db.DeviceMember.destroy({
       where: { device_id: device.id },
     });
@@ -1694,6 +1774,19 @@ const addMembers = async function (
       added.push({ user_id, role: finalRole });
     }
 
+    // Users who were members before but are not in the new list were
+    // actually removed from this device — invalidate their session
+    // token so their existing auth token stops working.
+    const removedUserIds = existingUserIds.filter(
+      (id: string) => !user_ids.includes(id)
+    );
+    if (removedUserIds.length) {
+      await db.User.update(
+        { session_token: null },
+        { where: { id: { [Op.in]: removedUserIds } } }
+      );
+    }
+
     return successMessage(res, "Members added successfully", {
       removed_count: removed,
       added,
@@ -1706,7 +1799,6 @@ const addMembers = async function (
     return errorMessage(res, "Error adding members");
   }
 };
-
 const listMembers = async function (
   req: Request,
   res: Response,
