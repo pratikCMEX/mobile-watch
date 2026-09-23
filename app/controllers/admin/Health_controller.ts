@@ -387,7 +387,7 @@ async function deleteMultipleHealthMetrics(
 
 export default {
   getAllHealthMetrics,
-  getHealthMetricsGraph,
+  // getHealthMetricsGraph,
   deleteHealthMetric,
   deleteMultipleHealthMetrics,
 };
