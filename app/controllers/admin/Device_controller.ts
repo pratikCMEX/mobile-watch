@@ -1787,7 +1787,7 @@ const addMembers = async function (
       );
     }
 
-    return successMessage(res, "Members added successfully", {
+    return successMessage(res, "Members updated successfully", {
       removed_count: removed,
       added,
       skipped,
