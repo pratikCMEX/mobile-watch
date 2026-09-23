@@ -112,7 +112,7 @@ router.post(
 );
 router.post(
   "/get_health_graph",
-  checkAdmin,
+  // checkAdmin,
   ValidateJoi(Schemas.getHealthMetricsGraph),
   Health_controller.getHealthMetricsGraph
 );
