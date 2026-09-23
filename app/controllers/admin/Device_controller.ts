@@ -1782,7 +1782,7 @@ const addMembers = async function (
     );
     if (removedUserIds.length) {
       await db.User.update(
-        { session_token: null },
+        { session_token: "" },
         { where: { id: { [Op.in]: removedUserIds } } }
       );
     }
