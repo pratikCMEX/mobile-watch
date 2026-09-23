@@ -164,7 +164,8 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     if (!user || !(await canAccessUser(req, user.id))) {
       return errorMessage(res, "User not found");
     }
-    await db.User.destroy({ where: { id } });
+    await db.User.destroy({ where: { id }, force: true });
+
     return successMessage(res, "User deleted successfully");
   } catch (err) {
     console.error("deleteUser error:", err);

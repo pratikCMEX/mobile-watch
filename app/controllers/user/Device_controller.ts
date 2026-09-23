@@ -439,7 +439,8 @@ const getDeviceStatus = async (
     const serialNumber = deviceData.serial_number;
 
     let commandSent = false;
-    let commandMessage = "Device is offline. Please ensure the device is connected.";
+    let commandMessage =
+      "Device is offline. Please ensure the device is connected.";
 
     if (serialNumber) {
       const tcpClient = tcpServer.getDevice(serialNumber);
@@ -458,7 +459,8 @@ const getDeviceStatus = async (
           "Device is offline. Please ensure the device is connected.";
       }
     } else {
-      commandMessage = "Device is offline. Please ensure the device is connected.";
+      commandMessage =
+        "Device is offline. Please ensure the device is connected.";
     }
 
     let sceneMode: number | null = null;
@@ -4443,8 +4445,10 @@ const getDeviceLocation = async function (
 //          + any provided fields), do NOT insert a duplicate.
 //        - if its imei is set   → return the existing row as-is.
 //   2. No row with this serial_number:
-//        - if imei supplied and already registered to another user → 409
+//        - if imei supplied and already registered to another user → add as member
 //        - otherwise INSERT a new device row.
+//   3. The authenticated user (from token) is added
+//      as a device_member (admin or member) of the resolved device.
 const registerDeviceByImei = async function (
   req: Request,
   res: Response,
@@ -4475,7 +4479,7 @@ const registerDeviceByImei = async function (
       gender,
       age,
       weight_kg,
-    } = req.body;
+    }: any = req.body;
 
     // ── Derive serial number from the IMEI ─────────────────────
     // IMEI layout used by this device family:
@@ -4541,11 +4545,12 @@ const registerDeviceByImei = async function (
           existingBySerial
         );
       }
-      // Serial is owned by a different user — do not hijack it.
-      return customMessage(
+      // Serial is owned by a different user — add current user as a member.
+      await ensureDeviceMember(existingBySerial.id, userId, "member");
+      return successMessage(
         res,
-        409,
-        "This serial number is already registered to another account"
+        "Device registered successfully",
+        existingBySerial
       );
     }
 
@@ -4595,11 +4600,12 @@ const registerDeviceByImei = async function (
             existingByImei
           );
         }
-        // IMEI is owned by a different user — refuse to hijack it.
-        return customMessage(
+        // IMEI is owned by a different user — add current user as a member.
+        await ensureDeviceMember(existingByImei.id, userId, "member");
+        return successMessage(
           res,
-          409,
-          "This IMEI is already registered to another account"
+          "Device registered successfully",
+          existingByImei
         );
       }
     }
@@ -4701,6 +4707,7 @@ const registerDeviceByImei = async function (
           device.owner_id = userId;
           await device.save();
         }
+        await ensureDeviceMember(device.id, userId, "admin");
         return successMessage(
           res,
           hadNoOwner
