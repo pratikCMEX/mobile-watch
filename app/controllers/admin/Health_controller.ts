@@ -1,12 +1,16 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
-import { Op } from "sequelize";
+import { Op, QueryTypes } from "sequelize";
 import {
   canAccessAllDevices,
   canAccessDevice,
   deviceIdScope,
 } from "../../helper/WatchAccess";
+
+// Metric types whose latest stored value is a cumulative counter that
+// must be read directly (the "last record") rather than differenced.
+const LATEST_METRIC_TYPES = ["steps_cumulative", "sleep"];
 
 // Get all health metrics (admin view) - also supports search by IMEI and ID
 async function getAllHealthMetrics(
@@ -130,7 +134,8 @@ async function getAllHealthMetrics(
         };
 
         // Check if search looks like a UUID (device_id) - exact match
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const uuidRegex =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         if (uuidRegex.test(search)) {
           deviceWhere[Op.or].push({ id: search });
         }
@@ -407,9 +412,112 @@ async function deleteMultipleHealthMetrics(
   }
 }
 
+/**
+ * POST /admin/get_latest_health_metrics
+ *
+ * Return the single most recent HealthMetric row per device for the
+ * cumulative metrics (steps_cumulative / sleep). Reading the "last
+ * record" directly is what gives the true current value — differencing
+ * it against the previous day would only produce a daily delta.
+ *
+ * Staff are restricted to the watches assigned to them (and those
+ * watches' owners); admins/staff with all_watches see everything.
+ */
+async function getLatestHealthMetrics(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const body = req.body || {};
+    const { metric_type } = body;
+
+    const types: string[] = Array.isArray(metric_type)
+      ? metric_type
+      : metric_type
+      ? [metric_type]
+      : LATEST_METRIC_TYPES;
+
+    const deviceScope = await deviceIdScope(req);
+
+    const where: any = {
+      metric_type: { [Op.in]: types },
+    };
+    if (deviceScope) {
+      where.device_id = deviceScope;
+    }
+
+    // One row per device = the latest recorded_at for that device.
+    const latest: any[] = await db.sequelize.query(
+      `
+      SELECT l.*
+      FROM "HealthMetrics" l
+      INNER JOIN (
+        SELECT device_id, MAX(recorded_at) AS max_recorded
+        FROM "HealthMetrics"
+        WHERE metric_type IN (:types)
+          ${deviceScope ? "AND device_id IN (:deviceScope)" : ""}
+        GROUP BY device_id
+      ) m
+        ON l.device_id = m.device_id AND l.recorded_at = m.max_recorded
+      ORDER BY l.device_id ASC
+      `,
+      {
+        replacements: { types, deviceScope },
+        type: QueryTypes.SELECT,
+      }
+    );
+
+    const deviceIds = latest.map((r: any) => r.device_id).filter(Boolean);
+    const devices = deviceIds.length
+      ? await db.Device.findAll({
+          where: { id: { [Op.in]: deviceIds } },
+          attributes: [
+            "id",
+            "imei",
+            "device_name",
+            "connection_status",
+            "is_online",
+            "battery_percentage",
+          ],
+        })
+      : [];
+    const deviceMap = new Map<string, any>(devices.map((d: any) => [d.id, d]));
+
+    const rows = latest.map((r: any) => {
+      const device: any = deviceMap.get(r.device_id) ?? null;
+      return {
+        id: r.id,
+        device_id: r.device_id,
+        imei: device?.imei ?? null,
+        device_name: device?.device_name ?? null,
+        connection_status: device?.connection_status ?? null,
+        is_online: device?.is_online ?? null,
+        battery_percentage: device?.battery_percentage ?? null,
+        metric_type: r.metric_type,
+        value_primary: r.value_primary,
+        value_secondary: r.value_secondary,
+        unit: r.unit,
+        recorded_at: r.recorded_at,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      };
+    });
+
+    return successMessage(res, "Latest health metrics fetched successfully", {
+      total: rows.length,
+      metrics: rows,
+    });
+  } catch (err) {
+    console.error("getLatestHealthMetrics error:", err);
+    return errorMessage(res, "Error fetching latest health metrics");
+  }
+}
+
 export default {
   getAllHealthMetrics,
   getHealthMetricsGraph,
+  getLatestHealthMetrics,
   deleteHealthMetric,
   deleteMultipleHealthMetrics,
 };
