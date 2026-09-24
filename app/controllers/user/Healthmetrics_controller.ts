@@ -446,19 +446,6 @@ const getAnalytics = async (
       //   total          = running cumulative total for that day
       // (the latest stored value equals the sum of all deltas.)
 
-      // Baseline: last cumulative reading before this window started.
-      const sleepBaseline = await db.HealthMetric.findOne({
-        where: {
-          device_id,
-          metric_type: "sleep",
-          unit: "tumbling",
-          recorded_at: { [Op.lt]: start },
-          value_primary: { [Op.ne]: 0 },
-        },
-        order: [["recorded_at", "DESC"]],
-        attributes: ["value_primary", "recorded_at"],
-      });
-
       // Last cumulative reading per calendar date inside the window.
       const sleepBuckets: any[] = await db.sequelize.query(
         `
@@ -505,9 +492,9 @@ const getAnalytics = async (
         }))
         .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
-      let prevTotal: number | null = sleepBaseline
-        ? Number(sleepBaseline.value_primary)
-        : null;
+      // Baseline is 0: the first day shows its raw cumulative value as-is,
+      // and every subsequent day is the delta against the previous day.
+      let prevTotal: number | null = null;
 
       chart = days.map((d) => {
         const cumulative = d.cumulative;
