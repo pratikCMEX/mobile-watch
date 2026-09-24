@@ -439,8 +439,8 @@ const getAnalytics = async (
       // ── Sleep / tumbling (cumulative counter) ──────────────────
       // The stored value_primary is a cumulative counter (one row per
       // calendar date, upserted in place — see tcpServer.saveStepCount).
-      // Return one bucket per calendar date across the range; missing
-      // days are 0-filled. Each bucket reports:
+      // Return one bucket per calendar date that actually has a stored
+      // reading (no 0-fill for missing days). Each bucket reports:
       //   tumbling_count = daily delta (today - yesterday; first day
       //     shows its value as-is, baseline 0)
       //   total          = running cumulative total for that day
@@ -492,16 +492,10 @@ const getAnalytics = async (
         byDate.set(fmtDateUTC(r.bucket), Number(r.value_primary));
       }
 
-      // Walk every calendar date in the range so missing days are 0-filled.
-      const days: { date: string; cumulative: number }[] = [];
-      const cursor = new Date(start);
-      while (cursor <= end) {
-        days.push({
-          date: fmtDateUTC(cursor),
-          cumulative: byDate.get(fmtDateUTC(cursor)) ?? 0,
-        });
-        cursor.setUTCDate(cursor.getUTCDate() + 1);
-      }
+      // Only return dates that actually have a stored reading (no 0-fill).
+      const days = Array.from(byDate.entries())
+        .map(([date, cumulative]) => ({ date, cumulative }))
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
       let prevTotal: number | null = sleepBaseline
         ? Number(sleepBaseline.value_primary)
