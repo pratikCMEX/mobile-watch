@@ -39,8 +39,15 @@ async function getDashboardStats(
 
     // Get total device count
     const totalDevices = await db.Device.count({ where: deviceWhere });
+
+    // Scope notifications by the same device list, but Notifications use
+    // `device_id` (not `id`), so build the scope separately.
+    const notificationDeviceScope = deviceScope
+      ? { device_id: deviceScope }
+      : {};
     const totalSosAlerts = await db.Notification.count({
       where: {
+        ...notificationDeviceScope,
         type: "sos",
       },
     });

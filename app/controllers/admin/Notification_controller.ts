@@ -5,7 +5,11 @@ import { Op } from "sequelize";
 import { canAccessDevice, deviceIdScope } from "../../helper/WatchAccess";
 
 // Get all notifications (admin view) - supports search by device_id, imei, type, is_read, and general search with pagination
-async function getAllNotifications(req: Request, res: Response, next: NextFunction) {
+async function getAllNotifications(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const body = req.body || {};
     const { device_id, imei, page = 1, limit = 20, search } = body;
@@ -47,11 +51,19 @@ async function getAllNotifications(req: Request, res: Response, next: NextFuncti
 
     // General search parameter - searches device_id, imei (through device), type, and is_read
     if (search && search !== "") {
+      // is_read is stored as the ENUM strings "0"/"1" — never compare it
+      // to a boolean (Postgres rejects `enum = boolean`).
+      const isReadCondition =
+        search === "true"
+          ? { is_read: "1" }
+          : search === "false"
+          ? { is_read: "0" }
+          : undefined;
       where[Op.or] = [
         { device_id: { [Op.like]: `%${search}%` } },
         { "$DeviceNotification.imei$": { [Op.like]: `%${search}%` } },
         { type: { [Op.like]: `%${search}%` } },
-        { is_read: search === "true" ? true : search === "false" ? false : undefined },
+        isReadCondition,
       ].filter((condition) => condition !== undefined);
     }
 
