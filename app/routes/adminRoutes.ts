@@ -84,6 +84,13 @@ router.post(
   ValidateJoi(Schemas.listDevices),
   Device_controller.listDevices
 );
+
+router.post(
+  "/get_all_devices",
+  checkAdmin,
+  Device_controller.getAllDevices
+);
+
 router.post(
   "/get_all_snapshots",
   checkAdmin,
