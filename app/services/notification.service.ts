@@ -1,7 +1,6 @@
 import db from "../models";
 import Logging from "../library/Logging";
 import { messaging } from "../config/firebase";
-import { v4 as uuidv4 } from "uuid";
 import { Op } from "sequelize";
 import { sendAdminNotification } from "../helper/WebNotification";
 
@@ -132,13 +131,14 @@ export const createNotification = async (
 ): Promise<any> => {
   const { device_id, user_id, user_ids, type, title, body, metadata } = payload;
 
-  // Every call to createNotification represents exactly one alert event,
-  // which may be fanned out to several DeviceMembers. Tag the event with a
-  // unique id so every row produced for that event can be correlated back
-  // to it — this lets the dashboard collapse the fan-out rows into a
-  // single alert without relying on fragile createdAt windows.
-  const event_id = uuidv4();
-  const enrichedMetadata = { ...(metadata ?? {}), event_id };
+  // An alert event may be fanned out to every DeviceMember of a watch,
+  // producing one Notification row per recipient. Only the first row is
+  // surfaced on the admin dashboard alert list (is_admin_show = "1");
+  // the rest are kept so each member still gets their own FCM push and
+  // read-state, but the admin panel shows the alert exactly once.
+  // `firstAdminShow` is consumed by the fan-out loop below and reset to
+  // false after the first row is written.
+  let firstAdminShow = true;
 
   // Resolve recipients from DeviceMembers for device-scoped notifications.
   // An explicit user_ids list is accepted for callers that have already
@@ -169,15 +169,17 @@ export const createNotification = async (
 
   if (recipients.length === 0) {
     // No recipient known — still persist the record so it is visible to
-    // admins, but skip the FCM push.
+    // admins, but skip the FCM push. This is the only row for the
+    // event, so it is the one surfaced on the admin dashboard.
     const notification = await db.Notification.create({
       device_id,
       user_id: null,
       type,
       title,
       body,
-      metadata: enrichedMetadata,
+      metadata: metadata ?? null,
       is_read: "0",
+      is_admin_show: "1",
     });
     Logging.info(
       `Notification created (no recipient): id=${notification.id} device=${device_id} type=${type}`
@@ -197,14 +199,22 @@ export const createNotification = async (
 
   let lastNotification: any = null;
   for (const recipientId of recipients) {
+    // The first row of the fan-out is the one surfaced on the admin
+    // dashboard (is_admin_show = "1"); every subsequent row is hidden
+    // from the admin list (is_admin_show = "0") but still delivered to
+    // its recipient via FCM below.
+    const is_admin_show = firstAdminShow ? "1" : "0";
+    firstAdminShow = false;
+
     const notification = await db.Notification.create({
       device_id,
       user_id: recipientId,
       type,
       title,
       body,
-      metadata: enrichedMetadata,
+      metadata: metadata ?? null,
       is_read: "0",
+      is_admin_show,
     });
 
     lastNotification = notification;

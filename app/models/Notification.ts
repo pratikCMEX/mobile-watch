@@ -10,6 +10,7 @@ export interface NotificationAttributes {
   body: string | null;
   metadata: any | null;
   is_read: string;
+  is_admin_show: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,6 +30,7 @@ class Notification
   public body!: string | null;
   public metadata!: any | null;
   public is_read!: string;
+  public is_admin_show!: string;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
 
@@ -97,6 +99,16 @@ export default (sequelize: Sequelize, DataTypes: any) => {
       },
       is_read: {
         type: DataTypes.ENUM("1", "0"),
+        allowNull: false,
+        defaultValue: "0",
+      },
+      // When an alert event is fanned out to every DeviceMember of a
+      // watch, one Notification row is created per recipient. Only the
+      // first row is surfaced on the admin dashboard alert list; the
+      // rest are kept so each member still gets their own FCM push and
+      // read-state, but the admin panel shows the alert exactly once.
+      is_admin_show: {
+        type: DataTypes.ENUM("0", "1"),
         allowNull: false,
         defaultValue: "0",
       },

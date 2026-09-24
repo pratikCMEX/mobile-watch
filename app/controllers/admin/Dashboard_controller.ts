@@ -149,6 +149,11 @@ async function getDashboardAlerts(
 
     const where: any = {
       type: { [Op.in]: requestedTypes },
+      // An alert event is fanned out to every DeviceMember of the watch,
+      // producing one Notification row per recipient. Only the first row
+      // is flagged is_admin_show = "1" (by createNotification), so the
+      // admin dashboard shows each alert exactly once.
+      is_admin_show: "1",
     };
     if (deviceScope) {
       where.device_id = deviceScope;
@@ -173,45 +178,15 @@ async function getDashboardAlerts(
       order: [["createdAt", "DESC"]],
     });
 
-    // A single alert event is fanned out to every DeviceMember of the
-    // watch, so the same SOS/fall/low-battery event is stored as one
-    // Notification row per recipient. Every row for one event carries
-    // the same event_id (set by createNotification in
-    // notification.service.ts), so collapse on that exact key to show
-    // each alert exactly once — the most recent row is kept (it carries
-    // the latest read state). Genuinely distinct events have different
-    // event_ids and are always preserved.
-    const deduped: any[] = [];
-    const seen = new Set<string>();
-    for (const a of alerts) {
-      const plain = typeof a.get === "function" ? a.get({ plain: true }) : a;
-      const eventId =
-        plain.metadata && plain.metadata.event_id
-          ? plain.metadata.event_id
-          : null;
-
-      // Fallback for rows created before event_id tagging: group by
-      // payload + createdAt second so legacy duplicates still collapse.
-      const key = eventId
-        ? eventId
-        : [
-            plain.device_id,
-            plain.type,
-            plain.title,
-            plain.body,
-            JSON.stringify(plain.metadata ?? null),
-            Math.floor(new Date(plain.createdAt).getTime() / 1000),
-          ].join("::");
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        deduped.push(plain);
-      }
-    }
+    // Plain objects only — Sequelize instances carry the Device/User
+    // associations (parent/include refs) which break JSON.stringify.
+    const plainAlerts = alerts.map((a: any) =>
+      typeof a.get === "function" ? a.get({ plain: true }) : a
+    );
 
     return successMessage(res, "Dashboard alerts fetched successfully", {
-      total: deduped.length,
-      alerts: deduped,
+      total: plainAlerts.length,
+      alerts: plainAlerts,
     });
   } catch (err) {
     console.error("getDashboardAlerts error:", err);
