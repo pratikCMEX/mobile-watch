@@ -113,10 +113,15 @@ async function getAllHealthMetrics(
         return errorMessage(res, "Health metric not found");
       }
 
+      // Plain object — Sequelize instances carry the DeviceHealthMetric
+      // association (parent/include refs) which break JSON.stringify.
+      const plainMetric =
+        typeof metric.get === "function" ? metric.get({ plain: true }) : metric;
+
       return successMessage(
         res,
         "Health metric retrieved successfully",
-        metric
+        plainMetric
       );
     }
 
@@ -154,13 +159,19 @@ async function getAllHealthMetrics(
         order: [["recorded_at", "DESC"]],
       });
 
+      // Plain objects — Sequelize instances carry the DeviceHealthMetric
+      // association (parent/include refs) which break JSON.stringify.
+      const plainMetrics = metrics.map((r: any) =>
+        typeof r.get === "function" ? r.get({ plain: true }) : r
+      );
+
       return successMessage(res, "Health metrics retrieved successfully", {
         device: {
           id: device.id,
           imei: device.imei,
           device_name: device.device_name,
         },
-        metrics,
+        metrics: plainMetrics,
       });
     }
 
@@ -182,6 +193,15 @@ async function getAllHealthMetrics(
       }
 
       listWhere.device_id = device.id;
+    }
+
+    // Filter by metric_type (single value or array). The stored enum
+    // values are e.g. "heart_rate", "sleep", "steps_cumulative".
+    if (metric_type) {
+      const types: string[] = Array.isArray(metric_type)
+        ? metric_type
+        : [metric_type];
+      listWhere.metric_type = { [Op.in]: types };
     }
 
     if (body.search && body.search !== "") {
@@ -255,7 +275,6 @@ async function getAllHealthMetrics(
     // getAnalytics uses so each listed row shows the computed value
     // (today - yesterday) and a running total, instead of the raw
     // cumulative counter.
-    let metrics = rows;
     const requestedTypes: string[] = Array.isArray(metric_type)
       ? metric_type
       : metric_type
@@ -265,8 +284,16 @@ async function getAllHealthMetrics(
       requestedTypes.length === 0 ||
       requestedTypes.some((t) => CUMULATIVE_METRIC_TYPES.includes(t));
 
+    let metrics: any[];
     if (isCumulative && rows.length) {
       metrics = await applyCumulativeDeltas(rows);
+    } else {
+      // Plain objects only — Sequelize instances carry the
+      // DeviceHealthMetric association (parent/include refs) which
+      // would throw "Converting circular structure to JSON".
+      metrics = rows.map((r: any) =>
+        typeof r.get === "function" ? r.get({ plain: true }) : r
+      );
     }
 
     return successMessage(res, "Health metrics retrieved successfully", {
