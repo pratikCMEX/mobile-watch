@@ -98,55 +98,25 @@ async function getAllHealthMetrics(
       });
     }
 
-    // If device_id is provided, search by device
+    // Otherwise, return all health metrics with pagination
+    // If search parameter is provided, search by imei, device_id, and metric_type
+    const listWhere: any = {};
+    const scope = await deviceIdScope(req);
+    if (scope) listWhere.device_id = scope;
+
+    // If device_id is provided, add to filter with access control
     if (device_id && device_id !== "") {
       const device = await db.Device.findOne({
         where: { id: device_id as string },
-        attributes: ["id", "imei", "device_name"],
+        attributes: ["id"],
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
         return errorMessage(res, "Device not found with this device_id");
       }
 
-      const metrics = await db.HealthMetric.findAll({
-        where: { device_id: device.id },
-        attributes: [
-          "id",
-          "device_id",
-          "metric_type",
-          "value_primary",
-          "value_secondary",
-          "unit",
-          "recorded_at",
-          "createdAt",
-          "updatedAt",
-        ],
-        include: [
-          {
-            model: db.Device,
-            as: "DeviceHealthMetric",
-            attributes: ["id", "imei", "device_name"],
-          },
-        ],
-        order: [["recorded_at", "DESC"]],
-      });
-
-      return successMessage(res, "Health metrics retrieved successfully", {
-        device: {
-          id: device.id,
-          imei: device.imei,
-          device_name: device.device_name,
-        },
-        metrics,
-      });
+      listWhere.device_id = device.id;
     }
-
-    // Otherwise, return all health metrics with pagination
-    // If search parameter is provided, search by imei, device_id, and metric_type
-    const listWhere: any = {};
-    const scope = await deviceIdScope(req);
-    if (scope) listWhere.device_id = scope;
 
     if (body.search && body.search !== "") {
       const search = body.search;
