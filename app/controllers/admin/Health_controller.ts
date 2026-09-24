@@ -16,7 +16,7 @@ async function getAllHealthMetrics(
 ) {
   try {
     const body = req.body || {};
-    const { page = 1, limit = 10, imei, id, search } = body;
+    const { page = 1, limit = 10, imei, id, device_id, search } = body;
     const offset = (Number(page) - 1) * Number(limit);
 
     // If ID is provided, search by ID
@@ -98,6 +98,50 @@ async function getAllHealthMetrics(
       });
     }
 
+    // If device_id is provided, search by device
+    if (device_id && device_id !== "") {
+      const device = await db.Device.findOne({
+        where: { id: device_id as string },
+        attributes: ["id", "imei", "device_name"],
+      });
+
+      if (!device || !(await canAccessDevice(req, device.id))) {
+        return errorMessage(res, "Device not found with this device_id");
+      }
+
+      const metrics = await db.HealthMetric.findAll({
+        where: { device_id: device.id },
+        attributes: [
+          "id",
+          "device_id",
+          "metric_type",
+          "value_primary",
+          "value_secondary",
+          "unit",
+          "recorded_at",
+          "createdAt",
+          "updatedAt",
+        ],
+        include: [
+          {
+            model: db.Device,
+            as: "DeviceHealthMetric",
+            attributes: ["id", "imei", "device_name"],
+          },
+        ],
+        order: [["recorded_at", "DESC"]],
+      });
+
+      return successMessage(res, "Health metrics retrieved successfully", {
+        device: {
+          id: device.id,
+          imei: device.imei,
+          device_name: device.device_name,
+        },
+        metrics,
+      });
+    }
+
     // Otherwise, return all health metrics with pagination
     // If search parameter is provided, search by imei, device_id, and metric_type
     const listWhere: any = {};
@@ -106,16 +150,23 @@ async function getAllHealthMetrics(
 
     if (body.search && body.search !== "") {
       const search = body.search;
-      // Check if search matches an IMEI or device_name first
+      // Check if search matches an IMEI, device_name, or device_id first
       try {
+        const deviceWhere: any = {
+          [Op.or]: [
+            { imei: { [Op.like]: `%${search}%` } },
+            { device_name: { [Op.like]: `%${search}%` } },
+          ],
+        };
+
+        // Check if search looks like a UUID (device_id) - exact match
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(search)) {
+          deviceWhere[Op.or].push({ id: search });
+        }
+
         const devices = await db.Device.findAll({
-          where: {
-            [Op.or]: [
-              { imei: { [Op.like]: `%${search}%` } },
-              { device_name: { [Op.like]: `%${search}%` } },
-              { id: { [Op.like]: `%${search}%` } },
-            ],
-          },
+          where: deviceWhere,
           attributes: ["id"],
         });
 
@@ -132,7 +183,7 @@ async function getAllHealthMetrics(
           listWhere[Op.or] = orConditions;
         }
       } catch (err) {
-        console.error("Error during IMEI/device_name search:", err);
+        console.error("Error during IMEI/device_name/device_id search:", err);
       }
     }
 
