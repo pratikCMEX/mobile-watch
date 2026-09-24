@@ -977,22 +977,10 @@ const getAllDevices = async function (
   next: NextFunction
 ) {
   try {
-    const { id } = req.body;
-
-    const where: any = {};
-
-    if (id) {
-      where.id = id;
-    }
-
     // Staff: restrict to assigned watches (combined with any id filter)
     const scope = await deviceIdScope(req);
-    if (scope) {
-      where[Op.and] = [{ id: scope }];
-    }
 
     const rows = await db.Device.findAll({
-      where,
       order: [["createdAt", "DESC"]],
       include: [
         {
@@ -1079,16 +1067,6 @@ const getAllDevices = async function (
 
     // When a specific device id was requested, return that single
     // device object directly instead of a list.
-    if (id) {
-      if (!devicesWithOwner.length) {
-        return errorMessage(res, "Device not found");
-      }
-      return successMessage(
-        res,
-        "Device fetched successfully",
-        devicesWithOwner[0]
-      );
-    }
 
     return successMessage(
       res,
