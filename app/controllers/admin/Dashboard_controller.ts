@@ -39,6 +39,13 @@ async function getDashboardStats(
 
     // Get total device count
     const totalDevices = await db.Device.count({ where: deviceWhere });
+    const totalSosAlerts = await db.Notification.count({
+      where: {
+        ...deviceWhere,
+        type: "sos",
+        is_read: false,
+      },
+    });
 
     // Get online devices count
     const onlineDevices = await db.Device.count({
@@ -83,6 +90,7 @@ async function getDashboardStats(
       stats: {
         total_users: totalUsers,
         total_devices: totalDevices,
+        total_sos_alerts: totalSosAlerts,
         // active_users: activeUsers,
         // inactive_users: inactiveUsers,
         online_devices: onlineDevices,
