@@ -1563,7 +1563,7 @@ class TcpServer {
         user_ids: memberUserIds,
         type: "low_battery",
         title: "Low Battery",
-        body: `Device ${deviceId} battery is low`,
+        body: `Device ${deviceName || deviceId} battery is low`,
         metadata: { kind: "low_battery_alarm", deviceId: deviceIdDb },
       });
       Logging.info(
