@@ -173,6 +173,17 @@ function endOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
 }
 
+// Format a Date (or postgres DATE/DATETIME) as a UTC calendar date string
+// YYYY-MM-DD. Sleep data is partitioned by UTC calendar date in the DB
+// (see tcpServer.saveStepCount), so buckets must use the same UTC date.
+function fmtDateUTC(d: any): string {
+  const date = d instanceof Date ? d : new Date(d);
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 const getAnalytics = async (
   req: Request,
   res: Response,
@@ -424,6 +435,89 @@ const getAnalytics = async (
         unit: r.unit,
         bucket: r.bucket,
       }));
+    } else if (dbMetricType === "sleep") {
+      // ── Sleep / tumbling (cumulative counter) ──────────────────
+      // The stored value_primary is a cumulative counter (one row per
+      // calendar date, upserted in place — see tcpServer.saveStepCount).
+      // Return one bucket per calendar date across the range; missing
+      // days are 0-filled. Each bucket reports:
+      //   tumbling_count = daily delta (today - yesterday; first day
+      //     shows its value as-is, baseline 0)
+      //   total          = running cumulative total for that day
+      // (the latest stored value equals the sum of all deltas.)
+
+      // Baseline: last cumulative reading before this window started.
+      const sleepBaseline = await db.HealthMetric.findOne({
+        where: {
+          device_id,
+          metric_type: "sleep",
+          unit: "tumbling",
+          recorded_at: { [Op.lt]: start },
+          value_primary: { [Op.ne]: 0 },
+        },
+        order: [["recorded_at", "DESC"]],
+        attributes: ["value_primary", "recorded_at"],
+      });
+
+      // Last cumulative reading per calendar date inside the window.
+      const sleepBuckets: any[] = await db.sequelize.query(
+        `
+        SELECT bucket, value_primary
+        FROM (
+          SELECT DATE(recorded_at) AS bucket,
+                 value_primary,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY DATE(recorded_at)
+                   ORDER BY recorded_at DESC
+                 ) AS rn
+          FROM "HealthMetrics"
+          WHERE device_id = :device_id
+            AND metric_type = 'sleep'
+            AND unit = 'tumbling'
+            AND recorded_at BETWEEN :start AND :end
+            AND value_primary <> 0
+        ) t
+        WHERE rn = 1
+        ORDER BY bucket ASC
+        `,
+        {
+          replacements: { device_id, start, end },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      // Map of "YYYY-MM-DD" -> cumulative value (last reading of the day).
+      const byDate = new Map<string, number>();
+      for (const r of sleepBuckets) {
+        byDate.set(fmtDateUTC(r.bucket), Number(r.value_primary));
+      }
+
+      // Walk every calendar date in the range so missing days are 0-filled.
+      const days: { date: string; cumulative: number }[] = [];
+      const cursor = new Date(start);
+      while (cursor <= end) {
+        days.push({
+          date: fmtDateUTC(cursor),
+          cumulative: byDate.get(fmtDateUTC(cursor)) ?? 0,
+        });
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+      }
+
+      let prevTotal: number | null = sleepBaseline
+        ? Number(sleepBaseline.value_primary)
+        : null;
+
+      chart = days.map((d) => {
+        const cumulative = d.cumulative;
+        const tumbling_count =
+          prevTotal !== null ? cumulative - prevTotal : cumulative;
+        prevTotal = cumulative;
+        return {
+          date: d.date,
+          tumbling_count: tumbling_count < 0 ? 0 : tumbling_count,
+          total: cumulative,
+        };
+      });
     } else {
       // daily range, or any metric type not in AVERAGE_METRIC_TYPES:
       // return every raw reading as-is.
