@@ -915,6 +915,12 @@ class TcpServer {
         this.handleRestartResponse(client, parsed);
         break;
 
+      // Device reports it is shutting down / powering off. Mark it
+      // offline immediately so the dashboard reflects the shutdown.
+      case "POWEROFF":
+        this.handlePowerOffResponse(client, parsed);
+        break;
+
       case "img":
         this.handleImageResponse(client, parsed);
         break;
@@ -3803,6 +3809,50 @@ class TcpServer {
       connection_status: "offline",
       last_updated_at: new Date(),
     });
+  }
+
+  /**
+   * Handle an inbound POWEROFF packet — the device is shutting down.
+   *
+   * Protocol: [3G*DEVICE_ID*LEN*POWEROFF]  (e.g. [3G*6677015323*0008*POWEROFF])
+   *
+   * The device is going offline on its own (not because the TCP socket
+   * dropped), so mark it offline immediately and drop the connection.
+   */
+  private async handlePowerOffResponse(
+    client: TcpClient,
+    packet: ParsedPacket
+  ): Promise<void> {
+    const deviceId = packet.deviceId || client.deviceId;
+
+    if (!deviceId) {
+      Logging.warn(
+        `POWEROFF received but no device id could be resolved from ${client.id}`
+      );
+      return;
+    }
+
+    Logging.info(`POWEROFF received from device ${deviceId} — marking offline`);
+
+    await this.markDeviceOffline(deviceId).catch((error: Error) =>
+      Logging.error(
+        `Failed to mark device ${deviceId} offline after POWEROFF: ${error.message}`
+      )
+    );
+
+    // The device is shutting down; close the socket so the connection
+    // doesn't linger as a stale "online" entry.
+    try {
+      if (client.socket && !client.socket.destroyed) {
+        client.socket.destroy();
+      }
+    } catch (err: any) {
+      Logging.warn(
+        `Failed to close socket after POWEROFF for ${deviceId}: ${
+          err?.message || err
+        }`
+      );
+    }
   }
 
   /**
