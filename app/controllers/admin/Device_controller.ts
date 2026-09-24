@@ -977,13 +977,9 @@ const getAllDevices = async function (
   next: NextFunction
 ) {
   try {
-    const { connection_status, id } = req.body;
+    const { id } = req.body;
 
     const where: any = {};
-
-    if (connection_status) {
-      where.connection_status = connection_status;
-    }
 
     if (id) {
       where.id = id;
@@ -1094,13 +1090,16 @@ const getAllDevices = async function (
       );
     }
 
-    return successMessage(res, "Devices fetched successfully", devicesWithOwner);
+    return successMessage(
+      res,
+      "Devices fetched successfully",
+      devicesWithOwner
+    );
   } catch (err) {
     console.error("getAllDevices error:", err);
     return errorMessage(res, "Error fetching devices");
   }
 };
-
 
 const getAllDeviceImei = async function (
   req: Request,
