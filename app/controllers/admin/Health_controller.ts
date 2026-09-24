@@ -30,9 +30,13 @@ const CUMULATIVE_METRIC_TYPES = ["steps_cumulative", "sleep"];
 async function applyCumulativeDeltas(rows: any[]): Promise<any[]> {
   const grouped = new Map<string, any[]>();
   for (const r of rows) {
-    const key = `${r.device_id}::${r.metric_type}`;
+    // Convert Sequelize instance -> plain object first, to avoid
+    // spreading internal Sequelize properties (options/include/parent
+    // refs) that create circular structures when JSON.stringify'd.
+    const plain = typeof r.get === "function" ? r.get({ plain: true }) : r;
+    const key = `${plain.device_id}::${plain.metric_type}`;
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(r);
+    grouped.get(key)!.push(plain);
   }
 
   const result: any[] = [];
@@ -62,7 +66,6 @@ async function applyCumulativeDeltas(rows: any[]): Promise<any[]> {
   );
   return result;
 }
-
 // Get all health metrics (admin view) - also supports search by IMEI and ID
 async function getAllHealthMetrics(
   req: Request,
