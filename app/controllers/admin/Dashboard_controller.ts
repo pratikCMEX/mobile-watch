@@ -41,9 +41,7 @@ async function getDashboardStats(
     const totalDevices = await db.Device.count({ where: deviceWhere });
     const totalSosAlerts = await db.Notification.count({
       where: {
-        ...deviceWhere,
         type: "sos",
-        is_read: false,
       },
     });
 
