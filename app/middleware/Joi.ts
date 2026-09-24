@@ -59,6 +59,7 @@ export const Schemas = {
     limit: Joi.number().integer().min(1).optional().default(10),
     imei: Joi.string().optional().allow(null, ""),
     id: Joi.string().optional().allow(null, ""),
+    device_id: Joi.string().optional().allow(null, ""),
     search: Joi.string().optional().allow(null, ""),
   }),
   getHealthMetricsGraph: Joi.object({
