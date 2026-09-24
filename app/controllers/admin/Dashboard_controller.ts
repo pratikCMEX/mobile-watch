@@ -175,36 +175,39 @@ async function getDashboardAlerts(
 
     // A single alert event is fanned out to every DeviceMember of the
     // watch, so the same SOS/fall/low-battery event is stored as one
-    // Notification row per recipient (identical payload, different
-    // user_id, same createdAt). Collapse those duplicates so the
-    // dashboard shows each alert exactly once — the most recent row is
-    // kept (it carries the latest read state).
-    //
-    // Distinct events are preserved: they may share the same payload
-    // (e.g. 5 SOS presses on one watch) but were created at different
-    // times, so the createdAt second is part of the dedup key. Rows
-    // created within the same second are the fan-out of one event;
-    // rows in different seconds are separate events.
-    const seen = new Map<string, any>();
+    // Notification row per recipient. Every row for one event carries
+    // the same event_id (set by createNotification in
+    // notification.service.ts), so collapse on that exact key to show
+    // each alert exactly once — the most recent row is kept (it carries
+    // the latest read state). Genuinely distinct events have different
+    // event_ids and are always preserved.
+    const deduped: any[] = [];
+    const seen = new Set<string>();
     for (const a of alerts) {
       const plain = typeof a.get === "function" ? a.get({ plain: true }) : a;
-      const createdAtMs = new Date(plain.createdAt).getTime();
-      const key = [
-        plain.device_id,
-        plain.type,
-        plain.title,
-        plain.body,
-        JSON.stringify(plain.metadata ?? null),
-        Math.floor(createdAtMs / 1000),
-      ].join("::");
+      const eventId =
+        plain.metadata && plain.metadata.event_id
+          ? plain.metadata.event_id
+          : null;
 
-      const existing = seen.get(key);
-      if (!existing || createdAtMs >= new Date(existing.createdAt).getTime()) {
-        seen.set(key, plain);
+      // Fallback for rows created before event_id tagging: group by
+      // payload + createdAt second so legacy duplicates still collapse.
+      const key = eventId
+        ? eventId
+        : [
+            plain.device_id,
+            plain.type,
+            plain.title,
+            plain.body,
+            JSON.stringify(plain.metadata ?? null),
+            Math.floor(new Date(plain.createdAt).getTime() / 1000),
+          ].join("::");
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(plain);
       }
     }
-
-    const deduped = Array.from(seen.values());
 
     return successMessage(res, "Dashboard alerts fetched successfully", {
       total: deduped.length,

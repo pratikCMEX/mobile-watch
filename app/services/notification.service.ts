@@ -1,6 +1,7 @@
 import db from "../models";
 import Logging from "../library/Logging";
 import { messaging } from "../config/firebase";
+import { v4 as uuidv4 } from "uuid";
 import { Op } from "sequelize";
 import { sendAdminNotification } from "../helper/WebNotification";
 
@@ -131,6 +132,14 @@ export const createNotification = async (
 ): Promise<any> => {
   const { device_id, user_id, user_ids, type, title, body, metadata } = payload;
 
+  // Every call to createNotification represents exactly one alert event,
+  // which may be fanned out to several DeviceMembers. Tag the event with a
+  // unique id so every row produced for that event can be correlated back
+  // to it — this lets the dashboard collapse the fan-out rows into a
+  // single alert without relying on fragile createdAt windows.
+  const event_id = uuidv4();
+  const enrichedMetadata = { ...(metadata ?? {}), event_id };
+
   // Resolve recipients from DeviceMembers for device-scoped notifications.
   // An explicit user_ids list is accepted for callers that have already
   // resolved the membership set; user_id remains available only for direct
@@ -167,7 +176,7 @@ export const createNotification = async (
       type,
       title,
       body,
-      metadata: metadata ?? null,
+      metadata: enrichedMetadata,
       is_read: "0",
     });
     Logging.info(
@@ -194,7 +203,7 @@ export const createNotification = async (
       type,
       title,
       body,
-      metadata: metadata ?? null,
+      metadata: enrichedMetadata,
       is_read: "0",
     });
 
