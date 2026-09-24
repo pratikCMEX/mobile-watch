@@ -1,16 +1,67 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
-import { Op, QueryTypes } from "sequelize";
+import { Op } from "sequelize";
 import {
   canAccessAllDevices,
   canAccessDevice,
   deviceIdScope,
 } from "../../helper/WatchAccess";
 
-// Metric types whose latest stored value is a cumulative counter that
-// must be read directly (the "last record") rather than differenced.
-const LATEST_METRIC_TYPES = ["steps_cumulative", "sleep"];
+// Cumulative metric types whose stored value is a running counter. For
+// these, the listing applies the same baseline + daily-delta logic that
+// getAnalytics uses, so each row shows the latest computed value rather
+// than the raw cumulative counter.
+const CUMULATIVE_METRIC_TYPES = ["steps_cumulative", "sleep"];
+
+/**
+ * Apply the same baseline + daily-delta differencing that getAnalytics
+ * uses for cumulative metrics (steps_cumulative / sleep). The stored
+ * value_primary is a running counter; each row is rewritten so that:
+ *   - value_primary = today's counter - previous day's counter
+ *                     (first row shows its value as-is, baseline 0,
+ *                      clamped to >= 0)
+ *   - total          = the running counter total for that row
+ *
+ * Rows are grouped by (device_id, metric_type) and ordered by
+ * recorded_at ASC so the delta is computed against the immediately
+ * preceding reading.
+ */
+async function applyCumulativeDeltas(rows: any[]): Promise<any[]> {
+  const grouped = new Map<string, any[]>();
+  for (const r of rows) {
+    const key = `${r.device_id}::${r.metric_type}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(r);
+  }
+
+  const result: any[] = [];
+  for (const [, group] of grouped) {
+    group.sort(
+      (a: any, b: any) =>
+        new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
+    );
+
+    let prevTotal: number | null = null;
+    for (const r of group) {
+      const cumulative = Number(r.value_primary);
+      const delta = prevTotal !== null ? cumulative - prevTotal : cumulative;
+      prevTotal = cumulative;
+      result.push({
+        ...r,
+        value_primary: delta < 0 ? 0 : delta,
+        total: cumulative,
+      });
+    }
+  }
+
+  // Preserve the original DESC order returned by the query.
+  const order = new Map(rows.map((r: any, i: number) => [r.id, i]));
+  result.sort(
+    (a: any, b: any) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)
+  );
+  return result;
+}
 
 // Get all health metrics (admin view) - also supports search by IMEI and ID
 async function getAllHealthMetrics(
@@ -20,7 +71,15 @@ async function getAllHealthMetrics(
 ) {
   try {
     const body = req.body || {};
-    const { page = 1, limit = 10, imei, id, device_id, search } = body;
+    const {
+      page = 1,
+      limit = 10,
+      imei,
+      id,
+      device_id,
+      search,
+      metric_type,
+    } = body;
     const offset = (Number(page) - 1) * Number(limit);
 
     // If ID is provided, search by ID
@@ -188,8 +247,27 @@ async function getAllHealthMetrics(
       offset,
     });
 
+    // Cumulative metrics (steps_cumulative / sleep) store a running
+    // counter. Apply the same baseline + daily-delta logic that
+    // getAnalytics uses so each listed row shows the computed value
+    // (today - yesterday) and a running total, instead of the raw
+    // cumulative counter.
+    let metrics = rows;
+    const requestedTypes: string[] = Array.isArray(metric_type)
+      ? metric_type
+      : metric_type
+      ? [metric_type]
+      : [];
+    const isCumulative =
+      requestedTypes.length === 0 ||
+      requestedTypes.some((t) => CUMULATIVE_METRIC_TYPES.includes(t));
+
+    if (isCumulative && rows.length) {
+      metrics = await applyCumulativeDeltas(rows);
+    }
+
     return successMessage(res, "Health metrics retrieved successfully", {
-      metrics: rows,
+      metrics,
       pagination: {
         total: count,
         page: Number(page),
@@ -412,112 +490,9 @@ async function deleteMultipleHealthMetrics(
   }
 }
 
-/**
- * POST /admin/get_latest_health_metrics
- *
- * Return the single most recent HealthMetric row per device for the
- * cumulative metrics (steps_cumulative / sleep). Reading the "last
- * record" directly is what gives the true current value — differencing
- * it against the previous day would only produce a daily delta.
- *
- * Staff are restricted to the watches assigned to them (and those
- * watches' owners); admins/staff with all_watches see everything.
- */
-async function getLatestHealthMetrics(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
-  try {
-    const body = req.body || {};
-    const { metric_type } = body;
-
-    const types: string[] = Array.isArray(metric_type)
-      ? metric_type
-      : metric_type
-      ? [metric_type]
-      : LATEST_METRIC_TYPES;
-
-    const deviceScope = await deviceIdScope(req);
-
-    const where: any = {
-      metric_type: { [Op.in]: types },
-    };
-    if (deviceScope) {
-      where.device_id = deviceScope;
-    }
-
-    // One row per device = the latest recorded_at for that device.
-    const latest: any[] = await db.sequelize.query(
-      `
-      SELECT l.*
-      FROM "HealthMetrics" l
-      INNER JOIN (
-        SELECT device_id, MAX(recorded_at) AS max_recorded
-        FROM "HealthMetrics"
-        WHERE metric_type IN (:types)
-          ${deviceScope ? "AND device_id IN (:deviceScope)" : ""}
-        GROUP BY device_id
-      ) m
-        ON l.device_id = m.device_id AND l.recorded_at = m.max_recorded
-      ORDER BY l.device_id ASC
-      `,
-      {
-        replacements: { types, deviceScope },
-        type: QueryTypes.SELECT,
-      }
-    );
-
-    const deviceIds = latest.map((r: any) => r.device_id).filter(Boolean);
-    const devices = deviceIds.length
-      ? await db.Device.findAll({
-          where: { id: { [Op.in]: deviceIds } },
-          attributes: [
-            "id",
-            "imei",
-            "device_name",
-            "connection_status",
-            "is_online",
-            "battery_percentage",
-          ],
-        })
-      : [];
-    const deviceMap = new Map<string, any>(devices.map((d: any) => [d.id, d]));
-
-    const rows = latest.map((r: any) => {
-      const device: any = deviceMap.get(r.device_id) ?? null;
-      return {
-        id: r.id,
-        device_id: r.device_id,
-        imei: device?.imei ?? null,
-        device_name: device?.device_name ?? null,
-        connection_status: device?.connection_status ?? null,
-        is_online: device?.is_online ?? null,
-        battery_percentage: device?.battery_percentage ?? null,
-        metric_type: r.metric_type,
-        value_primary: r.value_primary,
-        value_secondary: r.value_secondary,
-        unit: r.unit,
-        recorded_at: r.recorded_at,
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-      };
-    });
-
-    return successMessage(res, "Latest health metrics fetched successfully", {
-      total: rows.length,
-      metrics: rows,
-    });
-  } catch (err) {
-    console.error("getLatestHealthMetrics error:", err);
-    return errorMessage(res, "Error fetching latest health metrics");
-  }
-}
-
 export default {
   getAllHealthMetrics,
   getHealthMetricsGraph,
-  getLatestHealthMetrics,
   deleteHealthMetric,
   deleteMultipleHealthMetrics,
 };

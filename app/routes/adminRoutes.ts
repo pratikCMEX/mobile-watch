@@ -127,14 +127,6 @@ router.post(
   ValidateJoi(Schemas.healthMetric.analytics),
   Healthmetrics_controller.getAnalytics
 );
-
-// Latest cumulative health metric (steps_cumulative / sleep) per device —
-// reads the "last record" directly so the true current value is returned.
-router.post(
-  "/get_latest_health_metrics",
-  checkAdmin,
-  Health_controller.getLatestHealthMetrics
-);
 router.post(
   "/delete_health_metric",
   checkAdmin,
