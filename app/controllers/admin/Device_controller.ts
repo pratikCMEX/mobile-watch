@@ -1101,6 +1101,7 @@ const getAllDevices = async function (
   }
 };
 
+
 const getAllDeviceImei = async function (
   req: Request,
   res: Response,
