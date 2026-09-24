@@ -462,10 +462,11 @@ const getAnalytics = async (
       // Last cumulative reading per calendar date inside the window.
       const sleepBuckets: any[] = await db.sequelize.query(
         `
-        SELECT bucket, value_primary
+        SELECT bucket, value_primary, recorded_at
         FROM (
           SELECT DATE(recorded_at) AS bucket,
                  value_primary,
+                 recorded_at,
                  ROW_NUMBER() OVER (
                    PARTITION BY DATE(recorded_at)
                    ORDER BY recorded_at DESC
@@ -486,15 +487,22 @@ const getAnalytics = async (
         }
       );
 
-      // Map of "YYYY-MM-DD" -> cumulative value (last reading of the day).
-      const byDate = new Map<string, number>();
+      // Map of "YYYY-MM-DD" -> { cumulative value, recorded_at } (last reading of the day).
+      const byDate = new Map<string, { cumulative: number; recordedAt: any }>();
       for (const r of sleepBuckets) {
-        byDate.set(fmtDateUTC(r.bucket), Number(r.value_primary));
+        byDate.set(fmtDateUTC(r.bucket), {
+          cumulative: Number(r.value_primary),
+          recordedAt: r.recorded_at,
+        });
       }
 
       // Only return dates that actually have a stored reading (no 0-fill).
       const days = Array.from(byDate.entries())
-        .map(([date, cumulative]) => ({ date, cumulative }))
+        .map(([date, v]) => ({
+          date,
+          cumulative: v.cumulative,
+          recordedAt: v.recordedAt,
+        }))
         .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
       let prevTotal: number | null = sleepBaseline
@@ -507,6 +515,10 @@ const getAnalytics = async (
           prevTotal !== null ? cumulative - prevTotal : cumulative;
         prevTotal = cumulative;
         return {
+          value_primary: tumbling_count < 0 ? 0 : tumbling_count,
+          value_secondary: null,
+          unit: "tumbling",
+          bucket: d.recordedAt,
           date: d.date,
           tumbling_count: tumbling_count < 0 ? 0 : tumbling_count,
           total: cumulative,
