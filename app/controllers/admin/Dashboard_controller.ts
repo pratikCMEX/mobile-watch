@@ -1,21 +1,25 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
-import {
-  errorMessage,
-  successMessage,
-} from "../../library/Response";
-import {
-  deviceIdScope,
-  getAccessibleUserIds,
-} from "../../helper/WatchAccess";
+import { Op } from "sequelize";
+import { errorMessage, successMessage } from "../../library/Response";
+import { deviceIdScope, getAccessibleUserIds } from "../../helper/WatchAccess";
 
-async function getDashboardStats(req: Request, res: Response, next: NextFunction) {
+// Notification types surfaced on the dashboard alert list.
+const DASHBOARD_ALERT_TYPES = ["sos", "fall_detection", "low_battery"];
+
+async function getDashboardStats(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     // Staff only see watches assigned to them (and those watches' owners)
     const deviceScope = await deviceIdScope(req);
     const deviceWhere: any = deviceScope ? { id: deviceScope } : {};
     const userIds = await getAccessibleUserIds(req);
-    const userWhere: any = userIds ? { id: { [db.Sequelize.Op.in]: userIds } } : {};
+    const userWhere: any = userIds
+      ? { id: { [db.Sequelize.Op.in]: userIds } }
+      : {};
 
     // Get total user count
     const totalUsers = await db.User.count({ where: userWhere });
@@ -87,13 +91,86 @@ async function getDashboardStats(req: Request, res: Response, next: NextFunction
       devices: devices,
     };
 
-    return successMessage(res, "Dashboard stats fetched successfully", dashboardData);
+    return successMessage(
+      res,
+      "Dashboard stats fetched successfully",
+      dashboardData
+    );
   } catch (err) {
     console.error("getDashboardStats error:", err);
     return errorMessage(res, "Error fetching dashboard stats");
   }
 }
 
+/**
+ * POST /admin/dashboard_alerts
+ *
+ * List every SOS, fall-detection and low-battery notification across the
+ * watches the caller may access — no pagination, no limit. Staff are
+ * restricted to the watches assigned to them (and those watches' owners);
+ * admins/staff with all_watches see everything.
+ *
+ * Optional request body:
+ *   { "type": "sos" }              -> only SOS notifications
+ *   { "type": ["sos", "fall_detection"] } -> only those
+ *   {}                             -> all dashboard alert types
+ */
+async function getDashboardAlerts(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const body = req.body || {};
+    const { type } = body;
+
+    // A caller may request a single alert type (e.g. "sos") or none at
+    // all (defaults to every dashboard alert type).
+    const requestedTypes: string[] = Array.isArray(type)
+      ? type
+      : type
+      ? [type]
+      : DASHBOARD_ALERT_TYPES;
+
+    const deviceScope = await deviceIdScope(req);
+
+    const where: any = {
+      type: { [Op.in]: requestedTypes },
+    };
+    if (deviceScope) {
+      where.device_id = deviceScope;
+    }
+
+    const alerts = await db.Notification.findAll({
+      where,
+      include: [
+        {
+          model: db.Device,
+          as: "DeviceNotification",
+          attributes: ["id", "imei", "device_name"],
+          required: false,
+        },
+        {
+          model: db.User,
+          as: "UserNotification",
+          attributes: ["id", "name", "email"],
+          required: false,
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    return successMessage(res, "Dashboard alerts fetched successfully", {
+      total: alerts.length,
+      alerts,
+    });
+  } catch (err) {
+    console.error("getDashboardAlerts error:", err);
+    return errorMessage(res, "Error fetching dashboard alerts");
+  }
+}
+
 export default {
   getDashboardStats,
+  getDashboardAlerts,
 };

@@ -180,6 +180,14 @@ io.on("connection", (socket) => {
     socket.join(user_id);
     console.log(`User ${user_id} joined room`);
   });
+
+  // ✅ Admin panel clients join their own room using the admin id so
+  //    they receive server-pushed alert notifications (SOS / fall /
+  //    low-battery) targeted to that admin, mirroring how users join.
+  socket.on("joinAdmin", (admin_id: string) => {
+    if (admin_id) socket.join(admin_id);
+    console.log(`Admin ${admin_id} joined room`);
+  });
   socket.on("isDeviceConnected", (data) => {
     console.log("Received from Android:", data);
 

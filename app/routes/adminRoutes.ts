@@ -23,6 +23,14 @@ router.get(
   Dashboard_controller.getDashboardStats
 );
 
+// Dashboard alerts — every SOS / fall-detection / low-battery
+// notification for the watches the caller may access, no pagination.
+router.post(
+  "/dashboard_alerts",
+  checkAdmin,
+  Dashboard_controller.getDashboardAlerts
+);
+
 router.post(
   "/login",
   ValidateJoi(Schemas.adminLogin),
@@ -85,11 +93,7 @@ router.post(
   Device_controller.listDevices
 );
 
-router.post(
-  "/get_all_devices",
-  checkAdmin,
-  Device_controller.getAllDevices
-);
+router.post("/get_all_devices", checkAdmin, Device_controller.getAllDevices);
 
 router.post(
   "/get_all_snapshots",

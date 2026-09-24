@@ -2,6 +2,7 @@ import db from "../models";
 import Logging from "../library/Logging";
 import { messaging } from "../config/firebase";
 import { Op } from "sequelize";
+import { sendAdminNotification } from "../helper/WebNotification";
 
 // firebase-admin v14 is ESM-only; require() directly to avoid CJS interop issues.
 /**
@@ -19,6 +20,61 @@ export type NotificationType =
   | "health_alert"
   | "general"
   | "chat";
+
+/**
+ * Alert notification types that are also pushed to connected admin-panel
+ * clients in real time (via each admin's own socket room), in addition
+ * to the FCM push sent to the watch owner.
+ */
+export const ADMIN_ALERT_TYPES: NotificationType[] = [
+  "sos",
+  "fall_detection",
+  "low_battery",
+];
+
+/**
+ * Every currently-active admin account. Admin-panel clients join their
+ * own room (identified by admin id) via the `joinAdmin` socket event, so
+ * alert notifications are fanned out to each connected admin individually.
+ */
+export const getActiveAdminIds = async (): Promise<string[]> => {
+  const admins = await db.Admin.findAll({
+    where: { status: "active" },
+    attributes: ["id"],
+    raw: true,
+  });
+  return admins.map((a: any) => a.id).filter(Boolean);
+};
+
+/**
+ * Push an alert notification to every currently-active admin's own
+ * socket room (identified by admin id). No-op when no admin is active.
+ */
+export const pushToAdmins = async (
+  type: NotificationType,
+  title: string,
+  message: string,
+  data: Record<string, any> = {}
+): Promise<void> => {
+  const adminIds = await getActiveAdminIds();
+  if (adminIds.length === 0) return;
+
+  await Promise.all(
+    adminIds.map((admin_id) =>
+      sendAdminNotification({
+        admin_id,
+        type,
+        title,
+        message,
+        data,
+      }).catch((err: any) =>
+        Logging.warn(
+          `Admin socket push failed for ${admin_id}: ${err?.message || err}`
+        )
+      )
+    )
+  );
+};
 
 export interface NotificationPayload {
   device_id: string;
@@ -117,6 +173,16 @@ export const createNotification = async (
     Logging.info(
       `Notification created (no recipient): id=${notification.id} device=${device_id} type=${type}`
     );
+    // Alert notifications also reach connected admin-panel clients.
+    if (ADMIN_ALERT_TYPES.includes(type)) {
+      pushToAdmins(type, title, body, {
+        notification_id: notification.id,
+        device_id,
+        ...metadata,
+      }).catch((err) =>
+        Logging.warn(`Admin socket push failed: ${err?.message || err}`)
+      );
+    }
     return notification;
   }
 
@@ -149,6 +215,18 @@ export const createNotification = async (
         `FCM push failed for notification ${notification.id}: ${err.message}`
       )
     );
+
+    // Alert notifications also reach connected admin-panel clients.
+    if (ADMIN_ALERT_TYPES.includes(type)) {
+      pushToAdmins(type, title, body, {
+        notification_id: notification.id,
+        device_id,
+        user_id: recipientId,
+        ...metadata,
+      }).catch((err: any) =>
+        Logging.warn(`Admin socket push failed: ${err?.message || err}`)
+      );
+    }
   }
 
   return lastNotification;

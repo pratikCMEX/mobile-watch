@@ -47,6 +47,37 @@ export const sendNotification = async ({
   }
 };
 
+/**
+ * Push a notification to a specific admin-panel client (they join their
+ * own room via the `joinAdmin` socket event, using the admin id — the
+ * same pattern as users). Used so SOS / fall-detection / low-battery
+ * alerts surface in the admin dashboard in real time, in addition to the
+ * FCM push sent to the watch owner.
+ */
+export const sendAdminNotification = async ({
+  admin_id,
+  type,
+  title,
+  message,
+  data = {},
+}: {
+  admin_id: string;
+} & Omit<SendNotificationParams, "user_id">) => {
+  try {
+    io.to(admin_id).emit("notification", {
+      type,
+      title,
+      message,
+      notification_count: 1,
+      data,
+    });
+    return true;
+  } catch (error) {
+    console.log("Admin Notification Error:", error);
+    return false;
+  }
+};
+
 export const getAppCallNotify = async ({
   user_id,
   type,
