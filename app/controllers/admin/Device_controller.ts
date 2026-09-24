@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from "express";
+import fs from "fs";
 import db from "../../models";
 import {
   errorMessage,
@@ -270,7 +271,7 @@ const sendVoiceMessage = async function (
     const { serial_number } = req.body;
     // uploadVoice.single("voice_file") stores the file in req.file (singular)
     const voiceFile = (req as any).file as
-      | { path: string; originalname: string; size: number }
+      | { path: string; originalname: string; filename: string; size: number }
       | undefined;
 
     if (!serial_number) {
@@ -326,7 +327,28 @@ const sendVoiceMessage = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send voice message. Device may be disconnected or AMR data is invalid."
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Store voice message record in DeviceVoiceMessages table
+    try {
+      const voiceBuffer = fs.readFileSync(voiceFile.path);
+      await db.DeviceVoiceMessage.create({
+        device_id: device.id,
+        voice_data: voiceBuffer,
+        voice_file_name: voiceFile.filename,
+        is_send: 1,
+        status: null,
+      });
+      Logging.info(
+        `Voice message record stored in DeviceVoiceMessages for device ${serial_number}`
+      );
+    } catch (dbErr: any) {
+      Logging.error(
+        `Failed to store voice message record for device ${serial_number}: ${
+          dbErr?.message || dbErr
+        }`
       );
     }
 
@@ -369,7 +391,7 @@ const sendReminder = async function (
       reminder_text,
     } = req.body;
     const voiceFile = (req as any).file as
-      | { path: string; originalname: string; size: number }
+      | { path: string; originalname: string; filename: string; size: number }
       | undefined;
 
     if (!serial_number) {
@@ -450,7 +472,7 @@ const sendReminder = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send TAKEPILLS command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -518,7 +540,7 @@ const sendReminder = async function (
       reminder_settings,
       number: num,
       reminder_text: reminder_text || null,
-      voice_file: voiceFile ? voiceFile.originalname : null,
+      voice_file: voiceFile ? voiceFile.filename : null,
       command_sent: true,
       command_message:
         "TAKEPILLS command sent to device. The device will set the reminder.",
@@ -1295,7 +1317,7 @@ const sendDeviceCommand = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1410,7 +1432,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send find device command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 

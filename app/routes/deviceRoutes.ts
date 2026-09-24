@@ -36,7 +36,6 @@ router.get(
   Device_controller.getDeviceSettings
 );
 
-// Send voice message (AMR audio) to device via form-data
 router.post(
   "/send_voice_message",
   checkToken,
@@ -45,7 +44,6 @@ router.post(
   Device_controller.sendVoiceMessage
 );
 
-// Send reminder (TAKEPILLS) to device — supports pill, water, general, sedentary types
 router.post(
   "/send_reminder",
   checkToken,

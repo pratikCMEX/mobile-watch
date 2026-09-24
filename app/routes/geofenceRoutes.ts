@@ -5,7 +5,6 @@ import Geofence_controller from "../controllers/user/Geofence_controller";
 
 const router = express.Router();
 
-// Create or update geofence (if id provided -> update, else -> create)
 router.post(
   "/save_geofence",
   checkToken,
@@ -13,7 +12,6 @@ router.post(
   Geofence_controller.saveGeofence
 );
 
-// List geofences with pagination/filter
 router.post(
   "/list_geofence",
   checkToken,
@@ -21,7 +19,6 @@ router.post(
   Geofence_controller.listGeofences
 );
 
-// Toggle geofence active status
 router.post(
   "/toggle_geofence_status",
   checkToken,
@@ -29,7 +26,6 @@ router.post(
   Geofence_controller.toggleGeofenceStatus
 );
 
-// Delete geofence by ID
 router.delete(
   "/delete_geofence/:id",
   checkToken,

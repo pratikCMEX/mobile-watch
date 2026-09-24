@@ -31,6 +31,13 @@ router.get(
   Healthmetrics_controller.getHealthOverview
 );
 
+// Streaming version: sends progressive updates as each metric is fetched
+router.get(
+  "/health_overview_streamed/:device_id",
+  checkToken,
+  Healthmetrics_controller.getHealthOverviewStreamed
+);
+
 router.get(
   "/today_steps/:device_id",
   checkToken,

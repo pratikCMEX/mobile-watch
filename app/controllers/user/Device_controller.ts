@@ -255,10 +255,10 @@ const updateDeviceSettings = async function (
         "Settings pushed to device via TCP. Device will acknowledge.";
     } else if (device.serial_number) {
       response.command_message =
-        "Device is not connected via TCP. Settings saved to database only. They will be applied when the device reconnects.";
+        "Device is offline. Please ensure the device is connected.";
     } else {
       response.command_message =
-        "Device has no serial_number. Settings saved to database only.";
+        "Device is offline. Please ensure the device is connected.";
     }
 
     return successMessage(
@@ -439,7 +439,7 @@ const getDeviceStatus = async (
     const serialNumber = deviceData.serial_number;
 
     let commandSent = false;
-    let commandMessage = "Device is offline or not connected";
+    let commandMessage = "Device is offline. Please ensure the device is connected.";
 
     if (serialNumber) {
       const tcpClient = tcpServer.getDevice(serialNumber);
@@ -455,10 +455,10 @@ const getDeviceStatus = async (
         }
       } else {
         commandMessage =
-          "Device is not connected via TCP. Returning last known data.";
+          "Device is offline. Please ensure the device is connected.";
       }
     } else {
-      commandMessage = "Device has no serial_number. Cannot send TS command.";
+      commandMessage = "Device is offline. Please ensure the device is connected.";
     }
 
     let sceneMode: number | null = null;
@@ -557,7 +557,7 @@ const restartDevice = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send restart command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -757,7 +757,7 @@ const sendDeviceCommand = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -876,7 +876,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send find device command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1077,7 +1077,7 @@ const captureSnapshot = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send snapshot command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1169,7 +1169,7 @@ const setAutoAnswer = async (
     if (!commandSent) {
       const msg = enabled
         ? "Failed to send ACALL command. Ensure you provide 1–3 valid phone numbers (5–20 ASCII digits, no '+')."
-        : "Failed to send ACALL command. Device may be disconnected.";
+        : "Device is offline. Please ensure the device is connected.";
       return customMessage(res, 422, msg);
     }
 
@@ -1532,7 +1532,7 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send SOSSMS command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1620,7 +1620,7 @@ const setFallDownAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send FALLDOWN command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1738,7 +1738,7 @@ const setTakeOffAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send REMOVE command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1848,7 +1848,7 @@ const setRemoveSmsAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send REMOVESMS command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1958,7 +1958,7 @@ const setCenterNumber = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send CENTER command. Device may be disconnected or invalid center number."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -1994,6 +1994,127 @@ const setCenterNumber = async (
   } catch (err) {
     console.error("setCenterNumber error:", err);
     return errorMessage(res, "Error sending center number command");
+  }
+};
+
+// ────────────────────────────────────────────────────────────
+// Phrases Display (MESSAGE) — push phrases to the watch
+// and display them on the screen.
+//
+// Wire protocol:
+//   Server send : [CS*<id>*<LEN>*MESSAGE,<unicode_hex>]
+//   Device reply: [CS*<id>*<LEN>*MESSAGE]  (bare ack = success)
+//
+// The <unicode_hex> is a UTF-16BE hex string where each
+// Unicode codepoint is 4 hex digits in big-endian order.
+// Example: "好123" → "597d003100320033"
+//
+// Server-side mirror: none (ephemeral display command)
+// ────────────────────────────────────────────────────────────
+
+const setPhrasesDisplay = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { serial_number, phrases } = req.body;
+
+    if (!serial_number) {
+      return errorMessage(res, "serial_number is required");
+    }
+
+    if (!phrases) {
+      return errorMessage(res, "phrases is required");
+    }
+
+    const device = await db.Device.findOne({
+      where: { serial_number },
+    });
+    if (!device) {
+      return errorMessage(
+        res,
+        `Device with serial_number '${serial_number}' not found`
+      );
+    }
+
+    // Verify the watch is currently connected via TCP.
+    const tcpClient = tcpServer.getDevice(serial_number);
+    if (!tcpClient) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    const commandSent = tcpServer.sendPhrasesDisplayCommand(
+      serial_number,
+      phrases
+    );
+
+    if (!commandSent) {
+      return errorMessage(
+        res,
+        "Device is offline. Please ensure the device is connected."
+      );
+    }
+
+    // Store the text message in the DeviceVoiceMessages table.
+    // Phrases Display is a text-to-display message, so is_text = 1.
+    try {
+      await db.DeviceVoiceMessage.create({
+        device_id: device.id,
+        voice_data: null,
+        voice_file_name: null,
+        is_send: 1,
+        is_text: 1,
+        message: phrases,
+        status: null,
+      });
+      Logging.info(
+        `Text message record stored in DeviceVoiceMessages for device ${serial_number} (phrases="${phrases}")`
+      );
+    } catch (dbErr: any) {
+      Logging.error(
+        `Failed to store text message record for device ${serial_number}: ${
+          dbErr?.message || dbErr
+        }`
+      );
+    }
+
+    // Build the unicode hex for the response
+    let unicodeHex = "";
+    for (let i = 0; i < phrases.length; i++) {
+      unicodeHex += phrases.charCodeAt(i).toString(16).padStart(4, "0");
+    }
+
+    const content = `MESSAGE,${unicodeHex}`;
+    const lenHex = Buffer.byteLength(content, "utf8")
+      .toString(16)
+      .padStart(4, "0");
+    const commandProtocol = `[CS*${serial_number}*${lenHex}*${content}]`;
+
+    Logging.info(
+      `Phrases display (MESSAGE) command sent to device ${serial_number} ` +
+        `(device_id=${device.id})`
+    );
+
+    return successMessage(res, "Phrases display command sent successfully", {
+      serial_number,
+      device_id: device.id,
+      device_name: device.device_name,
+      phrases,
+      unicode_hex: unicodeHex,
+      command_sent: true,
+      command_message:
+        "MESSAGE command sent. Phrases will be displayed on the watch screen.",
+      command_protocol: commandProtocol,
+      note: "Device will reply with [CS*<id>*<LEN>*MESSAGE] (bare ack = success). Phrases contents are sent in Unicode coding.",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("setPhrasesDisplay error:", err);
+    return errorMessage(res, "Error sending phrases display command");
   }
 };
 
@@ -2050,7 +2171,7 @@ const setLowBatteryAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send LOWBAT command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2188,7 +2309,7 @@ const setFallDownSensitivity = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send LSSET command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2304,7 +2425,7 @@ const setLanguageTimezone = async (
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is offline. LZ command NOT sent — try again once the watch is connected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2317,7 +2438,7 @@ const setLanguageTimezone = async (
     if (!result.sent) {
       return errorMessage(
         res,
-        "Failed to send LZ command. Device may be disconnected."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2432,7 +2553,7 @@ const setSilenceTime = async (
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        `Device is offline. ${mode} command NOT sent — try again once the watch is connected.`
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2445,7 +2566,7 @@ const setSilenceTime = async (
     if (!result.sent) {
       return errorMessage(
         res,
-        `Failed to send ${mode} command. Device may be disconnected or slots/weekdays are invalid.`
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2745,7 +2866,7 @@ const requestBodyTemperature = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device has no serial_number. Cannot send bodytemp2 command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2754,7 +2875,7 @@ const requestBodyTemperature = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot request body temperature."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2822,7 +2943,7 @@ const requestHeartRate = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device has no serial_number. Cannot send hrtstart command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2835,7 +2956,7 @@ const requestHeartRate = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot request heart rate."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2912,7 +3033,7 @@ const requestHeartRateAndBodyTemperature = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device has no serial_number. Cannot send commands."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -2921,48 +3042,40 @@ const requestHeartRateAndBodyTemperature = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot request heart rate or body temperature."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
-    // Send the bodytemp2 command to request real-time temperature measurement
-    // const tempCommandSent = tcpServer.requestBodyTemperature(serialNumber);
-    const tempCommandSent = tcpServer.sendHeartRateRequest(serialNumber, 1);
-    const hrCommandSent = tcpServer.requestBodyTemperature(serialNumber);
+    // Check if device already has a pending request
+    const alreadyInProgress = tcpServer.hasPendingRequest(serialNumber);
 
-    console.log("Temperature command sent:", tempCommandSent);
+    // Start the sequential request (temperature first, then HR).
+    // This is NON-BLOCKING — returns a requestId immediately.
+    // The client polls GET /user/device/health-result?request_id=xxx for the final data.
+    const { requestId } = tcpServer.requestHRAndTemperature(serialNumber);
 
-    if (!tempCommandSent) {
-      return errorMessage(res, "Failed to send temperature command to device");
-    }
-
-    // Wait 15s before sending the HR command, and actually wait for it
-    // to be sent before responding, so the response reflects reality.
-    await new Promise((resolve) => setTimeout(resolve, 15 * 1000));
-
-    console.log("HR command sent after 15 seconds:", hrCommandSent);
-
-    if (!hrCommandSent) {
-      console.error("Failed to send HR command to device");
-    }
+    Logging.info(
+      `Health data request ${
+        alreadyInProgress ? "already in progresss" : "initiated"
+      } for ${serialNumber}. ` +
+        `Request ID: ${requestId}. Use GET /user/device/health-result?request_id=${requestId} to poll for results.`
+    );
 
     return successMessage(
       res,
-      "Commands sent to device. The device will measure and respond with heart rate / blood pressure and body temperature readings.",
+      alreadyInProgress
+        ? "Health data request already in progress."
+        : "Fetching health data from device.",
       {
+        status: "processing",
+        request_id: requestId,
         serial_number: serialNumber,
         device_id: device.id,
         device_name: device.device_name,
-        bodytemp2_command_sent: tempCommandSent,
-        hrtstart_command_sent: hrCommandSent,
-        bodytemp2_protocol: `[3G*${serialNumber}*0009*bodytemp2]`,
-        hrtstart_protocol: `[3G*${serialNumber}*<LEN>*hrtstart,1]`,
-        note:
-          "Device will reply with [3G*<id>*<LEN>*bodytemp2,type,temp] and " +
-          "[3G*<id>*<LEN>*bphrt,systolic,diastolic,heartRate,...]. " +
-          "Temperature is stored as temperature HealthMetric. " +
-          "Blood pressure is stored as blood_pressure HealthMetric. " +
-          "Heart rate is stored as heart_rate HealthMetric.",
+        already_in_progress: alreadyInProgress,
+        message: alreadyInProgress
+          ? "A previous request for this device is still being processed. The same request_id is returned — poll /user/device/health-result with it until you receive completed status."
+          : "Temperature command sent first, heart rate command will be sent after temperature response. Poll /user/device/health-result with the request_id to get the final result.",
         timestamp: new Date().toISOString(),
       }
     );
@@ -2973,6 +3086,69 @@ const requestHeartRateAndBodyTemperature = async function (
       res,
       "Error requesting heart rate and body temperature: " + msg
     );
+  }
+};
+
+/**
+ * GET /user/device/health-result?request_id=xxx
+ *
+ * Polling endpoint to check the status of a health data request.
+ *
+ * Returns:
+ *   - { status: "processing" } if still waiting for device responses
+ *   - { status: "completed", heart_rate, body_temperature, ... } when both HR and temp are received
+ *   - { status: "failed", error: "..." } if request not found or timed out
+ */
+const getHealthResult = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { request_id } = req.query;
+
+    if (!request_id || typeof request_id !== "string") {
+      return errorMessage(res, "request_id query parameter is required");
+    }
+
+    const status = tcpServer.getHealthRequestStatus(request_id);
+
+    if (status.status === "completed") {
+      return successMessage(
+        res,
+        "Heart rate and body temperature data received from device.",
+        {
+          status: "completed",
+          request_id: status.requestId,
+          serial_number: status.serialNumber,
+          heart_rate: status.hrData?.heartRate ?? null,
+          systolic: status.hrData?.systolic ?? null,
+          diastolic: status.hrData?.diastolic ?? null,
+          body_temperature: status.tempData?.temp ?? null,
+          temperature_type: status.tempData?.type ?? null,
+          temperature_is_ack: status.tempData?.isAck === true,
+          timestamp: new Date().toISOString(),
+        }
+      );
+    }
+
+    if (status.status === "failed") {
+      return errorMessage(res, status.error || "Request failed.");
+    }
+
+    // Processing
+    return successMessage(res, "Still fetching data from device.", {
+      status: "processing",
+      request_id: status.requestId,
+      serial_number: status.serialNumber,
+      message:
+        "Temperature and/or heart rate data not yet received. Poll again.",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error("getHealthResult error:", err);
+    const msg = (err && err.message) || String(err);
+    return errorMessage(res, "Error checking health result: " + msg);
   }
 };
 
@@ -3023,7 +3199,7 @@ const setRejectStranger = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send DEVREFUSEPHONESWITCH command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3140,7 +3316,7 @@ const setNightPowerSaving = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send APPLOCK command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3231,7 +3407,7 @@ const setDialLock = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send APPLOCK (dial lock) command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3333,7 +3509,7 @@ const voiceMonitor = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send MONITOR command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3437,7 +3613,7 @@ const setUploadInterval = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send UPLOAD command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3562,6 +3738,14 @@ const setWalkTime = async function (
       ? req.body.sections
       : [];
     const stepTargetRaw = req.body.step_target;
+    const parsedStepTarget =
+      stepTargetRaw === undefined || stepTargetRaw === null
+        ? null
+        : Number(stepTargetRaw);
+    const requestedStepTarget =
+      parsedStepTarget === null || !Number.isFinite(parsedStepTarget)
+        ? null
+        : Math.max(0, Math.floor(parsedStepTarget));
 
     if (!serial_number) {
       return errorMessage(res, "serial_number is required");
@@ -3588,7 +3772,7 @@ const setWalkTime = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send WALKTIME command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -3627,19 +3811,20 @@ const setWalkTime = async function (
         upload_interval_seconds: null,
         walk_time_enabled: sections.length > 0 ? "1" : "0",
         walk_time_sections: sections,
-        walk_time_step_target:
-          stepTargetRaw === undefined || stepTargetRaw === null
-            ? null
-            : Math.max(0, Math.floor(Number(stepTargetRaw))),
+        walk_time_step_target: requestedStepTarget,
       });
     } else {
       deviceSetting.walk_time_enabled = sections.length > 0 ? "1" : "0";
       deviceSetting.walk_time_sections = sections;
-      if (stepTargetRaw !== undefined && stepTargetRaw !== null) {
-        deviceSetting.walk_time_step_target = Math.max(
-          0,
-          Math.floor(Number(stepTargetRaw))
-        );
+      if (stepTargetRaw !== undefined) {
+        const targetChanged =
+          deviceSetting.walk_time_step_target !== requestedStepTarget;
+
+        deviceSetting.walk_time_step_target = requestedStepTarget;
+        if (targetChanged) {
+          // A new target starts a new achievement cycle.
+          deviceSetting.step_target_achieved = "0";
+        }
       }
       await deviceSetting.save();
     }
@@ -3733,7 +3918,7 @@ const setSleepTime = async function (
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send SLEEPTIME command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -4096,7 +4281,7 @@ const locateDevice = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is not connected via TCP. Cannot send CR command."
+        "Device is offline. Please ensure the device is connected."
       );
     }
 
@@ -4592,6 +4777,104 @@ const updateDeviceNumber = async function (
   }
 };
 
+const listVoiceMessages = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_id, page = 1, limit = 20 } = req.body;
+
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+
+    // Verify device exists
+    const device = await db.Device.findOne({
+      where: { id: device_id },
+    });
+    if (!device) {
+      return errorMessage(res, `Device with id '${device_id}' not found`);
+    }
+
+    const pageNum = Math.max(1, parseInt(page as string, 10));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit as string, 10)));
+    const offset = (pageNum - 1) * limitNum;
+    const VOICE_UPLOAD_DIR = "uploads/voice";
+
+    const { count, rows } = await db.DeviceVoiceMessage.findAndCountAll({
+      where: { device_id },
+      order: [["createdAt", "DESC"]],
+      limit: limitNum,
+      offset,
+      attributes: [
+        "id",
+        "device_id",
+        "voice_file_name",
+        "is_send",
+        "is_text",
+        "message",
+        "status",
+        "createdAt",
+        "updatedAt",
+      ],
+    });
+
+    // ...after findAndCountAll
+
+    const totalPages = Math.ceil(count / limitNum);
+    const BASE_URL = process.env.BASE_URL;
+    const voiceMessages = rows.map((row: any) => {
+      const data = row.toJSON();
+      return {
+        ...data,
+        voice_file_path: data.voice_file_name
+          ? `${BASE_URL}/uploads/voice/${data.voice_file_name}`
+          : null,
+      };
+    });
+    return successMessage(res, "Voice messages retrieved successfully", {
+      device_id,
+      device_name: device.device_name,
+      voice_messages: voiceMessages,
+      pagination: {
+        current_page: pageNum,
+        per_page: limitNum,
+        total_items: count,
+        total_pages: totalPages,
+        has_next_page: pageNum < totalPages,
+        has_prev_page: pageNum > 1,
+      },
+    });
+  } catch (err) {
+    console.error("listVoiceMessages error:", err);
+    return errorMessage(res, "Error retrieving voice messages");
+  }
+};
+
+const getDeviceStep = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id } = req.body;
+    if (!device_id) {
+      return errorMessage(res, "device_id is required");
+    }
+    const device = await db.DeviceSetting.findOne({
+      where: { device_id: device_id },
+      attributes: ["device_id", "walk_time_step_target"],
+    });
+    if (!device) {
+      return errorMessage(res, `Device with id '${device_id}' not found`);
+    }
+    return successMessage(res, "Device step retrieved successfully", device);
+  } catch (err) {
+    console.error("getDeviceStep error:", err);
+    return errorMessage(res, "Error retrieving device step");
+  }
+};
 export default {
   updateDeviceSettings,
   aboutDevice,
@@ -4608,6 +4891,7 @@ export default {
   setSosSms,
   setFallDownAlert,
   setLowBatteryAlert,
+  setPhrasesDisplay,
   setCenterNumber,
   setTakeOffAlert,
   setRemoveSmsAlert,
@@ -4632,4 +4916,6 @@ export default {
   registerDeviceByImei,
   editDeviceName,
   updateDeviceNumber,
+  listVoiceMessages,
+  getDeviceStep,
 };

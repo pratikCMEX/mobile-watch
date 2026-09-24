@@ -16,7 +16,7 @@ async function getAllHealthMetrics(
 ) {
   try {
     const body = req.body || {};
-    const { page = 1, limit = 10, imei, id,search } = body;
+    const { page = 1, limit = 10, imei, id, search } = body;
     const offset = (Number(page) - 1) * Number(limit);
 
     // If ID is provided, search by ID

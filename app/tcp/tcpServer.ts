@@ -1,15 +1,19 @@
 import net from "net";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import Logging from "../library/Logging";
 import { buildServerPortalCommand } from "./protocol";
 import db from "../models";
 import { database } from "../config/firebase";
+import { config } from "../config/config";
 import {
   createNotification,
   buildSosNotification,
   buildGeoFenceNotification,
   buildFallDownNotification,
+  buildChatNotification,
+  checkStepTarget,
 } from "../services/notification.service";
 
 interface FirebaseBloodPressure {
@@ -27,6 +31,8 @@ interface FirebaseHealthSnapshot {
   temperature: number;
   distance: number;
   steps: number;
+  total_steps: number;
+  target_step: number | null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -46,6 +52,24 @@ const ensureDir = (dir: string) => {
   }
 };
 ensureDir(SNAPSHOTS_DIR);
+
+// ─────────────────────────────────────────────────────────────
+// Voice-chat storage (device → server, watch-originated audio).
+// Stored under uploads/voice/chat so the existing
+// listVoiceMessages endpoint (which builds URLs as
+// `${BASE_URL}/uploads/voice/${voice_file_name}`) serves these
+// files without any controller changes, as long as
+// voice_file_name is saved as "chat/<filename>".
+// ─────────────────────────────────────────────────────────────
+const VOICE_CHAT_DIR = path.resolve(
+  __dirname,
+  "..",
+  "..",
+  "uploads",
+  "voice",
+  "chat"
+);
+ensureDir(VOICE_CHAT_DIR);
 
 // ─────────────────────────────────────────────────────────────
 // Optional JPEG normalization via ffmpeg
@@ -307,6 +331,31 @@ export interface TcpServerOptions {
 // (e.g. parked for an hour) and keeps the locations table lean.
 const MIN_DISTANCE_METERS = 10;
 
+// ─────────────────────────────────────────────────────────────
+// Device Request Cache
+//
+// Used by requestHeartRateAndBodyTemperature to ensure:
+//   1. Temperature command is sent first and we wait for its response
+//   2. Only after temperature response is received, HR command is sent
+//   3. requestId is returned immediately for polling (non-blocking)
+//   4. No concurrent requests for the same device
+// ─────────────────────────────────────────────────────────────
+
+interface DeviceRequestEntry {
+  serialNumber: string;
+  requestId: string;
+  hrRequested: boolean;
+  tempRequested: boolean;
+  hrReceived: boolean;
+  tempReceived: boolean;
+  hrData: any;
+  tempData: any;
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+  createdAt: Date;
+  timeoutTimer: NodeJS.Timeout | null;
+}
+
 class TcpServer {
   private readonly server: net.Server;
 
@@ -324,6 +373,19 @@ class TcpServer {
    * commands to a particular GPS device.
    */
   private readonly devices: Map<string, TcpClient> = new Map();
+
+  /**
+   * Per-device request cache for sequential Temperature + HR.
+   *
+   * Key = serial_number
+   * Value = DeviceRequestEntry
+   *
+   * Prevents concurrent requests for the same device.
+   * The API caller awaits the Promise until both temp and HR
+   * responses are received from the device.
+   */
+  private readonly deviceRequestCache: Map<string, DeviceRequestEntry> =
+    new Map();
 
   private readonly port: number;
   private readonly host: string;
@@ -485,6 +547,14 @@ class TcpServer {
     socket.on("close", () => {
       clearInterval(noProgressTimer);
 
+      // Cancel any pending device request for this device.
+      // If HR data was already received, resolve with partial data
+      // (HR + null temp) instead of rejecting — the device disconnected
+      // before temperature could be measured, but HR data is still valid.
+      if (client.deviceId) {
+        this.cancelOrResolveOnDisconnect(client.deviceId);
+      }
+
       this.removeClient(client);
 
       if (client.deviceId) {
@@ -614,6 +684,46 @@ class TcpServer {
         continue;
       }
 
+      // Check if this is a voice-chat packet (device-originated AMR
+      // audio over TK). Same binary-data problem as images: raw AMR
+      // bytes can contain unescaped '[' / ']' / newlines that break
+      // the generic bracket/regex-based parser below, and the
+      // declared LEN can understate the real on-wire size.
+      // Format: [3G*DEVICEID*LENGTH*TK,#!AMR<binary AMR bytes>]
+      const voiceChatMatch = buffer.match(
+        /^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*TK,#!AMR/
+      );
+      if (voiceChatMatch) {
+        const packetLength = parseInt(voiceChatMatch[2], 16);
+        const minExpected = packetLength + 2;
+
+        if (buffer.length < minExpected) {
+          // Not even the declared length has arrived yet.
+          return {
+            packets,
+            remaining: buffer,
+          };
+        }
+
+        const closeIdx = buffer.indexOf("]", minExpected - 1);
+        if (closeIdx === -1) {
+          // LEN understated the real packet size and the terminator
+          // hasn't arrived yet — wait for more data.
+          return {
+            packets,
+            remaining: buffer,
+          };
+        }
+
+        const packet = buffer.slice(0, closeIdx + 1);
+        buffer = buffer.slice(closeIdx + 1);
+
+        if (packet.length > 0) {
+          packets.push(packet);
+        }
+        continue;
+      }
+
       const endIndex = buffer.indexOf("]");
 
       /**
@@ -668,6 +778,23 @@ class TcpServer {
       };
 
       this.handleImageResponse(client, parsed);
+      return;
+    }
+
+    // Check if this is a voice-chat packet (device-originated AMR
+    // audio). Binary data breaks the generic regex parser (it can
+    // contain raw newlines etc.), so handle it directly.
+    const voiceChatMatch = message.match(
+      /^\[3G\*(\d+)\*[0-9A-Fa-f]+\*TK,#!AMR/
+    );
+    if (voiceChatMatch) {
+      const deviceId = voiceChatMatch[1];
+      client.deviceId = deviceId;
+
+      void this.processVoiceChatPacket(message, deviceId).catch(
+        (error: Error) =>
+          Logging.error(`processVoiceChatPacket error: ${error.message}`)
+      );
       return;
     }
 
@@ -734,6 +861,10 @@ class TcpServer {
 
       case "UD_LTE":
         this.handleLteLocation(client, parsed);
+        break;
+
+      case "hrtstart":
+        this.handleHrtStartAck(client, parsed);
         break;
 
       case "bphrt":
@@ -866,6 +997,10 @@ class TcpServer {
 
       case "CENTER":
         this.handleCenterResponse(client, parsed);
+        break;
+
+      case "MESSAGE":
+        this.handleMessageResponse(client, parsed);
         break;
 
       case "LSSET":
@@ -1328,7 +1463,7 @@ class TcpServer {
 
   /**
    * Parse the alarm-status bitmask from an AL / AL_LTE payload and
-   * dispatch the appropriate notifications to the device owner via FCM.
+   * dispatch the appropriate notifications to every DeviceMember via FCM.
    *
    * The alarm-status field is the 16th comma-separated value
    * (index 15) and is a hex string, e.g. "00010000" for SOS or
@@ -1374,13 +1509,11 @@ class TcpServer {
       return;
     }
 
-    const ownerId = device.owner_id;
     const deviceIdDb = device.id;
     const deviceName = device.device_name;
 
-    // A shared watch must alert EVERY member, not just the (possibly
-    // stale) owner_id. Resolve the member list once and fan the alarm
-    // notifications out to all of them.
+    // A shared watch must alert EVERY assigned member. DeviceMembers is
+    // the canonical recipient list; Devices.owner_id is not a recipient.
     let memberUserIds: string[] = [];
     try {
       const members = (await db.DeviceMember.findAll({
@@ -1395,11 +1528,6 @@ class TcpServer {
           memberErr?.message || memberErr
         }`
       );
-    }
-    if (memberUserIds.length === 0 && ownerId) {
-      // No membership rows yet — fall back to the legacy owner_id so
-      // single-owner watches still get their alarms.
-      memberUserIds = [ownerId];
     }
 
     // ── SOS alarm (bit 16) ──────────────────────────────────────
@@ -1480,7 +1608,7 @@ class TcpServer {
     // ── Remove the watch alarm (bit 20) ─────────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_WATCH_REMOVE) !== 0) {
       Logging.info(
-        `${tag} Watch-remove alarm detected — sending notification to owner`
+        `${tag} Watch-remove alarm detected — notification handling is not configured`
       );
 
       Logging.info(
@@ -1494,9 +1622,8 @@ class TcpServer {
         `${tag} Fall-down alarm detected — checking fall-detection setting`
       );
 
-      // Respect the owner's fall-down alert toggle. If the watch
-      // has fall-down alerts disabled, we still record the alarm but
-      // do NOT push a notification to the owner.
+      // Respect the device's fall-down alert setting. If fall-down
+      // alerts are disabled, do NOT push a notification to any member.
       let fallDownAlertEnabled = true;
       try {
         const deviceSetting = await db.DeviceSetting.findOne({
@@ -1524,7 +1651,7 @@ class TcpServer {
         );
         await createNotification({
           ...notificationPayload,
-          user_id: ownerId,
+          user_ids: memberUserIds,
         });
         Logging.info(
           `${tag} Fall-detection notification created for device ${deviceIdDb}`
@@ -1535,7 +1662,7 @@ class TcpServer {
     // ── Abnormal heart rate alarm (bit 22) ──────────────────────
     if ((alarmStatus & TcpServer.ALARM_BIT_ABNORMAL_HEART_RATE) !== 0) {
       Logging.info(
-        `${tag} Abnormal heart-rate alarm detected — sending notification to owner`
+        `${tag} Abnormal heart-rate alarm detected — notification handling is not configured`
       );
 
       Logging.info(
@@ -1850,6 +1977,26 @@ class TcpServer {
   }
 
   // ───────────────────────────────────────────────────────────
+  // hrtstart - Heart rate start command acknowledgment
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Handle hrtstart acknowledgment from device.
+   *
+   * When the server sends an hrtstart command (e.g., [3G*<id>*<LEN>*hrtstart,1]),
+   * the device acknowledges by echoing the command name: [3G*<id>*<LEN>*hrtstart].
+   * This is NOT the actual heart rate data - that comes later via the bphrt packet.
+   *
+   * This handler simply logs the acknowledgment for debugging purposes.
+   */
+  private handleHrtStartAck(client: TcpClient, packet: ParsedPacket): void {
+    Logging.info(
+      `hrtstart acknowledgment received from device ${packet.deviceId}: ${packet.payload}`
+    );
+    // No further action needed - actual HR data comes via bphrt packet
+  }
+
+  // ───────────────────────────────────────────────────────────
   // bphrt - Blood pressure + heart rate
   // ───────────────────────────────────────────────────────────
 
@@ -1900,6 +2047,14 @@ class TcpServer {
         )
       );
     }
+
+    // Update device request cache — HR response received
+    this.markHRReceived(packet.deviceId, {
+      systolic,
+      diastolic,
+      heartRate,
+      recordedAt,
+    });
   }
 
   // ───────────────────────────────────────────────────────────
@@ -2031,10 +2186,37 @@ class TcpServer {
     const measurementType = parseInt(parts[0], 10);
     const tempValue = parts[1] !== undefined ? parseFloat(parts[1]) : NaN;
 
+    // Check if this is an ACK/echo packet (empty or invalid payload)
+    // vs an actual temperature response (bodytemp2,type,temp format).
+    // Devices often echo back the bodytemp2 command as an ACK before
+    // measuring. The ACK has no comma in the payload.
+    const isAck = packet.payload.indexOf(",") === -1;
+
+    if (isAck) {
+      Logging.info(
+        `bodytemp2 ACK received from device ${packet.deviceId} ` +
+          `(payload="${packet.payload}"). ` +
+          `Waiting for actual temperature data (btemp2 packet) before proceeding.`
+      );
+
+      // Do NOT mark temp as received yet — the device will send actual
+      // temperature data via a separate btemp2 packet.
+      // markTempReceived will be called from handleTemperature when
+      // the actual data arrives.
+      return;
+    }
+
     if (isNaN(tempValue)) {
       Logging.warn(
         `Invalid temperature value from device ${packet.deviceId}: ${parts[1]}`
       );
+
+      // Even with invalid data, mark temp as received to unblock the flow
+      this.markTempReceived(packet.deviceId, {
+        type: measurementType,
+        temp: null,
+        recordedAt: new Date(),
+      });
       return;
     }
 
@@ -2111,6 +2293,13 @@ class TcpServer {
           )
         );
     }
+
+    // Update device request cache — Temperature response received
+    this.markTempReceived(packet.deviceId, {
+      type: measurementType,
+      temp: tempValue,
+      recordedAt: new Date(),
+    });
 
     // Server reply: [3G*YYYYYYYYYY*0009*bodytemp2]
     const reply = `[3G*${packet.deviceId}*0009*bodytemp2]`;
@@ -2189,6 +2378,15 @@ class TcpServer {
         `Failed to save temperature for device ${packet.deviceId}: ${error.message}`
       )
     );
+
+    // Update device request cache — actual temperature data received.
+    // This will auto-send the hrtstart command if a sequential
+    // request is pending (temperature-first flow).
+    this.markTempReceived(packet.deviceId, {
+      type: measurementType,
+      temp: tempValue,
+      recordedAt: new Date(),
+    });
 
     // Create notification for abnormal temperatures
     if (isAbnormal && abnormalType) {
@@ -2852,6 +3050,207 @@ class TcpServer {
     }
   }
 
+  // ───────────────────────────────────────────────────────────
+  // Shared voice-chat packet processor (device → server). This is
+  // the ONLY place that writes voice-chat files and DB rows.
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Parse a complete voice-chat packet and persist the AMR audio to
+   * disk + DB.
+   *
+   * Wire format (len excludes the brackets):
+   *   [3G*<deviceId>*<len>*TK,<AMR bytes>]
+   *
+   * Mirrors processImagePacket() — same binary-safe framing
+   * reasoning applies (header parsed via ASCII-only regex, escaped
+   * region extracted via latin1 to preserve bytes 1:1, declared LEN
+   * treated as a lower bound only).
+   */
+  private async processVoiceChatPacket(
+    rawPacket: string,
+    fallbackDeviceId: string
+  ): Promise<void> {
+    const tag = `[VOICECHAT:${fallbackDeviceId}]`;
+
+    try {
+      Logging.info(
+        `${tag} step 1: received voice-chat packet, raw length=${rawPacket.length}`
+      );
+
+      // ── 1. Parse ASCII header up to (and including) "TK," ──
+      const headerRe = /^\[3G\*(\d+)\*([0-9A-Fa-f]+)\*TK,/;
+      const m = rawPacket.match(headerRe);
+      if (!m) {
+        Logging.error(
+          `${tag} step 1 FAILED: header did not match expected pattern. ` +
+            `First 40 chars: ${JSON.stringify(rawPacket.substring(0, 40))}`
+        );
+        return;
+      }
+
+      const deviceId = m[1];
+      const packetLength = parseInt(m[2], 16); // bytes inside the brackets
+
+      Logging.info(
+        `${tag} step 2: parsed header deviceId=${deviceId} ` +
+          `packetLength=${packetLength} (expected raw length=${
+            packetLength + 2
+          })`
+      );
+
+      // ── 2. Compute the AMR byte range ──
+      const headerEnd = m[0].length;
+      const closingBracketAt = packetLength + 1;
+
+      if (rawPacket.length < closingBracketAt) {
+        Logging.error(
+          `${tag} step 2 FAILED: packet shorter than declared LEN. ` +
+            `raw.length=${rawPacket.length}, expected>=${closingBracketAt}`
+        );
+        return;
+      }
+
+      // Same LEN-is-unreliable caveat as images: trust the packet's
+      // actual last "]" first, since extractPackets() already scans
+      // forward for it rather than trusting LEN.
+      let regionEnd: number;
+      if (rawPacket[rawPacket.length - 1] === "]") {
+        regionEnd = rawPacket.length - 1;
+      } else if (rawPacket[closingBracketAt] === "]") {
+        regionEnd = closingBracketAt;
+      } else {
+        Logging.warn(
+          `${tag} step 2 WARNING: no closing ']' found (neither at the ` +
+            `packet's last char nor at declared-LEN index ${closingBracketAt}). ` +
+            `Falling back to the full buffer as the voice-chat region. ` +
+            `raw length=${rawPacket.length}`
+        );
+        regionEnd = rawPacket.length;
+      }
+
+      const amrCharCount = regionEnd - headerEnd;
+      Logging.info(
+        `${tag} step 3: AMR region headerEnd=${headerEnd} regionEnd=${regionEnd} ` +
+          `bytes=${amrCharCount}`
+      );
+
+      // ── 3. Build the on-wire (escaped) AMR Buffer ──
+      const escapedBuffer = Buffer.from(
+        rawPacket.substring(headerEnd, regionEnd),
+        "latin1"
+      );
+
+      // ── 3b. Decode the escape sequences per the protocol spec ──
+      const amrBuffer = unescape(escapedBuffer);
+      Logging.info(
+        `${tag} step 3b: decoded AMR = ${amrBuffer.length} bytes ` +
+          `(removed ${escapedBuffer.length - amrBuffer.length} escape bytes)`
+      );
+
+      // ── 4. Validate AMR magic bytes ("#!AMR") ──
+      const magic = amrBuffer.subarray(0, 5).toString("ascii");
+      if (magic !== "#!AMR") {
+        Logging.error(
+          `${tag} step 4 FAILED: data does not start with AMR magic bytes. ` +
+            `Got: ${JSON.stringify(magic)}`
+        );
+        return;
+      }
+
+      // ── 5. Write file ──
+      ensureDir(VOICE_CHAT_DIR);
+      const timestamp = Date.now();
+      const filename = `${deviceId}_${timestamp}.amr`;
+      const filepath = path.join(VOICE_CHAT_DIR, filename);
+
+      try {
+        fs.writeFileSync(filepath, amrBuffer);
+        const stat = fs.statSync(filepath);
+        Logging.info(
+          `${tag} step 5 OK: wrote ${stat.size} bytes to ${filepath}`
+        );
+      } catch (writeErr: any) {
+        Logging.error(
+          `${tag} step 5 FAILED: could not write file ${filepath}: ` +
+            (writeErr?.message || String(writeErr))
+        );
+        return;
+      }
+
+      // ── 6. Insert DB row ──
+      try {
+        const device = await this.findDevice(deviceId);
+        if (!device) {
+          Logging.error(
+            `${tag} step 6 FAILED: no Device row found for deviceId=${deviceId} ` +
+              `(file is on disk at ${filepath} but no DB row was created)`
+          );
+          return;
+        }
+        const row = await db.DeviceVoiceMessage.create({
+          device_id: device.id,
+          voice_file_name: `chat/${filename}`,
+          is_send: 0,
+          is_text: 0,
+        });
+        Logging.info(
+          `${tag} step 6 OK: DeviceVoiceMessage row created id=${row.id} ` +
+            `device_id=${device.id} voice_file_name=${row.voice_file_name}`
+        );
+
+        // ── 7. Notify watch members ──
+        // A shared watch must alert EVERY assigned member. DeviceMembers
+        // is the canonical recipient list; Devices.owner_id is not a recipient.
+        try {
+          const members = (await db.DeviceMember.findAll({
+            where: { device_id: device.id },
+            attributes: ["user_id"],
+            raw: true,
+          })) as any[];
+          let memberUserIds = [
+            ...new Set(members.map((mem: any) => mem.user_id)),
+          ];
+
+          if (memberUserIds.length === 0) {
+            Logging.warn(
+              `${tag} step 7 SKIPPED: no DeviceMembers found for device ${device.id}, ` +
+                `no notification sent`
+            );
+          } else {
+            const notificationPayload = buildChatNotification(
+              device.id,
+              device.device_name || deviceId
+            );
+            await createNotification({
+              ...notificationPayload,
+              user_ids: memberUserIds,
+            });
+            Logging.info(
+              `${tag} step 7 OK: chat notification sent to ${memberUserIds.length} member(s)`
+            );
+          }
+        } catch (notifyErr: any) {
+          Logging.error(
+            `${tag} step 7 FAILED: could not send chat notification for device ${device.id}: ` +
+              (notifyErr?.message || String(notifyErr))
+          );
+        }
+      } catch (dbErr: any) {
+        Logging.error(
+          `${tag} step 6 FAILED: DeviceVoiceMessage.create() threw for device ${deviceId} ` +
+            `(file IS on disk at ${filepath}): ` +
+            (dbErr?.message || String(dbErr))
+        );
+      }
+    } catch (error: any) {
+      Logging.error(
+        `${tag} UNCAUGHT: ${error?.message || String(error)}` +
+          (error?.stack ? `\nStack: ${error.stack}` : "")
+      );
+    }
+  }
+
   /**
    * Parse the semicolon-delimited key:value payload returned by the
    * device in response to a TS command.
@@ -3478,6 +3877,7 @@ class TcpServer {
     const tag = `[cacheLatestLocationOnDevice:${
       device.serial_number || device.id
     }]`;
+
     Logging.info(
       `${tag} step 1: caching latest_lat=${latitude} latest_lng=${longitude} ` +
         `isValidFix=${isValidFix}`
@@ -3493,6 +3893,35 @@ class TcpServer {
       Logging.info(`${tag} step 1 OK`);
     } catch (err: any) {
       Logging.warn(`${tag} step 1 FAILED: ` + (err?.message || String(err)));
+    }
+
+    // Refresh DeviceSetting.total_steps from the latest cumulative step
+    // reading so the live dashboard always reflects the current total
+    // without a separate HealthMetrics query. This runs on every fix,
+    // i.e. whenever the lat/long columns above are updated.
+    Logging.info(`${tag} step 1b: syncing total_steps to DeviceSetting`);
+    try {
+      const latestSteps = await db.HealthMetric.findOne({
+        where: {
+          device_id: device.id,
+          metric_type: "steps_cumulative",
+        },
+        order: [["recorded_at", "DESC"]],
+        attributes: ["value_primary"],
+      });
+
+      const totalSteps =
+        latestSteps && latestSteps.value_primary != null
+          ? Number(latestSteps.value_primary)
+          : null;
+
+      await db.DeviceSetting.upsert({
+        device_id: device.id,
+        total_steps: totalSteps,
+      });
+      Logging.info(`${tag} step 1b OK: total_steps=${totalSteps}`);
+    } catch (err: any) {
+      Logging.warn(`${tag} step 1b FAILED: ` + (err?.message || String(err)));
     }
 
     // Run geofencing on every reported location, not just GPS-grade
@@ -3516,7 +3945,7 @@ class TcpServer {
   // in/out status differs from Device.geofence_status (this
   // includes the very first-ever check for a device — if it's
   // already outside the fence the first time we look, that's still
-  // something the owner should be told about).
+  // something every DeviceMember should be told about).
   // ───────────────────────────────────────────────────────────
 
   private async checkGeofence(
@@ -3616,9 +4045,8 @@ class TcpServer {
         newStatus
       );
 
-      // A shared watch must alert EVERY member, not just the
-      // (possibly stale) owner_id. Resolve the member list and fan
-      // the geofence notification out to all of them.
+      // A shared watch must alert EVERY assigned member. Resolve the
+      // DeviceMembers list and fan the geofence notification out to all of them.
       let memberUserIds: string[] = [];
       try {
         const members = (await db.DeviceMember.findAll({
@@ -3634,14 +4062,8 @@ class TcpServer {
           }: ${memberErr?.message || memberErr}`
         );
       }
-      if (memberUserIds.length === 0 && device.owner_id) {
-        memberUserIds = [device.owner_id];
-      }
-
       Logging.info(
-        `${tag} step 5: device.owner_id=${
-          device.owner_id ?? "null"
-        } member_count=${memberUserIds.length} -> calling createNotification()`
+        `${tag} step 5: member_count=${memberUserIds.length} -> calling createNotification()`
       );
 
       const notification = await createNotification({
@@ -3888,6 +4310,8 @@ class TcpServer {
       // Hourly upsert in device-local time (IST, UTC+5:30).
       if (hasSteps) {
         const { hourStart, hourEnd } = this.istHourBucket(recordedAt);
+        let stepHealthMetricId: string | undefined;
+        let isStepMetricNew = false;
 
         const existingSteps = await db.HealthMetric.findOne({
           where: {
@@ -3900,6 +4324,8 @@ class TcpServer {
         });
 
         if (existingSteps) {
+          stepHealthMetricId = existingSteps.id;
+
           await existingSteps.update({
             value_primary: steps,
             value_secondary: null,
@@ -3911,7 +4337,7 @@ class TcpServer {
             `${tag} OK (updated): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
           );
         } else {
-          await db.HealthMetric.create({
+          const createdStep = await db.HealthMetric.create({
             device_id: deviceId,
             metric_type: "steps_cumulative",
             value_primary: steps,
@@ -3919,6 +4345,8 @@ class TcpServer {
             unit: "steps",
             recorded_at: recordedAt,
           });
+          stepHealthMetricId = createdStep.id;
+          isStepMetricNew = true;
 
           Logging.info(
             `${tag} OK (created): steps_cumulative=${steps} hour=${hourStart.toISOString()}`
@@ -3926,6 +4354,20 @@ class TcpServer {
         }
 
         shouldUpdateFirebaseHealth = true;
+
+        // The first new-day step log resets the achievement flag before the target check.
+        await checkStepTarget(
+          deviceId,
+          undefined,
+          "steps_cumulative",
+          recordedAt,
+          stepHealthMetricId,
+          isStepMetricNew
+        ).catch((err: any) =>
+          Logging.error(
+            `${tag} checkStepTarget FAILED: ${err?.message || String(err)}`
+          )
+        );
       }
 
       // ── Sleep (tumbling value from device) ──────────────
@@ -3996,11 +4438,16 @@ class TcpServer {
     }
     Logging.info(`${tag} step 1 OK: device.id=${device.id}`);
 
-    const latitude = this.convertCoordinate(
+    // UD packets report latitude/longitude as plain decimal degrees
+    // (e.g. 23.052520, 72.5172292 — near Mumbai). The old code used
+    // convertCoordinate() which assumes NMEA DDMM.MM format, producing
+    // wildly wrong values (e.g. 0.384, 1.208). Using convertDecimalCoordinate()
+    // correctly handles decimal degrees.
+    const latitude = this.convertDecimalCoordinate(
       location.latitude,
       location.latitudeDirection
     );
-    const longitude = this.convertCoordinate(
+    const longitude = this.convertDecimalCoordinate(
       location.longitude,
       location.longitudeDirection
     );
@@ -4176,7 +4623,42 @@ class TcpServer {
       temperature: 0,
       distance: 0,
       steps: 0,
+      total_steps: 0,
+      target_step: null,
     };
+  }
+
+  /**
+   * Latest cumulative step count from HealthMetrics (steps_cumulative),
+   * plus the configured step target from DeviceSetting.
+   *
+   * `total_steps` is the raw cumulative pedometer value the watch last
+   * reported (it only ever goes up). `target_step` is the user-configured
+   * walk_time_step_target; null when no target has been set.
+   */
+  private async getStepTotalAndTarget(
+    deviceId: string
+  ): Promise<{ total_steps: number; target_step: number | null }> {
+    const [latestSteps, setting] = await Promise.all([
+      db.HealthMetric.findOne({
+        where: { device_id: deviceId, metric_type: "steps_cumulative" },
+        order: [["recorded_at", "DESC"]],
+        attributes: ["value_primary"],
+      }),
+      db.DeviceSetting.findOne({ where: { device_id: deviceId } }),
+    ]);
+
+    const totalSteps =
+      latestSteps && latestSteps.value_primary != null
+        ? this.firebaseNumber(latestSteps.value_primary)
+        : 0;
+
+    const targetStep =
+      setting && setting.walk_time_step_target != null
+        ? Number(setting.walk_time_step_target)
+        : null;
+
+    return { total_steps: totalSteps, target_step: targetStep };
   }
 
   /**
@@ -4195,6 +4677,7 @@ class TcpServer {
         sleepRecord,
         spo2Record,
         temperatureRecord,
+        stepTotalAndTarget,
       ] = await Promise.all([
         db.HealthMetric.findOne({
           where: { device_id: deviceId, metric_type: "heart_rate" },
@@ -4216,6 +4699,7 @@ class TcpServer {
           where: { device_id: deviceId, metric_type: "temperature" },
           order: [["recorded_at", "DESC"]],
         }),
+        this.getStepTotalAndTarget(deviceId),
       ]);
       const dailySteps = await this.calculateDailyStepMetrics(deviceId);
       const bloodPressure = bloodPressureRecord
@@ -4235,6 +4719,8 @@ class TcpServer {
         temperature: this.firebaseNumber(temperatureRecord?.value_primary),
         distance: dailySteps.distance,
         steps: dailySteps.steps,
+        total_steps: stepTotalAndTarget.total_steps,
+        target_step: stepTotalAndTarget.target_step,
       };
     } catch (error: any) {
       Logging.error(`${tag} FAILED: ${error?.message || String(error)}`);
@@ -4429,6 +4915,371 @@ class TcpServer {
 
     this.send(client, command);
     return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Device Request Cache — Sequential HR + Temperature
+  // ───────────────────────────────────────────────────────────
+
+  /**
+   * Start a sequential HR + Temperature request for a device.
+   *
+   * Creates a cache entry that:
+   *   - Prevents concurrent requests for the same device
+   *   - Returns a Promise that resolves when both HR and temp
+   *     responses are received from the device
+   *
+   * @param serialNumber Device serial number
+   * @returns Promise that resolves with { hrData, tempData } when both responses received
+   */
+  public startDeviceRequest(
+    serialNumber: string,
+    requestId: string
+  ): Promise<{ hrData: any; tempData: any }> {
+    // Check if there's already a pending request for this device
+    if (this.deviceRequestCache.has(serialNumber)) {
+      const existing = this.deviceRequestCache.get(serialNumber)!;
+      const ageMs = Date.now() - existing.createdAt.getTime();
+      Logging.warn(
+        `Device ${serialNumber} already has a pending request ` +
+          `(age: ${Math.round(ageMs / 1000)}s). Rejecting new request.`
+      );
+      // Reject with a clear message so the controller can return an error
+      return Promise.reject(
+        new Error(
+          `Device ${serialNumber} request in progress. Please wait for the previous request to complete.`
+        )
+      );
+    }
+
+    return new Promise<{ hrData: any; tempData: any }>((resolve, reject) => {
+      const entry: DeviceRequestEntry = {
+        serialNumber,
+        requestId,
+        hrRequested: false,
+        tempRequested: false,
+        hrReceived: false,
+        tempReceived: false,
+        hrData: null,
+        tempData: null,
+        resolve,
+        reject,
+        createdAt: new Date(),
+        timeoutTimer: null,
+      };
+      this.deviceRequestCache.set(serialNumber, entry);
+
+      // Auto-timeout to prevent permanent lockout.
+      // Devices may be slow to respond (especially on cellular/LTE connections).
+      // Configurable via DEVICE_REQUEST_TIMEOUT_MS env var (default: 300s = 5 min).
+      entry.timeoutTimer = setTimeout(() => {
+        Logging.warn(
+          `Device request for ${serialNumber} timed out after ${
+            config.deviceRequestTimeoutMs / 1000
+          }s.`
+        );
+        this.cancelDeviceRequest(serialNumber);
+        reject(
+          new Error(
+            `Device ${serialNumber} request timed out after ${
+              config.deviceRequestTimeoutMs / 1000
+            }s. Device may be unresponsive.`
+          )
+        );
+      }, config.deviceRequestTimeoutMs);
+
+      Logging.info(
+        `Device request started for ${serialNumber}. ` +
+          `Waiting for temperature response, then HR response.`
+      );
+    });
+  }
+
+  /**
+   * Mark HR command as sent and store HR response data when received.
+   *
+   * Note: Temperature command was already sent before this HR response
+   * (reversed order: temperature first, then heart rate).
+   *
+   * @param serialNumber Device serial number
+   * @param data HR response payload parts (from bphrt packet)
+   */
+  public markHRReceived(serialNumber: string, data: any): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) {
+      Logging.warn(
+        `HR response received for ${serialNumber} but no pending request found.`
+      );
+      return;
+    }
+
+    entry.hrRequested = true;
+    entry.hrReceived = true;
+    entry.hrData = data;
+
+    Logging.info(
+      `HR response received for ${serialNumber}. ` +
+        `HR received=${entry.hrReceived}, Temp received=${entry.tempReceived}`
+    );
+
+    // Temperature was already sent before HR (reversed order).
+    // No need to auto-send bodytemp2 here.
+
+    this.checkAndResolveDeviceRequest(serialNumber);
+  }
+
+  /**
+   * Mark Temperature command as sent and store temperature response data when received.
+   *
+   * After temperature response is received, auto-sends the HR command (hrtstart,1)
+   * so the device measures heart rate while we have its attention.
+   *
+   * @param serialNumber Device serial number
+   * @param data Temperature response payload parts (from bodytemp2 packet)
+   */
+  public markTempReceived(serialNumber: string, data: any): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) {
+      Logging.warn(
+        `Temperature response received for ${serialNumber} but no pending request found.`
+      );
+      return;
+    }
+
+    entry.tempRequested = true;
+    entry.tempReceived = true;
+    entry.tempData = data;
+
+    Logging.info(
+      `Temperature response received for ${serialNumber}. ` +
+        `HR received=${entry.hrReceived}, Temp received=${entry.tempReceived}`
+    );
+
+    // After receiving temperature data, automatically send the hrtstart command
+    // so the device measures heart rate while we have its attention.
+    const client = this.devices.get(serialNumber);
+    if (client && !entry.hrRequested) {
+      const hrSent = this.sendHeartRateRequest(serialNumber, 1);
+      if (hrSent) {
+        entry.hrRequested = true;
+        Logging.info(
+          `Auto-sent hrtstart command to ${serialNumber} after temperature response.`
+        );
+      } else {
+        Logging.error(
+          `Failed to auto-send hrtstart command to ${serialNumber} after temperature response.`
+        );
+      }
+    }
+
+    this.checkAndResolveDeviceRequest(serialNumber);
+  }
+
+  /**
+   * Cancel/remove a pending device request (e.g., on device disconnect or error).
+   *
+   * @param serialNumber Device serial number
+   */
+  public cancelDeviceRequest(serialNumber: string): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) return;
+
+    // Clear the timeout timer to prevent it firing after cleanup
+    if (entry.timeoutTimer) {
+      clearTimeout(entry.timeoutTimer);
+      entry.timeoutTimer = null;
+    }
+
+    Logging.warn(`Cancelling pending device request for ${serialNumber}.`);
+    entry.reject(new Error(`Device request cancelled for ${serialNumber}.`));
+    this.deviceRequestCache.delete(serialNumber);
+  }
+
+  /**
+   * Handle device disconnect for a pending request.
+   *
+   * If HR data was already received, resolve the Promise with partial
+   * data (HR + null temp) instead of rejecting. The device disconnected
+   * before temperature could be measured, but HR data is still valid
+   * and useful.
+   *
+   * If no HR data was received, reject as before.
+   */
+  public cancelOrResolveOnDisconnect(serialNumber: string): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) return;
+
+    // Clear the timeout timer to prevent it firing after cleanup
+    if (entry.timeoutTimer) {
+      clearTimeout(entry.timeoutTimer);
+      entry.timeoutTimer = null;
+    }
+
+    if (entry.hrReceived) {
+      Logging.warn(
+        `Device ${serialNumber} disconnected. HR data already received — ` +
+          `resolving with partial data (HR only, temp null).`
+      );
+      entry.resolve({
+        hrData: entry.hrData,
+        tempData: null,
+      });
+    } else {
+      Logging.warn(`Cancelling pending device request for ${serialNumber}.`);
+      entry.reject(new Error(`Device request cancelled for ${serialNumber}.`));
+    }
+
+    this.deviceRequestCache.delete(serialNumber);
+  }
+
+  /**
+   * Check if both HR and temperature responses are received.
+   * If so, resolve the Promise and clean up the cache entry.
+   */
+  private checkAndResolveDeviceRequest(serialNumber: string): void {
+    const entry = this.deviceRequestCache.get(serialNumber);
+    if (!entry) return;
+
+    if (entry.hrReceived && entry.tempReceived) {
+      Logging.info(
+        `Both HR and Temperature responses received for ${serialNumber}. ` +
+          `Resolving device request.`
+      );
+
+      // Clear the timeout timer since we have all data
+      if (entry.timeoutTimer) {
+        clearTimeout(entry.timeoutTimer);
+        entry.timeoutTimer = null;
+      }
+
+      entry.resolve({
+        hrData: entry.hrData,
+        tempData: entry.tempData,
+      });
+      this.deviceRequestCache.delete(serialNumber);
+    }
+  }
+
+  /**
+   * Orchestrate sequential Temperature + HR request for a device.
+   *
+   * Flow (reversed order):
+   *   1. Creates a cache entry (prevents concurrent requests)
+   *   2. Sends bodytemp2 command (temperature first)
+   *   3. Waits for temperature response → auto-sends hrtstart command
+   *   4. Waits for HR response
+   *   5. Resolves with both hrData and tempData
+   *
+   * This method is NON-BLOCKING: it starts the request in the background
+   * and immediately returns a requestId. Use getHealthRequestStatus()
+   * to check when both responses are received.
+   *
+   * @param serialNumber Device serial number
+   * @returns { requestId } immediately; background promise resolves with { hrData, tempData }
+   */
+  public requestHRAndTemperature(serialNumber: string): { requestId: string } {
+    // Check if device already has a pending request.
+    // If so, return the EXISTING requestId so the client can poll the same request.
+    const existingEntry = this.deviceRequestCache.get(serialNumber);
+    if (existingEntry) {
+      Logging.warn(
+        `Device ${serialNumber} already has a pending request ` +
+          `(request_id: ${existingEntry.requestId}). Returning existing requestId.`
+      );
+      return { requestId: existingEntry.requestId };
+    }
+
+    // Generate unique request ID for polling
+    const requestId = crypto.randomUUID();
+
+    // Step 1: Create cache entry and start the background promise
+    const promise = this.startDeviceRequest(serialNumber, requestId);
+
+    // Prevent unhandled rejection if startDeviceRequest fails
+    promise.catch((err) => {
+      Logging.error(
+        `Background request for ${serialNumber} failed: ${err?.message || err}`
+      );
+    });
+
+    // Step 2: Verify device is connected
+    const client = this.devices.get(serialNumber);
+    if (!client) {
+      this.cancelDeviceRequest(serialNumber);
+      throw new Error(`Device ${serialNumber} is not connected via TCP.`);
+    }
+
+    // Step 3: Send bodytemp2 command FIRST (temperature before heart rate)
+    const tempSent = this.requestBodyTemperature(serialNumber);
+    if (!tempSent) {
+      this.cancelDeviceRequest(serialNumber);
+      throw new Error(
+        `Failed to send temperature command to device ${serialNumber}.`
+      );
+    }
+
+    Logging.info(
+      `Sequential request started for ${serialNumber}. ` +
+        `Temperature command sent first, waiting for temp response (auto-sends HR next). ` +
+        `Request ID: ${requestId}`
+    );
+
+    // Do NOT await the promise — return immediately with requestId.
+    // The background promise resolves when both HR and temp are received.
+    // Use getHealthRequestStatus(requestId) to check progress.
+    return { requestId };
+  }
+
+  /**
+   * Check if a device has a pending health data request.
+   *
+   * @param serialNumber Device serial number
+   * @returns true if the device has an in-progress request
+   */
+  public hasPendingRequest(serialNumber: string): boolean {
+    return this.deviceRequestCache.has(serialNumber);
+  }
+
+  /**
+   * Check the status of a health data request.
+   *
+   * @param requestId The request ID returned by requestHRAndTemperature
+   * @returns Object with status ("processing" | "completed" | "failed") and data if available
+   */
+  public getHealthRequestStatus(requestId: string): {
+    status: "processing" | "completed" | "failed";
+    requestId: string;
+    serialNumber?: string;
+    hrData?: any;
+    tempData?: any;
+    error?: string;
+  } {
+    // Search cache for the requestId
+    for (const [serialNumber, entry] of this.deviceRequestCache) {
+      if (entry.requestId === requestId) {
+        if (entry.hrReceived && entry.tempReceived) {
+          return {
+            status: "completed",
+            requestId,
+            serialNumber: entry.serialNumber,
+            hrData: entry.hrData,
+            tempData: entry.tempData,
+          };
+        }
+        return {
+          status: "processing",
+          requestId,
+          serialNumber: entry.serialNumber,
+        };
+      }
+    }
+
+    // Request not found — may have timed out or been cancelled
+    return {
+      status: "failed",
+      requestId,
+      error: "Request not found. It may have timed out or been cancelled.",
+    };
   }
 
   // ───────────────────────────────────────────────────────────
@@ -6535,10 +7386,10 @@ class TcpServer {
    *
    * We treat "1" as success and "0" as failure.
    */
-  private handleVoiceMessageResponse(
+  private async handleVoiceMessageResponse(
     client: TcpClient,
     packet: ParsedPacket
-  ): void {
+  ): Promise<void> {
     const status = (packet.payload || "").trim();
     const ok = status === "1";
     Logging.info(
@@ -6546,6 +7397,34 @@ class TcpServer {
         status || "(ack)"
       }" (${ok ? "OK - received" : "FAILED"})`
     );
+
+    // Update the voice message record with the device ACK status
+    try {
+      const voiceMessage = await db.DeviceVoiceMessage.findOne({
+        where: {
+          device_id: packet.deviceId,
+          status: null,
+        },
+        order: [["createdAt", "DESC"]],
+      });
+
+      if (voiceMessage) {
+        await voiceMessage.update({
+          status,
+          updatedAt: new Date(),
+        });
+        Logging.info(
+          `Updated DeviceVoiceMessages record for device ${packet.deviceId}: status=${status}`
+        );
+      }
+    } catch (dbErr: any) {
+      Logging.error(
+        `Failed to update voice message record for device ${packet.deviceId}: ${
+          dbErr?.message || dbErr
+        }`
+      );
+    }
+
     this.markDeviceOnline(packet.deviceId).catch((error: Error) =>
       Logging.error(
         `Failed to mark device ${packet.deviceId} online from TK: ${error.message}`
@@ -6633,8 +7512,8 @@ class TcpServer {
    * Handle an SOS trigger from the device.
    *
    * The device sends SOS1, SOS2, or SOS3 when the user presses the
-   * SOS button.  We persist a notification and push it to the device
-   * owner via FCM.
+   * SOS button. We persist a notification and push it to every
+   * DeviceMember via FCM.
    *
    * Device reply: none (fire-and-forget from the device side).
    */
@@ -6695,9 +7574,8 @@ class TcpServer {
           return;
         }
 
-        // A shared watch must alert EVERY member, not just the
-        // (possibly stale) owner_id. Resolve the member list and fan
-        // the SOS notification out to all of them.
+        // A shared watch must alert EVERY assigned member. Resolve the
+        // DeviceMembers list and fan the SOS notification out to all of them.
         let memberUserIds: string[] = [];
         try {
           const members = (await db.DeviceMember.findAll({
@@ -6713,13 +7591,9 @@ class TcpServer {
             }: ${memberErr?.message || memberErr}`
           );
         }
-        if (memberUserIds.length === 0 && device.owner_id) {
-          // No membership rows yet — fall back to the legacy owner_id.
-          memberUserIds = [device.owner_id];
-        }
         if (memberUserIds.length === 0) {
           Logging.warn(
-            `SOS trigger from device ${packet.deviceId} but no owner_id or members set`
+            `SOS trigger from device ${packet.deviceId} but no DeviceMembers found`
           );
           return;
         }
@@ -7008,6 +7882,92 @@ class TcpServer {
 
     this.send(client, command);
     return true;
+  }
+
+  // ───────────────────────────────────────────────────────────
+  // Phrases Display (MESSAGE) — push phrases to the watch
+  // and display them on the screen.
+  //
+  // Wire protocol:
+  //   Server send : [CS*<id>*<LEN>*MESSAGE,<unicode_hex>]
+  //   Device reply: [CS*<id>*<LEN>*MESSAGE]  (bare ack = success)
+  //
+  // The <unicode_hex> is a UTF-16BE hex string where each
+  // Unicode codepoint is 4 hex digits in big-endian order.
+  // Example: "好123" → "597d003100320033"
+  //
+  // @param deviceId Protocol device ID (serial number)
+  // @param phrases Text phrases to display on the watch
+  // @returns true if command sent successfully, false if device not connected
+  //
+  // ───────────────────────────────────────────────────────────
+
+  public sendPhrasesDisplayCommand(deviceId: string, phrases: string): boolean {
+    const client = this.devices.get(deviceId);
+
+    if (!client) {
+      Logging.error(
+        `Device ${deviceId} is not connected. Cannot send MESSAGE command.`
+      );
+      return false;
+    }
+
+    if (!phrases || phrases.length === 0) {
+      Logging.error(
+        `Invalid phrases for device ${deviceId} — phrases must not be empty`
+      );
+      return false;
+    }
+
+    // Convert phrases to Unicode hex string (UTF-16BE, each codepoint as 4 hex digits)
+    const unicodeHex = this.stringToUnicodeHex(phrases);
+
+    const content = `MESSAGE,${unicodeHex}`;
+    const length = this.utf8ByteLength(content).toString(16).padStart(4, "0");
+    const command = `[CS*${deviceId}*${length}*${content}]`;
+
+    Logging.info(
+      `Sending phrases display (MESSAGE) command to device ${deviceId}`
+    );
+
+    this.send(client, command);
+    return true;
+  }
+
+  /**
+   * Convert a string to a Unicode hex representation.
+   *
+   * Each character's Unicode code point is encoded as 4 hex digits
+   * in big-endian (UTF-16BE) order.
+   *
+   * Example: "Hi" → "00480069"
+   *          "好" → "597d"
+   *
+   * @param str Input string
+   * @returns Unicode hex string (lowercase)
+   */
+  private stringToUnicodeHex(str: string): string {
+    let result = "";
+    for (let i = 0; i < str.length; i++) {
+      const codePoint = str.charCodeAt(i);
+      result += codePoint.toString(16).padStart(4, "0");
+    }
+    return result;
+  }
+
+  /**
+   * Handle a MESSAGE reply from the device.
+   *
+   * Reply shape:
+   *   [CS*<id>*<LEN>*MESSAGE]   bare ack → success
+   */
+  private handleMessageResponse(client: TcpClient, packet: ParsedPacket): void {
+    const status = (packet.payload || "").trim();
+    const ok = status === "" || status === "1";
+    Logging.info(
+      `MESSAGE (phrases display) response from device ${packet.deviceId}: ` +
+        `status="${status || "(ack)"}" (${ok ? "OK" : "FAILED"})`
+    );
   }
 
   /**

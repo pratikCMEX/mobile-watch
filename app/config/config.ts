@@ -6,10 +6,12 @@ const SERVER_PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 const TCP_PORT = process.env.TCP_PORT ? Number(process.env.TCP_PORT) : 9000;
 
 export const config = {
-    server: {
-        port: SERVER_PORT,
-    },
-    tcp: {
-        port: TCP_PORT,
-    },
+  server: {
+    port: SERVER_PORT,
+  },
+  tcp: {
+    port: TCP_PORT,
+  },
+  deviceRequestTimeoutMs:
+    Number(process.env.DEVICE_REQUEST_TIMEOUT_MS) || 300_000,
 };

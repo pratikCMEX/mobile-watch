@@ -20,8 +20,10 @@ export interface DeviceSettingAttributes {
   walk_time_enabled: string;
   walk_time_sections: string[] | null;
   walk_time_step_target: number | null;
+  step_target_achieved: string;
   dial_lock_enabled: string;
   low_battery_alert: string;
+  total_steps: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,8 +53,10 @@ class DeviceSetting
   public walk_time_enabled!: string;
   public walk_time_sections!: string[] | null;
   public walk_time_step_target!: number | null;
+  public step_target_achieved!: string;
   public dial_lock_enabled!: string;
   public low_battery_alert!: string;
+  public total_steps!: number | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -180,6 +184,13 @@ export default (sequelize: Sequelize, DataTypes: any) => {
           min: 0,
         },
       },
+      step_target_achieved: {
+        type: DataTypes.ENUM("0", "1"),
+        allowNull: false,
+        defaultValue: "0",
+        comment:
+          "Set to 1 when step target notification has been sent. Reset to 0 on the first step log of a new day, when steps go below target, or when the target changes.",
+      },
       dial_lock_enabled: {
         type: DataTypes.ENUM("1", "0"),
         allowNull: true,
@@ -191,6 +202,13 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         allowNull: true,
         defaultValue: "0",
         comment: "Low battery alarm SMS alert switch (LOWBAT,1=ON, 0=OFF)",
+      },
+      total_steps: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: null,
+        comment:
+          "Latest cumulative step count synced from HealthMetrics (steps_cumulative). Refreshed on every location fix so the live dashboard always shows the current total.",
       },
 
       createdAt: {

@@ -3,6 +3,13 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import { QueryTypes, Op } from "sequelize";
 import HealthMetricService from "../../services/HealthMetricService";
+import { checkStepTarget } from "../../services/notification.service";
+import {
+  sendProcessing,
+  sendFetching,
+  sendCompleted,
+  sendError,
+} from "../../library/Stream";
 
 const AddMetrics = async function (
   req: Request,
@@ -75,20 +82,26 @@ const AddMetrics = async function (
       unit: unit,
       recorded_at: new Date(),
     });
+
+    // Check the configured daily target immediately after a step metric is persisted.
+    const stepMetricTypes = ["steps", "steps_daily", "steps_cumulative"];
+    if (stepMetricTypes.includes(metric_type)) {
+      await checkStepTarget(
+        device_id,
+        Number(value_primary),
+        metric_type,
+        healthmetric.recorded_at,
+        healthmetric.id,
+        true
+      ).catch((err) => console.error("checkStepTarget error:", err));
+    }
+
     return successMessage(res, "Healthmetric added successfully", healthmetric);
   } catch (err) {
     return errorMessage(res, "Error adding healthmetric");
   }
 };
 
-// POST /health/save_spo2
-// Save a SpO2 (blood oxygen saturation) reading.
-//
-// SPO2 data rating (server-side):
-//   90%–100% → Good   → status 1 (normal)
-//   70%–89%  → Average → status 1 (normal)
-//   <70%     → Poor    → status 0 (abnormal)
-//   invalid  → error   → status 2 (error)
 const saveSpO2 = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { device_id, spo2, measurement_type, unit, recorded_at } = req.body;
@@ -136,6 +149,13 @@ const METRIC_TYPES = [
   "turnovers",
 ];
 
+const AVERAGE_METRIC_TYPES = [
+  "heart_rate",
+  "blood_pressure",
+  "spo2",
+  "temperature",
+];
+
 function startOfDay(d: Date) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -146,17 +166,6 @@ function endOfDay(d: Date) {
   x.setHours(23, 59, 59, 999);
   return x;
 }
-function startOfWeek(d: Date) {
-  const x = startOfDay(d);
-  const day = x.getDay(); // 0 = Sunday, matches the S M T W T F S strip
-  x.setDate(x.getDate() - day);
-  return x;
-}
-function endOfWeek(d: Date) {
-  const x = startOfWeek(d);
-  x.setDate(x.getDate() + 6);
-  return endOfDay(x);
-}
 function startOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
 }
@@ -164,8 +173,6 @@ function endOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
 }
 
-// POST /health/analytics
-// body: { device_id, metric_type, range: "daily"|"weekly"|"monthly", date? }
 const getAnalytics = async (
   req: Request,
   res: Response,
@@ -204,15 +211,31 @@ const getAnalytics = async (
     if (range === "daily") {
       start = startOfDay(targetDate);
       end = endOfDay(targetDate);
-      truncUnit = "hour"; // 9AM, 10AM, 11AM... buckets, matching the Daily chart
+      truncUnit = "hour"; // hourly buckets within the day
     } else if (range === "weekly") {
-      start = startOfWeek(targetDate);
-      end = endOfWeek(targetDate);
-      truncUnit = "day"; // one point per day, matching the S M T W T F S strip
+      // Sent `date` is used as-is as the start of the 7-day window
+      start = startOfDay(targetDate);
+      end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      end = endOfDay(end);
+      truncUnit = "day"; // one point per day
     } else {
+      // monthly = full calendar month containing the sent date.
       start = startOfMonth(targetDate);
       end = endOfMonth(targetDate);
-      truncUnit = "week"; // one point per week across the month
+
+      // Bucket per day for:
+      //  - average-based metrics when a specific date is provided
+      //  - cumulative step counts, so each chart point is that day's total
+      //    steps (same granularity as the daily range). Everything else
+      //    buckets per week.
+      const bucketPerDay =
+        (range === "monthly" &&
+          date &&
+          AVERAGE_METRIC_TYPES.includes(dbMetricType)) ||
+        dbMetricType === "steps_cumulative";
+
+      truncUnit = bucketPerDay ? "day" : "week";
     }
 
     console.log(
@@ -220,6 +243,8 @@ const getAnalytics = async (
       device_id,
       "metric_type:",
       dbMetricType,
+      "range:",
+      range,
       "start:",
       start,
       "end:",
@@ -232,6 +257,7 @@ const getAnalytics = async (
         device_id,
         metric_type: dbMetricType,
         recorded_at: { [Op.between]: [start, end] },
+        value_primary: { [Op.ne]: 0 },
       },
       attributes: ["value_primary", "value_secondary", "unit", "recorded_at"],
       order: [["recorded_at", "DESC"]],
@@ -252,21 +278,28 @@ const getAnalytics = async (
           (sum: number, r: any) => sum + Number(r.value_primary),
           0
         ) / readings.length;
+
+      // value_secondary is only a real numeric quantity to average for
+      // blood_pressure (diastolic). For temperature it's a measurement-type
+      // flag (0=forehead, 1=wrist), not something to average.
+      const secondaryIsAveragable = dbMetricType !== "temperature";
+
       const secondaryReadings = readings.filter(
         (r: any) => r.value_secondary !== null
       );
-      const avgSecondary = secondaryReadings.length
-        ? secondaryReadings.reduce(
-            (sum: number, r: any) => sum + Number(r.value_secondary),
-            0
-          ) / secondaryReadings.length
-        : null;
+      const avgSecondary =
+        secondaryIsAveragable && secondaryReadings.length
+          ? secondaryReadings.reduce(
+              (sum: number, r: any) => sum + Number(r.value_secondary),
+              0
+            ) / secondaryReadings.length
+          : null;
 
       summary = {
         low: {
           primary: Number(lowest.value_primary),
           secondary:
-            lowest.value_secondary !== null
+            secondaryIsAveragable && lowest.value_secondary !== null
               ? Number(lowest.value_secondary)
               : null,
         },
@@ -278,7 +311,7 @@ const getAnalytics = async (
         max: {
           primary: Number(highest.value_primary),
           secondary:
-            highest.value_secondary !== null
+            secondaryIsAveragable && highest.value_secondary !== null
               ? Number(highest.value_secondary)
               : null,
         },
@@ -295,6 +328,7 @@ const getAnalytics = async (
           device_id,
           metric_type: dbMetricType,
           recorded_at: { [Op.lt]: start },
+          value_primary: { [Op.ne]: 0 },
         },
         order: [["recorded_at", "DESC"]],
         attributes: ["value_primary"],
@@ -320,6 +354,7 @@ const getAnalytics = async (
           WHERE device_id = :device_id
             AND metric_type = :dbMetricType
             AND recorded_at BETWEEN :start AND :end
+            AND value_primary <> 0
         ) t
         WHERE rn = 1
         ORDER BY bucket ASC
@@ -342,7 +377,56 @@ const getAnalytics = async (
           bucket: r.bucket,
         };
       });
+    } else if (
+      range !== "daily" &&
+      AVERAGE_METRIC_TYPES.includes(dbMetricType)
+    ) {
+      const secondaryIsAveragable = dbMetricType !== "temperature";
+
+      // Exclude abnormal-flag rows (unit contains "abnormal") from the
+      // numeric average — they store 0/1 as a flag, not a real reading.
+      const excludeAbnormal =
+        dbMetricType === "temperature" ? `AND unit NOT LIKE '%abnormal%'` : "";
+
+      const avgBuckets: any[] = await db.sequelize.query(
+        `
+        SELECT date_trunc(:truncUnit, recorded_at) AS bucket,
+               AVG(value_primary) AS value_primary,
+               ${
+                 secondaryIsAveragable ? "AVG(value_secondary)" : "NULL"
+               } AS value_secondary,
+               MAX(unit) AS unit,
+               COUNT(*) AS reading_count
+        FROM "HealthMetrics"
+        WHERE device_id = :device_id
+          AND metric_type = :dbMetricType
+          AND recorded_at BETWEEN :start AND :end
+          AND value_primary <> 0
+          ${excludeAbnormal}
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        `,
+        {
+          replacements: { truncUnit, device_id, dbMetricType, start, end },
+          type: QueryTypes.SELECT,
+        }
+      );
+
+      chart = avgBuckets.map((r: any) => ({
+        value_primary:
+          r.value_primary !== null
+            ? Math.round(Number(r.value_primary) * 100) / 100
+            : null,
+        value_secondary:
+          r.value_secondary !== null
+            ? Math.round(Number(r.value_secondary) * 100) / 100
+            : null,
+        unit: r.unit,
+        bucket: r.bucket,
+      }));
     } else {
+      // daily range, or any metric type not in AVERAGE_METRIC_TYPES:
+      // return every raw reading as-is.
       chart = readings.map((r: any) => ({
         value_primary: Number(r.value_primary),
         value_secondary:
@@ -354,7 +438,11 @@ const getAnalytics = async (
 
     // Last synced — most recent reading ever recorded, not limited to the window
     const latest = await db.HealthMetric.findOne({
-      where: { device_id, metric_type: dbMetricType },
+      where: {
+        device_id,
+        metric_type: dbMetricType,
+        value_primary: { [Op.ne]: 0 },
+      },
       order: [["recorded_at", "DESC"]],
     });
 
@@ -490,9 +578,6 @@ const getHealthOverview = async (
   }
 };
 
-// GET /health/today_steps/:device_id
-// Returns the total step count for today based on cumulative pedometer
-// readings stored as HealthMetric rows (metric_type = "steps_cumulative").
 const getTodaySteps = async (
   req: Request,
   res: Response,
@@ -571,10 +656,140 @@ const getTodaySteps = async (
   }
 };
 
+const getHealthOverviewStreamed = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { device_id } = req.params;
+
+    if (!device_id) {
+      return sendError(res, "device_id is required");
+    }
+
+    const device = await db.Device.findByPk(device_id as string);
+    if (!device) {
+      return sendError(res, "Device not found");
+    }
+
+    // Step 0: Immediate "processing" signal
+    sendProcessing(res, "Starting health overview fetch...");
+
+    const metricTypes = [
+      "heart_rate",
+      "blood_pressure",
+      "steps_cumulative",
+      "sleep",
+      "spo2",
+      "temperature",
+    ];
+
+    const overview: any = {};
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const totalMetrics = metricTypes.length;
+
+    for (let i = 0; i < metricTypes.length; i++) {
+      const metricType = metricTypes[i];
+
+      // Fetch latest reading for this metric type
+      const latest = await db.HealthMetric.findOne({
+        where: { device_id, metric_type: metricType },
+        order: [["recorded_at", "DESC"]],
+      });
+
+      // Fetch most recent reading strictly before today
+      const previousDayMetric = await db.HealthMetric.findOne({
+        where: {
+          device_id,
+          metric_type: metricType,
+          recorded_at: { [Op.lt]: todayStart },
+        },
+        order: [["recorded_at", "DESC"]],
+      });
+
+      const latestValue = latest ? Number(latest.value_primary) : null;
+      const previousValue = previousDayMetric
+        ? Number(previousDayMetric.value_primary)
+        : null;
+      const delta =
+        latestValue !== null && previousValue !== null
+          ? latestValue - previousValue
+          : null;
+      const direction =
+        delta !== null
+          ? delta > 0
+            ? "up"
+            : delta < 0
+            ? "down"
+            : "stable"
+          : null;
+
+      const responseKey =
+        metricType === "steps_cumulative" ? "steps" : metricType;
+
+      overview[responseKey] = {
+        latest: latestValue,
+        latest_secondary: latest
+          ? Number(latest.value_secondary) || null
+          : null,
+        unit: latest?.unit || null,
+        recorded_at: latest?.recorded_at || null,
+        previous_day_value: previousValue,
+        delta: delta,
+        direction: direction,
+      };
+
+      // Send progress chunk for this metric
+      const progress = Math.round(((i + 1) / totalMetrics) * 100);
+      sendFetching(
+        res,
+        `Fetched ${responseKey} data`,
+        overview[responseKey],
+        progress
+      );
+    }
+
+    // Steps actually taken TODAY
+    if (overview["steps"]) {
+      const stepsLatest = overview["steps"].latest;
+      const stepsPrevious = overview["steps"].previous_day_value;
+      const stepsToday =
+        stepsLatest !== null && stepsPrevious !== null
+          ? Math.max(stepsLatest - stepsPrevious, 0)
+          : stepsLatest || 0;
+
+      overview["steps"].latest = stepsToday;
+    }
+
+    const stepsToday = overview["steps"]?.latest || 0;
+    const totalDistanceKm = Number((stepsToday * 0.000762).toFixed(2));
+    const totalCalories = Number((stepsToday * 0.04).toFixed(2));
+
+    overview["distance"] = {
+      latest: totalDistanceKm,
+      unit: "km",
+    };
+
+    overview["calories"] = {
+      latest: totalCalories,
+      unit: "kcal",
+    };
+
+    // Final: completed
+    sendCompleted(res, "Health overview fetched successfully", overview);
+  } catch (err) {
+    console.error("getHealthOverviewStreamed error:", err);
+    return sendError(res, "Error fetching health overview");
+  }
+};
+
 export default {
   AddMetrics,
   getAnalytics,
   getHealthOverview,
+  getHealthOverviewStreamed,
   getTodaySteps,
   saveSpO2,
 };
