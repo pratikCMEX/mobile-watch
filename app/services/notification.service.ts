@@ -215,18 +215,19 @@ export const createNotification = async (
         `FCM push failed for notification ${notification.id}: ${err.message}`
       )
     );
+  }
 
-    // Alert notifications also reach connected admin-panel clients.
-    if (ADMIN_ALERT_TYPES.includes(type)) {
-      pushToAdmins(type, title, body, {
-        notification_id: notification.id,
-        device_id,
-        user_id: recipientId,
-        ...metadata,
-      }).catch((err: any) =>
-        Logging.warn(`Admin socket push failed: ${err?.message || err}`)
-      );
-    }
+  // Alert notifications reach connected admin-panel clients exactly once
+  // per event (not once per recipient), so admins see a single alert even
+  // when the watch is shared across several members.
+  if (ADMIN_ALERT_TYPES.includes(type) && lastNotification) {
+    pushToAdmins(type, title, body, {
+      notification_id: lastNotification.id,
+      device_id,
+      ...metadata,
+    }).catch((err: any) =>
+      Logging.warn(`Admin socket push failed: ${err?.message || err}`)
+    );
   }
 
   return lastNotification;
