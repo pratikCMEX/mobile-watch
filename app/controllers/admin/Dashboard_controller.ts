@@ -175,30 +175,31 @@ async function getDashboardAlerts(
 
     // A single alert event is fanned out to every DeviceMember of the
     // watch, so the same SOS/fall/low-battery event is stored as one
-    // Notification row per recipient. Collapse those duplicates so the
+    // Notification row per recipient (identical payload, different
+    // user_id, same createdAt). Collapse those duplicates so the
     // dashboard shows each alert exactly once — the most recent row is
-    // kept (it carries the latest read state). Genuinely distinct events
-    // (different metadata) are preserved.
+    // kept (it carries the latest read state).
+    //
+    // Distinct events are preserved: they may share the same payload
+    // (e.g. 5 SOS presses on one watch) but were created at different
+    // times, so the createdAt second is part of the dedup key. Rows
+    // created within the same second are the fan-out of one event;
+    // rows in different seconds are separate events.
     const seen = new Map<string, any>();
     for (const a of alerts) {
       const plain = typeof a.get === "function" ? a.get({ plain: true }) : a;
-      // JSON.stringify metadata so distinct events (different payload)
-      // don't collapse into a single key — plain join() would reduce
-      // every object to "[object Object]".
+      const createdAtMs = new Date(plain.createdAt).getTime();
       const key = [
         plain.device_id,
         plain.type,
         plain.title,
         plain.body,
         JSON.stringify(plain.metadata ?? null),
+        Math.floor(createdAtMs / 1000),
       ].join("::");
 
       const existing = seen.get(key);
-      if (
-        !existing ||
-        new Date(plain.createdAt).getTime() >=
-          new Date(existing.createdAt).getTime()
-      ) {
+      if (!existing || createdAtMs >= new Date(existing.createdAt).getTime()) {
         seen.set(key, plain);
       }
     }
