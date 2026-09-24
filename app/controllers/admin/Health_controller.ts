@@ -113,6 +113,7 @@ async function getAllHealthMetrics(
             [Op.or]: [
               { imei: { [Op.like]: `%${search}%` } },
               { device_name: { [Op.like]: `%${search}%` } },
+              { id: { [Op.like]: `%${search}%` } },
             ],
           },
           attributes: ["id"],
