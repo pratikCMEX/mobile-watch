@@ -569,7 +569,7 @@ const listUnlinkedDevices = async function (
     };
 
     if (search) {
-      where.serial_number = { [Op.like]: `%${search}%` };
+      where.serial_number = { [Op.iLike]: `%${search}%` };
     }
 
     const { rows, count } = await db.Device.findAndCountAll({
@@ -692,10 +692,10 @@ const listDevicesOld = async function (
 
     if (search) {
       where[Op.or] = [
-        { serial_number: { [Op.like]: `%${search}%` } },
-        { imei: { [Op.like]: `%${search}%` } },
-        { device_name: { [Op.like]: `%${search}%` } },
-        { "$DeviceOwner.name$": { [Op.like]: `%${search}%` } },
+        { serial_number: { [Op.iLike]: `%${search}%` } },
+        { imei: { [Op.iLike]: `%${search}%` } },
+        { device_name: { [Op.iLike]: `%${search}%` } },
+        { "$DeviceOwner.name$": { [Op.iLike]: `%${search}%` } },
       ];
     }
 
@@ -836,10 +836,10 @@ const listDevices = async function (
 
     if (search) {
       where[Op.or] = [
-        { serial_number: { [Op.like]: `%${search}%` } },
-        { imei: { [Op.like]: `%${search}%` } },
-        { device_name: { [Op.like]: `%${search}%` } },
-        { "$DeviceOwner.name$": { [Op.like]: `%${search}%` } },
+        { serial_number: { [Op.iLike]: `%${search}%` } },
+        { imei: { [Op.iLike]: `%${search}%` } },
+        { device_name: { [Op.iLike]: `%${search}%` } },
+        { "$DeviceOwner.name$": { [Op.iLike]: `%${search}%` } },
       ];
     }
 

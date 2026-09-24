@@ -60,9 +60,9 @@ async function getAllNotifications(
           ? { is_read: "0" }
           : undefined;
       where[Op.or] = [
-        { device_id: { [Op.like]: `%${search}%` } },
-        { "$DeviceNotification.imei$": { [Op.like]: `%${search}%` } },
-        { type: { [Op.like]: `%${search}%` } },
+        { device_id: { [Op.iLike]: `%${search}%` } },
+        { "$DeviceNotification.imei$": { [Op.iLike]: `%${search}%` } },
+        { type: { [Op.iLike]: `%${search}%` } },
         isReadCondition,
       ].filter((condition) => condition !== undefined);
     }

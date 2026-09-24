@@ -47,8 +47,8 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
         const devices = await db.Device.findAll({
           where: {
             [Op.or]: [
-              { imei: { [Op.like]: `%${search}%` } },
-              { device_name: { [Op.like]: `%${search}%` } },
+              { imei: { [Op.iLike]: `%${search}%` } },
+              { device_name: { [Op.iLike]: `%${search}%` } },
             ],
           },
           attributes: ["id"],
@@ -56,8 +56,8 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
 
         const orConditions: any[] = [
           { name: { [Op.iLike]: `%${search}%` } },
-          { phone_number: { [Op.like]: `%${search}%` } },
-          { country_code: { [Op.like]: `%${search}%` } },
+          { phone_number: { [Op.iLike]: `%${search}%` } },
+          { country_code: { [Op.iLike]: `%${search}%` } },
         ];
 
         for (const device of devices) {
@@ -73,8 +73,8 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
         // If error occurs, just search by name, phone_number, country_code
         where[Op.or] = [
           { name: { [Op.iLike]: `%${search}%` } },
-          { phone_number: { [Op.like]: `%${search}%` } },
-          { country_code: { [Op.like]: `%${search}%` } },
+          { phone_number: { [Op.iLike]: `%${search}%` } },
+          { country_code: { [Op.iLike]: `%${search}%` } },
         ];
       }
     }
@@ -145,8 +145,8 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
         const devices = await db.Device.findAll({
           where: {
             [Op.or]: [
-              { imei: { [Op.like]: `%${search}%` } },
-              { device_name: { [Op.like]: `%${search}%` } },
+              { imei: { [Op.iLike]: `%${search}%` } },
+              { device_name: { [Op.iLike]: `%${search}%` } },
             ],
           },
           attributes: ["id"],
@@ -154,8 +154,8 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
 
         const orConditions: any[] = [
           { name: { [Op.iLike]: `%${search}%` } },
-          { phone_number: { [Op.like]: `%${search}%` } },
-          { country_code: { [Op.like]: `%${search}%` } },
+          { phone_number: { [Op.iLike]: `%${search}%` } },
+          { country_code: { [Op.iLike]: `%${search}%` } },
         ];
 
         for (const device of devices) {
@@ -171,8 +171,8 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
         // If error occurs, just search by name, phone_number, country_code
         where[Op.or] = [
           { name: { [Op.iLike]: `%${search}%` } },
-          { phone_number: { [Op.like]: `%${search}%` } },
-          { country_code: { [Op.like]: `%${search}%` } },
+          { phone_number: { [Op.iLike]: `%${search}%` } },
+          { country_code: { [Op.iLike]: `%${search}%` } },
         ];
       }
     }

@@ -36,8 +36,8 @@ const listGeofences = async (
                 const devices = await db.Device.findAll({
                     where: {
                         [Op.or]: [
-                            { imei: { [Op.like]: `%${search}%` } },
-                            { device_name: { [Op.like]: `%${search}%` } },
+                            { imei: { [Op.iLike]: `%${search}%` } },
+                            { device_name: { [Op.iLike]: `%${search}%` } },
                         ],
                     },
                     attributes: ["id"],
