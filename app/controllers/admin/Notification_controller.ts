@@ -45,6 +45,11 @@ async function getAllNotifications(
     //   where.type = { [Op.in]: type };
     // }
 
+    // Filter by type - single string or array of notification types
+    if (type && (Array.isArray(type) ? type.length > 0 : type !== "")) {
+      const types: string[] = Array.isArray(type) ? type : [type];
+      where.type = { [Op.in]: types.map((t) => String(t).toLowerCase()) };
+    }
     // General search parameter - searches device_id, imei (through device), device_name (through device), title, createdAt, type, and is_read
     if (search && search !== "") {
       // is_read is stored as the ENUM strings "0"/"1" — never compare it
