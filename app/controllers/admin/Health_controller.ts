@@ -205,73 +205,73 @@ async function getAllHealthMetrics(
     }
 
     if (search && search !== "") {
-      // Check if search looks like a UUID (device_id) - exact match
+      const term = String(search).trim();
       const uuidRegex =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-      // Get accessible device IDs for access control
       const accessibleScope = await deviceIdScope(req);
       let accessibleDeviceIds: string[] | null = null;
       if (accessibleScope && accessibleScope[Op.in]) {
         accessibleDeviceIds = accessibleScope[Op.in];
       }
 
-      // Build device search conditions for the include
-      // remove — unused
-      const deviceSearchWhere: any = {
-        [Op.or]: [
-          { imei: { [Op.iLike]: `%${search}%` } },
-          { device_name: { [Op.iLike]: `%${search}%` } },
-        ],
-      };
-      if (uuidRegex.test(search)) {
-        deviceSearchWhere[Op.or].push({ id: search });
-      }
-      if (accessibleDeviceIds !== null) {
-        deviceSearchWhere.id = { [Op.in]: accessibleDeviceIds };
-      }
+      const esc = db.sequelize.escape(`%${term}%`);
 
-      // Build OR conditions for metric fields (always searched)
       const metricFieldConditions: any[] = [
-        { metric_type: { [Op.iLike]: `%${search}%` } },
-        db.sequelize.where(db.sequelize.literal(`"value_primary"::text`), {
-          [Op.iLike]: `%${search}%`,
-        }),
-        { unit: { [Op.iLike]: `%${search}%` } },
-        db.sequelize.where(db.sequelize.literal(`"createdAt"::text`), {
-          [Op.iLike]: `%${search}%`,
-        }),
+        db.sequelize.where(
+          db.sequelize.cast(
+            db.sequelize.col("HealthMetric.metric_type"),
+            "text"
+          ),
+          { [Op.iLike]: `%${term}%` }
+        ),
+        db.sequelize.where(
+          db.sequelize.cast(
+            db.sequelize.col("HealthMetric.value_primary"),
+            "text"
+          ),
+          { [Op.iLike]: `%${term}%` }
+        ),
+        { unit: { [Op.iLike]: `%${term}%` } },
+        db.sequelize.where(
+          db.sequelize.cast(db.sequelize.col("HealthMetric.createdAt"), "text"),
+          { [Op.iLike]: `%${term}%` }
+        ),
       ];
 
-      // Add device search as an OR condition via subquery on device_id
-      // This searches for metrics where device matches the search criteria
       if (accessibleDeviceIds === null) {
         // Admin/all_watches: search all devices
         metricFieldConditions.push({
           device_id: {
             [Op.in]: db.sequelize.literal(`
               (SELECT id FROM "Devices"
-               WHERE (imei ILIKE '%${search}%' OR device_name ILIKE '%${search}%'${
-              uuidRegex.test(search) ? ` OR id = '${search}'` : ""
+               WHERE (imei ILIKE ${esc} OR device_name ILIKE ${esc}${
+              uuidRegex.test(term)
+                ? ` OR id = ${db.sequelize.escape(term)}`
+                : ""
             }))
             `),
           },
         });
       } else if (accessibleDeviceIds.length > 0) {
-        // Regular staff: search only their accessible devices
+        const idsList = accessibleDeviceIds
+          .map((id) => db.sequelize.escape(id))
+          .join(",");
         metricFieldConditions.push({
           device_id: {
             [Op.in]: db.sequelize.literal(`
               (SELECT id FROM "Devices"
-               WHERE id IN ('${accessibleDeviceIds.join("','")}')
-               AND (imei ILIKE '%${search}%' OR device_name ILIKE '%${search}%'${
-              uuidRegex.test(search) ? ` OR id = '${search}'` : ""
+               WHERE id IN (${idsList})
+               AND (imei ILIKE ${esc} OR device_name ILIKE ${esc}${
+              uuidRegex.test(term)
+                ? ` OR id = ${db.sequelize.escape(term)}`
+                : ""
             }))
             `),
           },
         });
       }
-      // If accessibleDeviceIds is empty array, no device search added (staff has no devices)
+      // accessibleDeviceIds is an empty array -> staff has no devices, no device search added
 
       listWhere[Op.or] = metricFieldConditions;
     }
@@ -300,7 +300,7 @@ async function getAllHealthMetrics(
       order: [["recorded_at", "DESC"]],
       limit: Number(limit),
       offset,
-      subQuery: false, // ← add
+      subQuery: false,
       distinct: true,
     });
 
