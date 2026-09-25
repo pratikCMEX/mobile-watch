@@ -61,17 +61,32 @@ export const Schemas = {
     id: Joi.string().optional().allow(null, ""),
     device_id: Joi.string().optional().allow(null, ""),
     search: Joi.string().optional().allow(null, ""),
-    metric_type: Joi.string()
-      .valid(
-        "heart_rate",
-        "blood_pressure",
-        "sleep",
-        "spo2",
-        "calories",
-        "temperature",
-        "distance",
-        "steps_daily",
-        "steps_cumulative"
+    metric_type: Joi.alternatives()
+      .try(
+        Joi.array().items(
+          Joi.string().valid(
+            "heart_rate",
+            "blood_pressure",
+            "sleep",
+            "spo2",
+            "calories",
+            "temperature",
+            "distance",
+            "steps_daily",
+            "steps_cumulative"
+          )
+        ),
+        Joi.string().valid(
+          "heart_rate",
+          "blood_pressure",
+          "sleep",
+          "spo2",
+          "calories",
+          "temperature",
+          "distance",
+          "steps_daily",
+          "steps_cumulative"
+        )
       )
       .optional()
       .allow(null, ""),
