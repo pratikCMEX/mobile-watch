@@ -205,7 +205,7 @@ async function getAllHealthMetrics(
     }
 
     if (search && search !== "") {
-      // Build device search query for accessible devices matching IMEI/name/ID
+      // Build device search query (without access control first)
       const deviceWhere: any = {
         [Op.or]: [
           { imei: { [Op.iLike]: `%${search}%` } },
@@ -220,19 +220,24 @@ async function getAllHealthMetrics(
         deviceWhere[Op.or].push({ id: search });
       }
 
-      // Apply access control to device search
-      const accessibleScope = await deviceIdScope(req);
-      if (accessibleScope) {
-        deviceWhere.id = accessibleScope;
-      }
+      // Get device IDs matching the search
+      let matchingDeviceIds: string[] = [];
+      try {
+        const matchingDevices = await db.Device.findAll({
+          where: deviceWhere,
+          attributes: ["id"],
+          raw: true,
+        });
 
-      // Get accessible device IDs matching the search
-      const matchingDevices = await db.Device.findAll({
-        where: deviceWhere,
-        attributes: ["id"],
-        raw: true,
-      });
-      const matchingDeviceIds = matchingDevices.map((d: any) => d.id);
+        // Filter by access control
+        for (const device of matchingDevices) {
+          if (await canAccessDevice(req, device.id)) {
+            matchingDeviceIds.push(device.id);
+          }
+        }
+      } catch (err) {
+        console.error("Error during device search:", err);
+      }
 
       // Build OR conditions for the main query
       const orConditions: any[] = [
