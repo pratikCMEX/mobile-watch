@@ -217,6 +217,7 @@ async function getAllHealthMetrics(
       }
 
       // Build device search conditions for the include
+      // remove — unused
       const deviceSearchWhere: any = {
         [Op.or]: [
           { imei: { [Op.iLike]: `%${search}%` } },
@@ -226,7 +227,6 @@ async function getAllHealthMetrics(
       if (uuidRegex.test(search)) {
         deviceSearchWhere[Op.or].push({ id: search });
       }
-      // Apply access control to device search
       if (accessibleDeviceIds !== null) {
         deviceSearchWhere.id = { [Op.in]: accessibleDeviceIds };
       }
