@@ -839,6 +839,7 @@ const listDevices = async function (
         { serial_number: { [Op.iLike]: `%${search}%` } },
         { imei: { [Op.iLike]: `%${search}%` } },
         { device_name: { [Op.iLike]: `%${search}%` } },
+        { connection_status: { [Op.iLike]: `%${search}%` } },
         { "$DeviceOwner.name$": { [Op.iLike]: `%${search}%` } },
       ];
     }
