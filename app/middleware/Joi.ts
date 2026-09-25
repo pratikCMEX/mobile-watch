@@ -113,6 +113,17 @@ export const Schemas = {
       .optional()
       .allow(null, ""),
   }),
+  verifyResetToken: Joi.object({
+    token: Joi.string().required(),
+  }),
+  forgotPassword: Joi.object({
+    email: Joi.string().email().required(),
+  }),
+  updatePassword: Joi.object({
+    token: Joi.string().required(),
+    new_password: Joi.string().min(6).required(),
+    confirm_password: Joi.string().min(6).required(),
+  }),
   getAllNotifications: Joi.object({
     device_id: Joi.string().optional().allow(null, ""),
     imei: Joi.string().optional().allow(null, ""),

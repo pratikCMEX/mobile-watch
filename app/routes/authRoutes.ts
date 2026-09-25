@@ -19,6 +19,21 @@ router.delete("/delete_account", checkToken, Auth_controller.deleteAccount);
 router.post("/logout", checkToken, Auth_controller.logout);
 
 router.post(
+  "/forgotPassword",
+  ValidateJoi(Schemas.forgotPassword),
+  Auth_controller.forgotPassword
+);
+router.post(
+  "/verifyResetToken",
+  ValidateJoi(Schemas.verifyResetToken),
+  Auth_controller.verifyResetToken
+);
+router.post(
+  "/updatePassword",
+  ValidateJoi(Schemas.updatePassword),
+  Auth_controller.updatePassword
+);
+router.post(
   "/update_profile",
   uploadProfile.single("profile_image"),
   checkToken,

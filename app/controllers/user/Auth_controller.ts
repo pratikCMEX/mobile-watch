@@ -1,11 +1,18 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
-import { errorMessage, successMessage } from "../../library/Response";
+import {
+  customMessage,
+  errorMessage,
+  successMessage,
+} from "../../library/Response";
 import bcrypt from "bcrypt";
 import { Op } from "sequelize";
 import { generateAuthToken, deleteFile } from "../../helper/Helper";
 import { getUserDeviceIds } from "../../helper/WatchAccess";
 import { tcpServer } from "../../app";
+import generatePasswordResetTemplate from "../../email/password_reset";
+import EmailHelper from "../../helper/EmailHelper";
+import crypto from "crypto";
 
 /**
  * Maps GMT timezone strings (e.g., "GMT-8", "GMT+5") to numeric offsets (e.g., -8, 5).
@@ -373,6 +380,178 @@ const deleteAccount = async (
     return res.status(500).json({ message: error.message });
   }
 };
+
+const generateResetToken = (): string => {
+  return crypto.randomBytes(32).toString("hex");
+};
+
+const forgotPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return customMessage(res, 400, "Email is required", null);
+    }
+
+    // Find user by email
+    const user = await db.User.findOne({
+      where: {
+        email: email.toLowerCase(),
+
+        deletedAt: null,
+      },
+    });
+
+    if (!user) {
+      return customMessage(res, 404, "User not found", null);
+    }
+
+    // Generate reset token
+    const resetToken = generateResetToken();
+    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour expiry
+
+    // Update user with reset token
+    await user.update({
+      reset_token: resetToken,
+      reset_token_expiry: resetTokenExpiry,
+    });
+
+    // Send email with reset link
+    const resetLink = `${
+      process.env.BASE_URL || "http://localhost:3000"
+    }/reset-password?token=${resetToken}`;
+
+    try {
+      const htmlTemplate = generatePasswordResetTemplate({
+        name: user.full_name || "User",
+        resetLink,
+        expiryTime: resetTokenExpiry.toISOString(),
+      });
+
+      await EmailHelper.sendMail(htmlTemplate, email, "Password Reset Request");
+    } catch (emailError: any) {
+      console.error("Failed to send password reset email:", emailError);
+      // Continue with the response even if email fails
+    }
+
+    return successMessage(res, "Reset link sent to your email", {
+      message: "Password reset link has been sent to your email",
+      // For testing only - remove in production
+      reset_token:
+        process.env.NODE_ENV === "development" ? resetToken : undefined,
+      reset_link:
+        process.env.NODE_ENV === "development" ? resetLink : undefined,
+    });
+  } catch (error: any) {
+    console.error("forgotPassword error:", error);
+    return res.status(500).json({ status: false, message: error.message });
+  }
+};
+
+const verifyResetToken = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return customMessage(res, 400, "Reset token is required", null);
+    }
+
+    // Find user by reset token
+    const user = await db.User.findOne({
+      where: {
+        reset_token: token,
+        deletedAt: null,
+      },
+    });
+
+    if (!user) {
+      return customMessage(res, 400, "Invalid reset token", null);
+    }
+
+    // Check if token is not expired
+    if (!user.reset_token_expiry || new Date() > user.reset_token_expiry) {
+      return customMessage(res, 400, "Reset token has expired", null);
+    }
+
+    return successMessage(res, "Reset token verified successfully", {
+      message: "Token is valid, you can now reset your password",
+      email: user.email,
+    });
+  } catch (error: any) {
+    console.error("verifyResetToken error:", error);
+    return res.status(500).json({ status: false, message: error.message });
+  }
+};
+
+// ── Update Password ─────────────────────────────────────────────────────────
+const updatePassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { token, new_password, confirm_password } = req.body;
+
+    if (!token || !new_password || !confirm_password) {
+      return customMessage(res, 400, "All fields are required", null);
+    }
+
+    if (new_password !== confirm_password) {
+      return customMessage(res, 400, "Passwords do not match", null);
+    }
+
+    if (new_password.length < 6) {
+      return customMessage(
+        res,
+        400,
+        "Password must be at least 6 characters",
+        null
+      );
+    }
+
+    // Find user by reset token
+    const user = await db.User.findOne({
+      where: {
+        reset_token: token,
+        deletedAt: null,
+      },
+    });
+
+    if (!user) {
+      return customMessage(res, 400, "Invalid or expired reset token", null);
+    }
+
+    // Check if token is not expired
+    if (!user.reset_token_expiry || new Date() > user.reset_token_expiry) {
+      return customMessage(res, 400, "Reset token has expired", null);
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(new_password, 10);
+
+    // Update user password and clear reset token
+    await user.update({
+      password: hashedPassword,
+      reset_token: null,
+      reset_token_expiry: null,
+    });
+
+    return successMessage(res, "Password updated successfully", {
+      message: "Your password has been reset successfully",
+    });
+  } catch (error: any) {
+    console.error("updatePassword error:", error);
+    return res.status(500).json({ status: false, message: error.message });
+  }
+};
 export default {
   login,
   logout,
@@ -380,4 +559,7 @@ export default {
   getProfile,
   createUser,
   deleteAccount,
+  forgotPassword,
+  verifyResetToken,
+  updatePassword,
 };

@@ -49,6 +49,7 @@ async function getDashboardStats(
       where: {
         ...notificationDeviceScope,
         type: "sos",
+        is_admin_show: "1",
       },
     });
 
