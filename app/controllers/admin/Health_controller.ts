@@ -243,15 +243,13 @@ async function getAllHealthMetrics(
       const orConditions: any[] = [
         // Search on health metric fields directly (cast numeric/date to text for ILIKE)
         { metric_type: { [Op.iLike]: `%${search}%` } },
-        db.sequelize.where(
-          db.sequelize.cast(db.sequelize.col("value_primary"), "text"),
-          { [Op.iLike]: `%${search}%` }
-        ),
+        db.sequelize.where(db.sequelize.literal(`"value_primary"::text`), {
+          [Op.iLike]: `%${search}%`,
+        }),
         { unit: { [Op.iLike]: `%${search}%` } },
-        db.sequelize.where(
-          db.sequelize.cast(db.sequelize.col("createdAt"), "text"),
-          { [Op.iLike]: `%${search}%` }
-        ),
+        db.sequelize.where(db.sequelize.literal(`"createdAt"::text`), {
+          [Op.iLike]: `%${search}%`,
+        }),
       ];
 
       // Add device_id condition if any matching accessible devices found

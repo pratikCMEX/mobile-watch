@@ -41,10 +41,9 @@ const listGeofences = async (
 
         const orConditions: any[] = [
           { name: { [Op.iLike]: `%${search}%` } },
-          db.sequelize.where(
-            db.sequelize.cast(db.sequelize.col("radius_meters"), "text"),
-            { [Op.iLike]: `%${search}%` }
-          ),
+          db.sequelize.where(db.sequelize.literal(`"radius_meters"::text`), {
+            [Op.iLike]: `%${search}%`,
+          }),
         ];
 
         for (const device of devices) {
@@ -63,10 +62,9 @@ const listGeofences = async (
         whereCondition.name = { [Op.iLike]: `%${search}%` };
         whereCondition[Op.or] = [
           { name: { [Op.iLike]: `%${search}%` } },
-          db.sequelize.where(
-            db.sequelize.cast(db.sequelize.col("radius_meters"), "text"),
-            { [Op.iLike]: `%${search}%` }
-          ),
+          db.sequelize.where(db.sequelize.literal(`"radius_meters"::text`), {
+            [Op.iLike]: `%${search}%`,
+          }),
         ];
       }
     }
