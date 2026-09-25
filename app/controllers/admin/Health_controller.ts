@@ -235,12 +235,18 @@ async function getAllHealthMetrics(
           }
         }
 
-        // Also search on health metric fields
+        // Also search on health metric fields (cast numeric/date to text for ILIKE)
         orConditions.push(
           { metric_type: { [Op.iLike]: `%${search}%` } },
-          { value_primary: { [Op.iLike]: `%${search}%` } },
+          db.sequelize.where(
+            db.sequelize.cast(db.sequelize.col("value_primary"), "text"),
+            { [Op.iLike]: `%${search}%` }
+          ),
           { unit: { [Op.iLike]: `%${search}%` } },
-          { createdAt: { [Op.iLike]: `%${search}%` } }
+          db.sequelize.where(
+            db.sequelize.cast(db.sequelize.col("createdAt"), "text"),
+            { [Op.iLike]: `%${search}%` }
+          )
         );
 
         if (orConditions.length > 0) {
@@ -248,6 +254,19 @@ async function getAllHealthMetrics(
         }
       } catch (err) {
         console.error("Error during IMEI/device_name/device_id search:", err);
+        // Fallback: search on health metric fields directly
+        listWhere[Op.or] = [
+          { metric_type: { [Op.iLike]: `%${search}%` } },
+          db.sequelize.where(
+            db.sequelize.cast(db.sequelize.col("value_primary"), "text"),
+            { [Op.iLike]: `%${search}%` }
+          ),
+          { unit: { [Op.iLike]: `%${search}%` } },
+          db.sequelize.where(
+            db.sequelize.cast(db.sequelize.col("createdAt"), "text"),
+            { [Op.iLike]: `%${search}%` }
+          ),
+        ];
       }
     }
 
@@ -275,6 +294,8 @@ async function getAllHealthMetrics(
       order: [["recorded_at", "DESC"]],
       limit: Number(limit),
       offset,
+      subQuery: false, // ← add
+      distinct: true,
     });
 
     // Cumulative metrics (steps_cumulative / sleep) store a running
