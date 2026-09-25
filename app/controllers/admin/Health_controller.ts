@@ -204,8 +204,7 @@ async function getAllHealthMetrics(
       listWhere.metric_type = { [Op.in]: types };
     }
 
-    if (body.search && body.search !== "") {
-      const search = body.search;
+    if (search && search !== "") {
       // Check if search matches an IMEI, device_name, or device_id first
       try {
         const deviceWhere: any = {
@@ -235,6 +234,14 @@ async function getAllHealthMetrics(
             orConditions.push({ device_id: device.id });
           }
         }
+
+        // Also search on health metric fields
+        orConditions.push(
+          { metric_type: { [Op.iLike]: `%${search}%` } },
+          { value_primary: { [Op.iLike]: `%${search}%` } },
+          { unit: { [Op.iLike]: `%${search}%` } },
+          { createdAt: { [Op.iLike]: `%${search}%` } }
+        );
 
         if (orConditions.length > 0) {
           listWhere[Op.or] = orConditions;
