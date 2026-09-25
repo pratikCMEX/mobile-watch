@@ -41,7 +41,10 @@ const listGeofences = async (
 
         const orConditions: any[] = [
           { name: { [Op.iLike]: `%${search}%` } },
-          { radius_meters: { [Op.iLike]: `%${search}%` } },
+          db.sequelize.where(
+            db.sequelize.cast(db.sequelize.col("radius_meters"), "text"),
+            { [Op.iLike]: `%${search}%` }
+          ),
         ];
 
         for (const device of devices) {
@@ -58,7 +61,13 @@ const listGeofences = async (
         console.error("Error during IMEI/device_name search:", err);
         // If error occurs, just search by name
         whereCondition.name = { [Op.iLike]: `%${search}%` };
-        whereCondition.radius_meters = { [Op.iLike]: `%${search}%` };
+        whereCondition[Op.or] = [
+          { name: { [Op.iLike]: `%${search}%` } },
+          db.sequelize.where(
+            db.sequelize.cast(db.sequelize.col("radius_meters"), "text"),
+            { [Op.iLike]: `%${search}%` }
+          ),
+        ];
       }
     }
 
