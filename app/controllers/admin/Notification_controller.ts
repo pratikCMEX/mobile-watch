@@ -4,7 +4,7 @@ import { errorMessage, successPagination } from "../../library/Response";
 import { Op } from "sequelize";
 import { canAccessDevice, deviceIdScope } from "../../helper/WatchAccess";
 
-// Get all notifications (admin view) - supports search by device_id, imei, type, is_read, and general search with pagination
+// Get all notifications (admin view) - supports search by device_id, imei, device_name, title, createdAt, type[], is_read, and general search with pagination
 async function getAllNotifications(
   req: Request,
   res: Response,
@@ -12,7 +12,7 @@ async function getAllNotifications(
 ) {
   try {
     const body = req.body || {};
-    const { device_id, imei, page = 1, limit = 20, search } = body;
+    const { device_id, imei, page = 1, limit = 20, search, type } = body;
     const offset = (Number(page) - 1) * Number(limit);
 
     const where: any = {};
@@ -40,16 +40,12 @@ async function getAllNotifications(
       if (scope) where.device_id = scope;
     }
 
-    // Optional filters
-    // if (type) {
-    //   where.type = type;
-    // }
+    // Filter by type[] - array of notification types
+    if (type && Array.isArray(type) && type.length > 0) {
+      where.type = { [Op.in]: type };
+    }
 
-    // if (is_read !== undefined) {
-    //   where.is_read = is_read;
-    // }
-
-    // General search parameter - searches device_id, imei (through device), type, and is_read
+    // General search parameter - searches device_id, imei (through device), device_name (through device), title, createdAt, type, and is_read
     if (search && search !== "") {
       // is_read is stored as the ENUM strings "0"/"1" — never compare it
       // to a boolean (Postgres rejects `enum = boolean`).
@@ -59,11 +55,31 @@ async function getAllNotifications(
           : search === "false"
           ? { is_read: "0" }
           : undefined;
+
+      // For createdAt search, try to parse as date
+      let createdAtCondition = undefined;
+      const searchDate = new Date(search);
+      if (!isNaN(searchDate.getTime())) {
+        // Search for notifications created on this date (full day range)
+        const startOfDay = new Date(searchDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(searchDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        createdAtCondition = {
+          createdAt: {
+            [Op.between]: [startOfDay, endOfDay],
+          },
+        };
+      }
+
       where[Op.or] = [
         { device_id: { [Op.iLike]: `%${search}%` } },
         { "$DeviceNotification.imei$": { [Op.iLike]: `%${search}%` } },
+        { "$DeviceNotification.device_name$": { [Op.iLike]: `%${search}%` } },
+        { title: { [Op.iLike]: `%${search}%` } },
         { type: { [Op.iLike]: `%${search}%` } },
         isReadCondition,
+        createdAtCondition,
       ].filter((condition) => condition !== undefined);
     }
 
