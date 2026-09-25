@@ -39,7 +39,10 @@ const listGeofences = async (
           attributes: ["id"],
         });
 
-        const orConditions: any[] = [{ name: { [Op.iLike]: `%${search}%` } }];
+        const orConditions: any[] = [
+          { name: { [Op.iLike]: `%${search}%` } },
+          { radius_meters: { [Op.iLike]: `%${search}%` } },
+        ];
 
         for (const device of devices) {
           const hasAccess = await canAccessDevice(req, device.id);
