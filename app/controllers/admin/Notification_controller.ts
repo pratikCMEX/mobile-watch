@@ -41,9 +41,9 @@ async function getAllNotifications(
     }
 
     // Filter by type[] - array of notification types
-    if (type && Array.isArray(type) && type.length > 0) {
-      where.type = { [Op.in]: type };
-    }
+    // if (type && Array.isArray(type) && type.length > 0) {
+    where.type = { [Op.in]: type };
+    // }
 
     // General search parameter - searches device_id, imei (through device), device_name (through device), title, createdAt, type, and is_read
     if (search && search !== "") {
