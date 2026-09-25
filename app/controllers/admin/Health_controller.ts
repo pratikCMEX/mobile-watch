@@ -225,13 +225,13 @@ async function getAllHealthMetrics(
           ),
           { [Op.iLike]: `%${term}%` }
         ),
-        db.sequelize.where(
-          db.sequelize.cast(
-            db.sequelize.col("HealthMetric.value_primary"),
-            "text"
-          ),
-          { [Op.iLike]: `%${term}%` }
-        ),
+        // db.sequelize.where(
+        //   db.sequelize.cast(
+        //     db.sequelize.col("HealthMetric.value_primary"),
+        //     "text"
+        //   ),
+        //   { [Op.iLike]: `%${term}%` }
+        // ),
         { unit: { [Op.iLike]: `%${term}%` } },
         db.sequelize.where(
           db.sequelize.cast(db.sequelize.col("HealthMetric.createdAt"), "text"),
