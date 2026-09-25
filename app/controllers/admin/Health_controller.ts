@@ -209,39 +209,30 @@ async function getAllHealthMetrics(
       const uuidRegex =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-      // Get accessible device IDs for access control (null = admin/all_watches, [] = no access, [ids] = specific devices)
+      // Get accessible device IDs for access control
       const accessibleScope = await deviceIdScope(req);
       let accessibleDeviceIds: string[] | null = null;
       if (accessibleScope && accessibleScope[Op.in]) {
         accessibleDeviceIds = accessibleScope[Op.in];
       }
 
-      // Build device search query with access control built-in
-      const deviceWhere: any = {
+      // Build device search conditions for the include
+      const deviceSearchWhere: any = {
         [Op.or]: [
           { imei: { [Op.iLike]: `%${search}%` } },
           { device_name: { [Op.iLike]: `%${search}%` } },
         ],
       };
       if (uuidRegex.test(search)) {
-        deviceWhere[Op.or].push({ id: search });
+        deviceSearchWhere[Op.or].push({ id: search });
       }
-      // Apply access control: only search devices the user can access
+      // Apply access control to device search
       if (accessibleDeviceIds !== null) {
-        deviceWhere.id = { [Op.in]: accessibleDeviceIds };
+        deviceSearchWhere.id = { [Op.in]: accessibleDeviceIds };
       }
 
-      // Get matching accessible device IDs
-      const matchingDevices = await db.Device.findAll({
-        where: deviceWhere,
-        attributes: ["id"],
-        raw: true,
-      });
-      const matchingDeviceIds = matchingDevices.map((d: any) => d.id);
-
-      // Build OR conditions for the main query
-      const orConditions: any[] = [
-        // Search on health metric fields directly (cast numeric/date to text for ILIKE)
+      // Build OR conditions for metric fields (always searched)
+      const metricFieldConditions: any[] = [
         { metric_type: { [Op.iLike]: `%${search}%` } },
         db.sequelize.where(db.sequelize.literal(`"value_primary"::text`), {
           [Op.iLike]: `%${search}%`,
@@ -252,12 +243,37 @@ async function getAllHealthMetrics(
         }),
       ];
 
-      // Add device_id condition if any matching accessible devices found
-      if (matchingDeviceIds.length > 0) {
-        orConditions.push({ device_id: { [Op.in]: matchingDeviceIds } });
+      // Add device search as an OR condition via subquery on device_id
+      // This searches for metrics where device matches the search criteria
+      if (accessibleDeviceIds === null) {
+        // Admin/all_watches: search all devices
+        metricFieldConditions.push({
+          device_id: {
+            [Op.in]: db.sequelize.literal(`
+              (SELECT id FROM "Devices"
+               WHERE (imei ILIKE '%${search}%' OR device_name ILIKE '%${search}%'${
+              uuidRegex.test(search) ? ` OR id = '${search}'` : ""
+            }))
+            `),
+          },
+        });
+      } else if (accessibleDeviceIds.length > 0) {
+        // Regular staff: search only their accessible devices
+        metricFieldConditions.push({
+          device_id: {
+            [Op.in]: db.sequelize.literal(`
+              (SELECT id FROM "Devices"
+               WHERE id IN ('${accessibleDeviceIds.join("','")}')
+               AND (imei ILIKE '%${search}%' OR device_name ILIKE '%${search}%'${
+              uuidRegex.test(search) ? ` OR id = '${search}'` : ""
+            }))
+            `),
+          },
+        });
       }
+      // If accessibleDeviceIds is empty array, no device search added (staff has no devices)
 
-      listWhere[Op.or] = orConditions;
+      listWhere[Op.or] = metricFieldConditions;
     }
 
     const { count, rows } = await db.HealthMetric.findAndCountAll({

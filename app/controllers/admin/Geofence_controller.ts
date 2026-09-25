@@ -27,45 +27,56 @@ const listGeofences = async (
     const whereCondition: any = {};
 
     if (search) {
-      // Check if search matches an IMEI or device_name first
-      try {
-        const devices = await db.Device.findAll({
-          where: {
-            [Op.or]: [
-              { imei: { [Op.iLike]: `%${search}%` } },
-              { device_name: { [Op.iLike]: `%${search}%` } },
-            ],
+      // Check if search looks like a UUID (device_id) - exact match
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      // Get accessible device IDs for access control
+      const accessibleScope = await deviceIdScope(req);
+      let accessibleDeviceIds: string[] | null = null;
+      if (accessibleScope && accessibleScope[Op.in]) {
+        accessibleDeviceIds = accessibleScope[Op.in];
+      }
+
+      // Build OR conditions for geofence fields (always searched)
+      const orConditions: any[] = [
+        { name: { [Op.iLike]: `%${search}%` } },
+        db.sequelize.where(db.sequelize.literal(`"radius_meters"::text`), {
+          [Op.iLike]: `%${search}%`,
+        }),
+      ];
+
+      // Add device search as an OR condition via subquery on device_id
+      if (accessibleDeviceIds === null) {
+        // Admin/all_watches: search all devices
+        orConditions.push({
+          device_id: {
+            [Op.in]: db.sequelize.literal(`
+              (SELECT id FROM "Devices"
+               WHERE (imei ILIKE '%${search}%' OR device_name ILIKE '%${search}%'${
+              uuidRegex.test(search) ? ` OR id = '${search}'` : ""
+            }))
+            `),
           },
-          attributes: ["id"],
         });
+      } else if (accessibleDeviceIds.length > 0) {
+        // Regular staff: search only their accessible devices
+        orConditions.push({
+          device_id: {
+            [Op.in]: db.sequelize.literal(`
+              (SELECT id FROM "Devices"
+               WHERE id IN ('${accessibleDeviceIds.join("','")}')
+               AND (imei ILIKE '%${search}%' OR device_name ILIKE '%${search}%'${
+              uuidRegex.test(search) ? ` OR id = '${search}'` : ""
+            }))
+            `),
+          },
+        });
+      }
+      // If accessibleDeviceIds is empty array, no device search added (staff has no devices)
 
-        const orConditions: any[] = [
-          { name: { [Op.iLike]: `%${search}%` } },
-          db.sequelize.where(db.sequelize.literal(`"radius_meters"::text`), {
-            [Op.iLike]: `%${search}%`,
-          }),
-        ];
-
-        for (const device of devices) {
-          const hasAccess = await canAccessDevice(req, device.id);
-          if (hasAccess) {
-            orConditions.push({ device_id: device.id });
-          }
-        }
-
-        if (orConditions.length > 0) {
-          whereCondition[Op.or] = orConditions;
-        }
-      } catch (err) {
-        console.error("Error during IMEI/device_name search:", err);
-        // If error occurs, just search by name
-        whereCondition.name = { [Op.iLike]: `%${search}%` };
-        whereCondition[Op.or] = [
-          { name: { [Op.iLike]: `%${search}%` } },
-          db.sequelize.where(db.sequelize.literal(`"radius_meters"::text`), {
-            [Op.iLike]: `%${search}%`,
-          }),
-        ];
+      if (orConditions.length > 0) {
+        whereCondition[Op.or] = orConditions;
       }
     }
 
