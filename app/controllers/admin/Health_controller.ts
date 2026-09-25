@@ -176,7 +176,7 @@ async function getAllHealthMetrics(
     }
 
     // Otherwise, return all health metrics with pagination
-    // If search parameter is provided, search by imei, device_id, and metric_type
+    // If search parameter is provided, search by imei, device_name, device_id, and metric fields
     const listWhere: any = {};
     const scope = await deviceIdScope(req);
     if (scope) listWhere.device_id = scope;
@@ -205,69 +205,56 @@ async function getAllHealthMetrics(
     }
 
     if (search && search !== "") {
-      // Check if search matches an IMEI, device_name, or device_id first
-      try {
-        const deviceWhere: any = {
-          [Op.or]: [
-            { imei: { [Op.iLike]: `%${search}%` } },
-            { device_name: { [Op.iLike]: `%${search}%` } },
-          ],
-        };
+      // Build device search query for accessible devices matching IMEI/name/ID
+      const deviceWhere: any = {
+        [Op.or]: [
+          { imei: { [Op.iLike]: `%${search}%` } },
+          { device_name: { [Op.iLike]: `%${search}%` } },
+        ],
+      };
 
-        // Check if search looks like a UUID (device_id) - exact match
-        const uuidRegex =
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (uuidRegex.test(search)) {
-          deviceWhere[Op.or].push({ id: search });
-        }
-
-        const devices = await db.Device.findAll({
-          where: deviceWhere,
-          attributes: ["id"],
-        });
-
-        const orConditions: any[] = [];
-
-        for (const device of devices) {
-          const hasAccess = await canAccessDevice(req, device.id);
-          if (hasAccess) {
-            orConditions.push({ device_id: device.id });
-          }
-        }
-
-        // Also search on health metric fields (cast numeric/date to text for ILIKE)
-        orConditions.push(
-          { metric_type: { [Op.iLike]: `%${search}%` } },
-          db.sequelize.where(
-            db.sequelize.cast(db.sequelize.col("value_primary"), "text"),
-            { [Op.iLike]: `%${search}%` }
-          ),
-          { unit: { [Op.iLike]: `%${search}%` } },
-          db.sequelize.where(
-            db.sequelize.cast(db.sequelize.col("createdAt"), "text"),
-            { [Op.iLike]: `%${search}%` }
-          )
-        );
-
-        if (orConditions.length > 0) {
-          listWhere[Op.or] = orConditions;
-        }
-      } catch (err) {
-        console.error("Error during IMEI/device_name/device_id search:", err);
-        // Fallback: search on health metric fields directly
-        listWhere[Op.or] = [
-          { metric_type: { [Op.iLike]: `%${search}%` } },
-          db.sequelize.where(
-            db.sequelize.cast(db.sequelize.col("value_primary"), "text"),
-            { [Op.iLike]: `%${search}%` }
-          ),
-          { unit: { [Op.iLike]: `%${search}%` } },
-          db.sequelize.where(
-            db.sequelize.cast(db.sequelize.col("createdAt"), "text"),
-            { [Op.iLike]: `%${search}%` }
-          ),
-        ];
+      // Check if search looks like a UUID (device_id) - exact match
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (uuidRegex.test(search)) {
+        deviceWhere[Op.or].push({ id: search });
       }
+
+      // Apply access control to device search
+      const accessibleScope = await deviceIdScope(req);
+      if (accessibleScope) {
+        deviceWhere.id = accessibleScope;
+      }
+
+      // Get accessible device IDs matching the search
+      const matchingDevices = await db.Device.findAll({
+        where: deviceWhere,
+        attributes: ["id"],
+        raw: true,
+      });
+      const matchingDeviceIds = matchingDevices.map((d: any) => d.id);
+
+      // Build OR conditions for the main query
+      const orConditions: any[] = [
+        // Search on health metric fields directly (cast numeric/date to text for ILIKE)
+        { metric_type: { [Op.iLike]: `%${search}%` } },
+        db.sequelize.where(
+          db.sequelize.cast(db.sequelize.col("value_primary"), "text"),
+          { [Op.iLike]: `%${search}%` }
+        ),
+        { unit: { [Op.iLike]: `%${search}%` } },
+        db.sequelize.where(
+          db.sequelize.cast(db.sequelize.col("createdAt"), "text"),
+          { [Op.iLike]: `%${search}%` }
+        ),
+      ];
+
+      // Add device_id condition if any matching accessible devices found
+      if (matchingDeviceIds.length > 0) {
+        orConditions.push({ device_id: { [Op.in]: matchingDeviceIds } });
+      }
+
+      listWhere[Op.or] = orConditions;
     }
 
     const { count, rows } = await db.HealthMetric.findAndCountAll({
