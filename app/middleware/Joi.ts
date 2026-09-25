@@ -119,6 +119,8 @@ export const Schemas = {
     page: Joi.number().integer().min(1).optional().default(1),
     limit: Joi.number().integer().min(1).optional().default(20),
 
+    type: Joi.string().optional().allow(null, ""),
+
     search: Joi.string().optional().allow(null, ""),
   }),
   getAllEmergencyContacts: Joi.object({
