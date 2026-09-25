@@ -205,39 +205,39 @@ async function getAllHealthMetrics(
     }
 
     if (search && search !== "") {
-      // Build device search query (without access control first)
+      // Check if search looks like a UUID (device_id) - exact match
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      // Get accessible device IDs for access control (null = admin/all_watches, [] = no access, [ids] = specific devices)
+      const accessibleScope = await deviceIdScope(req);
+      let accessibleDeviceIds: string[] | null = null;
+      if (accessibleScope && accessibleScope[Op.in]) {
+        accessibleDeviceIds = accessibleScope[Op.in];
+      }
+
+      // Build device search query with access control built-in
       const deviceWhere: any = {
         [Op.or]: [
           { imei: { [Op.iLike]: `%${search}%` } },
           { device_name: { [Op.iLike]: `%${search}%` } },
         ],
       };
-
-      // Check if search looks like a UUID (device_id) - exact match
-      const uuidRegex =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (uuidRegex.test(search)) {
         deviceWhere[Op.or].push({ id: search });
       }
-
-      // Get device IDs matching the search
-      let matchingDeviceIds: string[] = [];
-      try {
-        const matchingDevices = await db.Device.findAll({
-          where: deviceWhere,
-          attributes: ["id"],
-          raw: true,
-        });
-
-        // Filter by access control
-        for (const device of matchingDevices) {
-          if (await canAccessDevice(req, device.id)) {
-            matchingDeviceIds.push(device.id);
-          }
-        }
-      } catch (err) {
-        console.error("Error during device search:", err);
+      // Apply access control: only search devices the user can access
+      if (accessibleDeviceIds !== null) {
+        deviceWhere.id = { [Op.in]: accessibleDeviceIds };
       }
+
+      // Get matching accessible device IDs
+      const matchingDevices = await db.Device.findAll({
+        where: deviceWhere,
+        attributes: ["id"],
+        raw: true,
+      });
+      const matchingDeviceIds = matchingDevices.map((d: any) => d.id);
 
       // Build OR conditions for the main query
       const orConditions: any[] = [
