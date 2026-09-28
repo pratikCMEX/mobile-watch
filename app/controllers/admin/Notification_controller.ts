@@ -243,7 +243,7 @@ async function getAllNotifications(
         createdAtCondition,
       ].filter((condition) => condition !== undefined);
     }
-
+    where.user_id! = null;
     const { count, rows } = await db.Notification.findAndCountAll({
       where,
       include: [
