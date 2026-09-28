@@ -10,7 +10,7 @@ import { Op } from "sequelize";
 import { generateAuthToken, deleteFile } from "../../helper/Helper";
 import { getUserDeviceIds } from "../../helper/WatchAccess";
 import { tcpServer } from "../../app";
-import generatePasswordResetTemplate from "../../email/password_reset";
+import generateOtpTemplate from "../../email/otp";
 import EmailHelper from "../../helper/EmailHelper";
 import crypto from "crypto";
 
@@ -381,10 +381,47 @@ const deleteAccount = async (
   }
 };
 
+// ── Forgot Password (OTP flow) ────────────────────────────────────────────
+const OTP_LENGTH = 6;
+const OTP_EXPIRY_MINUTES = 10;
+const RESET_TOKEN_EXPIRY_MINUTES = 15;
+const MAX_OTP_ATTEMPTS = 5;
+const BCRYPT_ROUNDS = 10;
+
+/** Cryptographically secure 6 digit OTP, zero padded. */
+const generateOtp = (): string => {
+  return crypto
+    .randomInt(0, 10 ** OTP_LENGTH)
+    .toString()
+    .padStart(OTP_LENGTH, "0");
+};
+
+/** Random reset token handed to the client after a successful OTP check. */
 const generateResetToken = (): string => {
   return crypto.randomBytes(32).toString("hex");
 };
 
+const minutesFromNow = (minutes: number): Date =>
+  new Date(Date.now() + minutes * 60 * 1000);
+
+/**
+ * Clears any pending OTP / reset token for a user so a new request starts clean.
+ */
+const clearOtpState = async (user: any) => {
+  await user.update({
+    otp_hash: null,
+    otp_expiry: null,
+    otp_attempts: 0,
+    reset_token: null,
+    reset_token_expiry: null,
+  });
+};
+
+/**
+ * API 1 — POST /forgotPassword
+ * Body: { email }
+ * Emails a 6 digit OTP to the account.
+ */
 const forgotPassword = async (
   req: Request,
   res: Response,
@@ -397,110 +434,166 @@ const forgotPassword = async (
       return customMessage(res, 400, "Email is required", null);
     }
 
-    // Find user by email
-    const user = await db.User.findOne({
-      where: {
-        email: email.toLowerCase(),
+    const normalizedEmail = email.toLowerCase().trim();
 
-        deletedAt: null,
-      },
+    const user = await db.User.findOne({
+      where: { email: normalizedEmail },
     });
 
+    /*
+     * Always answer with the same generic message so this endpoint cannot be
+     * used to discover which email addresses have an account.
+     */
+    const GENERIC_RESPONSE = successMessage(
+      res,
+      "If an account exists for this email, an OTP has been sent",
+      { message: "Please check your email for the verification code" }
+    );
+
     if (!user) {
-      return customMessage(res, 404, "User not found", null);
+      return GENERIC_RESPONSE;
     }
 
-    // Generate reset token
-    const resetToken = generateResetToken();
-    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour expiry
+    // Any previous reset attempt is discarded when a new OTP is requested.
+    const otp = generateOtp();
+    const otpHash = await bcrypt.hash(otp, BCRYPT_ROUNDS);
+    const otpExpiry = minutesFromNow(OTP_EXPIRY_MINUTES);
 
-    // Update user with reset token
     await user.update({
+      otp_hash: otpHash,
+      otp_expiry: otpExpiry,
+      otp_attempts: 0,
+      reset_token: null,
+      reset_token_expiry: null,
+    });
+
+    try {
+      const htmlTemplate = generateOtpTemplate({
+        name: user.name || "User",
+        otp,
+        expiryMinutes: OTP_EXPIRY_MINUTES,
+      });
+
+      await EmailHelper.sendMail(
+        htmlTemplate,
+        user.email,
+        "Your Password Reset Code"
+      );
+    } catch (emailError: any) {
+      console.error("Failed to send OTP email:", emailError);
+    }
+
+    return successMessage(
+      res,
+      "If an account exists for this email, an OTP has been sent",
+      {
+        message: "Please check your email for the verification code",
+        email: user.email,
+        expires_in_minutes: OTP_EXPIRY_MINUTES,
+        // Development convenience only — never expose the OTP in production.
+        otp: process.env.NODE_ENV === "development" ? otp : undefined,
+      }
+    );
+  } catch (error: any) {
+    console.error("forgotPassword error:", error);
+    return errorMessage(res, "Error processing forgot password request");
+  }
+};
+
+/**
+ * API 2 — POST /verifyOtp
+ * Body: { email, otp }
+ * Verifies the emailed OTP and returns a short lived reset token.
+ */
+const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return customMessage(res, 400, "Email and OTP are required", null);
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    const user = await db.User.findOne({
+      where: { email: normalizedEmail },
+    });
+
+    if (!user || !user.otp_hash) {
+      return customMessage(res, 400, "Invalid or expired OTP", null);
+    }
+
+    if (!user.otp_expiry || new Date() > user.otp_expiry) {
+      await clearOtpState(user);
+      return customMessage(
+        res,
+        400,
+        "OTP has expired, request a new one",
+        null
+      );
+    }
+
+    const isMatch = await bcrypt.compare(String(otp), user.otp_hash);
+
+    if (!isMatch) {
+      const attempts = (user.otp_attempts || 0) + 1;
+
+      if (attempts >= MAX_OTP_ATTEMPTS) {
+        await clearOtpState(user);
+        return customMessage(
+          res,
+          400,
+          "Too many incorrect attempts, request a new OTP",
+          null
+        );
+      }
+
+      await user.update({ otp_attempts: attempts });
+
+      return customMessage(res, 400, "Invalid OTP", {
+        attempts_remaining: MAX_OTP_ATTEMPTS - attempts,
+      });
+    }
+
+    // OTP is correct — issue a reset token for the change password step and
+    // wipe the OTP so it cannot be replayed.
+    const resetToken = generateResetToken();
+    const resetTokenExpiry = minutesFromNow(RESET_TOKEN_EXPIRY_MINUTES);
+
+    await user.update({
+      otp_hash: null,
+      otp_expiry: null,
+      otp_attempts: 0,
       reset_token: resetToken,
       reset_token_expiry: resetTokenExpiry,
     });
 
-    // Send email with reset link
-    const resetLink = `${
-      process.env.BASE_URL || "http://localhost:3000"
-    }/reset-password?token=${resetToken}`;
-
-    try {
-      const htmlTemplate = generatePasswordResetTemplate({
-        name: user.full_name || "User",
-        resetLink,
-        expiryTime: resetTokenExpiry.toISOString(),
-      });
-
-      await EmailHelper.sendMail(htmlTemplate, email, "Password Reset Request");
-    } catch (emailError: any) {
-      console.error("Failed to send password reset email:", emailError);
-      // Continue with the response even if email fails
-    }
-
-    return successMessage(res, "Reset link sent to your email", {
-      message: "Password reset link has been sent to your email",
-      // For testing only - remove in production
-      reset_token:
-        process.env.NODE_ENV === "development" ? resetToken : undefined,
-      reset_link:
-        process.env.NODE_ENV === "development" ? resetLink : undefined,
-    });
-  } catch (error: any) {
-    console.error("forgotPassword error:", error);
-    return res.status(500).json({ status: false, message: error.message });
-  }
-};
-
-const verifyResetToken = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const { token } = req.body;
-
-    if (!token) {
-      return customMessage(res, 400, "Reset token is required", null);
-    }
-
-    // Find user by reset token
-    const user = await db.User.findOne({
-      where: {
-        reset_token: token,
-        deletedAt: null,
-      },
-    });
-
-    if (!user) {
-      return customMessage(res, 400, "Invalid reset token", null);
-    }
-
-    // Check if token is not expired
-    if (!user.reset_token_expiry || new Date() > user.reset_token_expiry) {
-      return customMessage(res, 400, "Reset token has expired", null);
-    }
-
-    return successMessage(res, "Reset token verified successfully", {
-      message: "Token is valid, you can now reset your password",
+    return successMessage(res, "OTP verified successfully", {
+      message: "Verification complete, you can now set a new password",
       email: user.email,
+      reset_token: resetToken,
+      expires_in_minutes: RESET_TOKEN_EXPIRY_MINUTES,
     });
   } catch (error: any) {
-    console.error("verifyResetToken error:", error);
-    return res.status(500).json({ status: false, message: error.message });
+    console.error("verifyOtp error:", error);
+    return errorMessage(res, "Error verifying OTP");
   }
 };
 
-// ── Update Password ─────────────────────────────────────────────────────────
-const updatePassword = async (
+/**
+ * API 3 — POST /changePassword
+ * Body: { reset_token, new_password, confirm_password }
+ * Consumes the reset token and stores the new password.
+ */
+const changePassword = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    const { token, new_password, confirm_password } = req.body;
+    const { reset_token, new_password, confirm_password } = req.body;
 
-    if (!token || !new_password || !confirm_password) {
+    if (!reset_token || !new_password || !confirm_password) {
       return customMessage(res, 400, "All fields are required", null);
     }
 
@@ -517,41 +610,40 @@ const updatePassword = async (
       );
     }
 
-    // Find user by reset token
     const user = await db.User.findOne({
-      where: {
-        reset_token: token,
-        deletedAt: null,
-      },
+      where: { reset_token },
     });
 
     if (!user) {
       return customMessage(res, 400, "Invalid or expired reset token", null);
     }
 
-    // Check if token is not expired
     if (!user.reset_token_expiry || new Date() > user.reset_token_expiry) {
+      await user.update({ reset_token: null, reset_token_expiry: null });
       return customMessage(res, 400, "Reset token has expired", null);
     }
 
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(new_password, 10);
+    const hashedPassword = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
 
-    // Update user password and clear reset token
+    // Single use — clear both the token and any leftover OTP state.
     await user.update({
       password: hashedPassword,
       reset_token: null,
       reset_token_expiry: null,
+      otp_hash: null,
+      otp_expiry: null,
+      otp_attempts: 0,
     });
 
-    return successMessage(res, "Password updated successfully", {
-      message: "Your password has been reset successfully",
+    return successMessage(res, "Password changed successfully", {
+      message: "Your password has been changed successfully",
     });
   } catch (error: any) {
-    console.error("updatePassword error:", error);
-    return res.status(500).json({ status: false, message: error.message });
+    console.error("changePassword error:", error);
+    return errorMessage(res, "Error changing password");
   }
 };
+
 export default {
   login,
   logout,
@@ -560,6 +652,6 @@ export default {
   createUser,
   deleteAccount,
   forgotPassword,
-  verifyResetToken,
-  updatePassword,
+  verifyOtp,
+  changePassword,
 };

@@ -14,6 +14,11 @@ export interface UserAttributes {
   profile_image?: string | null;
   fcm_token?: string | null;
   device_type?: string | null;
+  otp_hash?: string | null;
+  otp_expiry?: Date | null;
+  otp_attempts?: number;
+  reset_token?: string | null;
+  reset_token_expiry?: Date | null;
   deletedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -36,6 +41,14 @@ class User
   public profile_image?: string | null;
   public fcm_token?: string | null;
   public device_type?: string | null;
+
+  // ── Password Reset (OTP flow) ──
+  public otp_hash?: string | null;
+  public otp_expiry?: Date | null;
+  public otp_attempts?: number;
+  public reset_token?: string | null;
+  public reset_token_expiry?: Date | null;
+
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
   public readonly deletedAt!: Date;
@@ -129,6 +142,39 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         allowNull: true,
         defaultValue: null,
         comment: "Device type: android or ios",
+      },
+
+      // ── Password Reset (OTP flow) ──
+      otp_hash: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: null,
+        comment: "bcrypt hash of the 6 digit OTP, never the plain OTP",
+      },
+      otp_expiry: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        defaultValue: null,
+        comment: "Timestamp after which the pending OTP is no longer valid",
+      },
+      otp_attempts: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        comment: "Failed OTP verification attempts for the current OTP",
+      },
+      reset_token: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: null,
+        comment:
+          "Short lived token issued by /verifyOtp, consumed by /changePassword",
+      },
+      reset_token_expiry: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        defaultValue: null,
+        comment: "Expiry timestamp of reset_token",
       },
       deletedAt: {
         type: DataTypes.DATE,

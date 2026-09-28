@@ -18,20 +18,25 @@ router.delete("/delete_account", checkToken, Auth_controller.deleteAccount);
 
 router.post("/logout", checkToken, Auth_controller.logout);
 
+/* ── Forgot password (OTP flow) ──
+   1. /forgotPassword  — emails a 6 digit OTP
+   2. /verifyOtp       — verifies the OTP, returns a short lived reset token
+   3. /changePassword  — consumes the reset token, sets the new password
+*/
 router.post(
   "/forgotPassword",
   ValidateJoi(Schemas.forgotPassword),
   Auth_controller.forgotPassword
 );
 router.post(
-  "/verifyResetToken",
-  ValidateJoi(Schemas.verifyResetToken),
-  Auth_controller.verifyResetToken
+  "/verifyOtp",
+  ValidateJoi(Schemas.verifyOtp),
+  Auth_controller.verifyOtp
 );
 router.post(
-  "/updatePassword",
-  ValidateJoi(Schemas.updatePassword),
-  Auth_controller.updatePassword
+  "/changePassword",
+  ValidateJoi(Schemas.changePassword),
+  Auth_controller.changePassword
 );
 router.post(
   "/update_profile",

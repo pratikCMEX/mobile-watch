@@ -113,16 +113,34 @@ export const Schemas = {
       .optional()
       .allow(null, ""),
   }),
-  verifyResetToken: Joi.object({
-    token: Joi.string().required(),
-  }),
+  // ── Forgot password (OTP flow) ──
+  // API 1: request an OTP to be emailed.
   forgotPassword: Joi.object({
     email: Joi.string().email().required(),
   }),
-  updatePassword: Joi.object({
-    token: Joi.string().required(),
-    new_password: Joi.string().min(6).required(),
+  // API 2: verify the emailed OTP, returns a short lived reset token.
+  verifyOtp: Joi.object({
+    email: Joi.string().email().required(),
+    otp: Joi.string()
+      .pattern(/^[0-9]{6}$/)
+      .required()
+      .messages({
+        "string.pattern.base": "OTP must be exactly 6 digits",
+      }),
+  }),
+  // API 3: consume the reset token to set a new password.
+  changePassword: Joi.object({
+    reset_token: Joi.string().required(),
+    new_password: Joi.string().min(6).max(72).required().messages({
+      "string.min": "New password must be at least 6 characters long",
+      "string.max": "New password must be at most 72 characters long",
+    }),
     confirm_password: Joi.string().min(6).required(),
+  }).custom((value: any, helpers: any) => {
+    if (value.new_password !== value.confirm_password) {
+      return helpers.message({ custom: "Passwords do not match" });
+    }
+    return value;
   }),
   getAllNotifications: Joi.object({
     device_id: Joi.string().optional().allow(null, ""),
