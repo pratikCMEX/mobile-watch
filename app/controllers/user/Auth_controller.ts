@@ -447,7 +447,10 @@ const forgotPassword = async (
     const GENERIC_RESPONSE = successMessage(
       res,
       "If an account exists for this email, an OTP has been sent",
-      { message: "Please check your email for the verification code" }
+      {
+        message: "Please check your email for the verification code",
+        email: normalizedEmail,
+      }
     );
 
     if (!user) {
