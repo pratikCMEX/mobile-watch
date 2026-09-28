@@ -250,7 +250,7 @@ async function getAllNotifications(
         {
           model: db.Device,
           as: "DeviceNotification",
-          attributes: ["id", "imei", "device_name"],
+          attributes: ["id", "user_id", "imei", "device_name"],
           required: false,
         },
         {
