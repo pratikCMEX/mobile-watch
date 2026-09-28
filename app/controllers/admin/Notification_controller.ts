@@ -9,11 +9,21 @@ import { canAccessDevice, deviceIdScope } from "../../helper/WatchAccess";
  *
  * The include in the query is a LEFT JOIN on `Notifications.user_id`; rows
  * stored without a recipient (see createNotification in
- * notification.service.ts) therefore come back with `UserNotification: null`.
- * The recipient is resolved as the first DeviceMember assigned to the watch,
- * falling back to the device owner, so the admin list can always show who the
- * alert belongs to. Two batched queries are used, so the cost does not grow
- * with the page size.
+ * notification.service.ts, which writes `user_id: null` when a watch has no
+ * DeviceMembers) therefore come back with `UserNotification: null`.
+ *
+ * The recipient is resolved with the following chain, so the admin list can
+ * always show who an alert belongs to:
+ *   1. the DeviceMember with role "admin", else the oldest DeviceMember;
+ *   2. the device owner (`Devices.owner_id`);
+ *   3. the user registered with the account email stored on the device
+ *      (`Devices.email`);
+ *   4. the user registered with the account phone stored on the device
+ *      (`Devices.phone_number`).
+ *
+ * Everything is fetched with three batched queries, so the cost does not grow
+ * with the page size, and the block is skipped entirely when the page has no
+ * orphan rows.
  */
 async function attachFallbackRecipients(rows: any[]): Promise<void> {
   const orphans = (rows || []).filter(
@@ -29,50 +39,111 @@ async function attachFallbackRecipients(rows: any[]): Promise<void> {
   const [members, devices] = await Promise.all([
     db.DeviceMember.findAll({
       where: { device_id: { [Op.in]: deviceIds } },
-      attributes: ["device_id", "user_id"],
+      attributes: ["device_id", "user_id", "role"],
       order: [["createdAt", "ASC"]],
       raw: true,
     }),
     db.Device.findAll({
       where: { id: { [Op.in]: deviceIds } },
-      attributes: ["id", "owner_id"],
+      attributes: ["id", "owner_id", "email", "phone_number"],
       raw: true,
     }),
   ]);
 
-  // First member assigned to the device wins as the representative recipient.
-  const memberByDevice = new Map<string, string>();
+  // A member with role "admin" is the representative recipient; otherwise the
+  // oldest assignment (rows arrive ordered by createdAt ASC) wins.
+  const adminByDevice = new Map<string, string>();
+  const oldestByDevice = new Map<string, string>();
   (members as any[]).forEach((member) => {
-    if (member.user_id && !memberByDevice.has(member.device_id)) {
-      memberByDevice.set(member.device_id, member.user_id);
+    if (!member.user_id) return;
+    if (member.role === "admin" && !adminByDevice.has(member.device_id)) {
+      adminByDevice.set(member.device_id, member.user_id);
     }
+    if (!oldestByDevice.has(member.device_id)) {
+      oldestByDevice.set(member.device_id, member.user_id);
+    }
+  });
+  const memberByDevice = new Map<string, string>();
+  deviceIds.forEach((id) => {
+    const resolved = adminByDevice.get(id) || oldestByDevice.get(id);
+    if (resolved) memberByDevice.set(id, resolved);
   });
 
   const ownerByDevice = new Map<string, string>();
+  const emailByDevice = new Map<string, string>();
+  const phoneByDevice = new Map<string, string>();
   (devices as any[]).forEach((device) => {
     if (device.owner_id) ownerByDevice.set(device.id, device.owner_id);
+    if (device.email)
+      emailByDevice.set(device.id, String(device.email).trim().toLowerCase());
+    if (device.phone_number)
+      phoneByDevice.set(device.id, String(device.phone_number).trim());
   });
 
   const candidateIds = [
     ...new Set([...memberByDevice.values(), ...ownerByDevice.values()]),
   ];
+  const candidateEmails = [...new Set(emailByDevice.values())];
+  const candidatePhones = [...new Set(phoneByDevice.values())];
 
-  if (candidateIds.length === 0) return;
-
-  const users = await db.User.findAll({
-    where: { id: { [Op.in]: candidateIds } },
-    attributes: ["id", "name", "email"],
-    raw: true,
-  });
+  const [usersById, usersByEmail, usersByPhone] = await Promise.all([
+    candidateIds.length
+      ? db.User.findAll({
+          // paranoid: false so a soft-deleted account still resolves instead
+          // of degrading to null.
+          where: { id: { [Op.in]: candidateIds } },
+          attributes: ["id", "name", "email"],
+          paranoid: false,
+          raw: true,
+        })
+      : Promise.resolve([]),
+    candidateEmails.length
+      ? db.User.findAll({
+          where: { email: { [Op.iLike]: { [Op.any]: candidateEmails } } },
+          attributes: ["id", "name", "email", "phone_number"],
+          paranoid: false,
+          raw: true,
+        })
+      : Promise.resolve([]),
+    candidatePhones.length
+      ? db.User.findAll({
+          where: { phone_number: { [Op.in]: candidatePhones } },
+          attributes: ["id", "name", "email", "phone_number"],
+          paranoid: false,
+          raw: true,
+        })
+      : Promise.resolve([]),
+  ]);
 
   const userById = new Map(
-    (users as any[]).map((user) => [user.id, user] as [string, any])
+    (usersById as any[]).map((user) => [user.id, user] as [string, any])
+  );
+  const userByEmail = new Map(
+    (usersByEmail as any[]).map((user) => [
+      String(user.email || "")
+        .trim()
+        .toLowerCase(),
+      user,
+    ]) as Array<[string, any]>
+  );
+  const userByPhone = new Map(
+    (usersByPhone as any[]).map((user) => [
+      String(user.phone_number || "").trim(),
+      user,
+    ]) as Array<[string, any]>
   );
 
   orphans.forEach((row: any) => {
-    const resolvedId =
-      memberByDevice.get(row.device_id) || ownerByDevice.get(row.device_id);
-    const user = resolvedId ? userById.get(resolvedId) : undefined;
+    const memberId = memberByDevice.get(row.device_id);
+    const ownerId = ownerByDevice.get(row.device_id);
+    const deviceEmail = emailByDevice.get(row.device_id);
+    const devicePhone = phoneByDevice.get(row.device_id);
+
+    const user =
+      (memberId && userById.get(memberId)) ||
+      (ownerId && userById.get(ownerId)) ||
+      (deviceEmail ? userByEmail.get(deviceEmail) : undefined) ||
+      (devicePhone ? userByPhone.get(devicePhone) : undefined);
 
     if (!user) return;
 
@@ -81,10 +152,11 @@ async function attachFallbackRecipients(rows: any[]): Promise<void> {
     const payload = { id: user.id, name: user.name, email: user.email };
     if (typeof row.setDataValue === "function") {
       row.setDataValue("UserNotification", payload);
+      row.setDataValue("resolved_recipient_id", user.id);
     } else {
       row.UserNotification = payload;
+      row.resolved_recipient_id = user.id;
     }
-    row.resolved_recipient_id = user.id;
   });
 }
 
