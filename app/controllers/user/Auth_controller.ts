@@ -513,7 +513,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
     const { email, otp } = req.body;
 
     if (!email || !otp) {
-      return customMessage(res, 400, "Email and OTP are required", null);
+      return customMessage(res, 200, "Email and OTP are required", null);
     }
 
     const normalizedEmail = email.toLowerCase().trim();
@@ -523,7 +523,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
     });
 
     if (!user || !user.otp_hash) {
-      return customMessage(res, 400, "Invalid or expired OTP", null);
+      return customMessage(res, 200, "Invalid or expired OTP", null);
     }
 
     if (!user.otp_expiry || new Date() > user.otp_expiry) {
@@ -545,7 +545,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
         await clearOtpState(user);
         return customMessage(
           res,
-          400,
+          200,
           "Too many incorrect attempts, request a new OTP",
           null
         );
