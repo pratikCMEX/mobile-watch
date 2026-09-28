@@ -439,26 +439,10 @@ const forgotPassword = async (
     const user = await db.User.findOne({
       where: { email: normalizedEmail },
     });
-
-    /*
-     * Always answer with the same generic message so this endpoint cannot be
-     * used to discover which email addresses have an account.
-     */
-    const GENERIC_RESPONSE = successMessage(
-      res,
-      "If an account exists for this email, an OTP has been sent",
-      {
-        message: "Please check your email for the verification code",
-        email: normalizedEmail,
-      }
-    );
-
     if (!user) {
-      return successMessage(
-        res,
-        "User does not exist for this email address",
-        null
-      );
+      return errorMessage(res, "User does not exist for this email address", {
+        email: normalizedEmail,
+      });
     }
 
     // Any previous reset attempt is discarded when a new OTP is requested.
@@ -490,17 +474,13 @@ const forgotPassword = async (
       console.error("Failed to send OTP email:", emailError);
     }
 
-    return successMessage(
-      res,
-      "If an account exists for this email, an OTP has been sent",
-      {
-        message: "Please check your email for the verification code",
-        email: user.email,
-        expires_in_minutes: OTP_EXPIRY_MINUTES,
-        // Development convenience only — never expose the OTP in production.
-        otp: process.env.NODE_ENV === "development" ? otp : undefined,
-      }
-    );
+    return successMessage(res, "OTP sent to your email", {
+      message: "Please check your email for the verification code",
+      email: user.email,
+      expires_in_minutes: OTP_EXPIRY_MINUTES,
+      // Development convenience only — never expose the OTP in production.
+      otp: process.env.NODE_ENV === "development" ? otp : undefined,
+    });
   } catch (error: any) {
     console.error("forgotPassword error:", error);
     return errorMessage(res, "Error processing forgot password request");
