@@ -4,6 +4,90 @@ import { errorMessage, successPagination } from "../../library/Response";
 import { Op } from "sequelize";
 import { canAccessDevice, deviceIdScope } from "../../helper/WatchAccess";
 
+/**
+ * Fill in `UserNotification` for notification rows whose `user_id` is NULL.
+ *
+ * The include in the query is a LEFT JOIN on `Notifications.user_id`; rows
+ * stored without a recipient (see createNotification in
+ * notification.service.ts) therefore come back with `UserNotification: null`.
+ * The recipient is resolved as the first DeviceMember assigned to the watch,
+ * falling back to the device owner, so the admin list can always show who the
+ * alert belongs to. Two batched queries are used, so the cost does not grow
+ * with the page size.
+ */
+async function attachFallbackRecipients(rows: any[]): Promise<void> {
+  const orphans = (rows || []).filter(
+    (row: any) => !row?.user_id && row?.device_id && !row?.UserNotification
+  );
+
+  if (orphans.length === 0) return;
+
+  const deviceIds = [
+    ...new Set(orphans.map((row: any) => row.device_id as string)),
+  ];
+
+  const [members, devices] = await Promise.all([
+    db.DeviceMember.findAll({
+      where: { device_id: { [Op.in]: deviceIds } },
+      attributes: ["device_id", "user_id"],
+      order: [["createdAt", "ASC"]],
+      raw: true,
+    }),
+    db.Device.findAll({
+      where: { id: { [Op.in]: deviceIds } },
+      attributes: ["id", "owner_id"],
+      raw: true,
+    }),
+  ]);
+
+  // First member assigned to the device wins as the representative recipient.
+  const memberByDevice = new Map<string, string>();
+  (members as any[]).forEach((member) => {
+    if (member.user_id && !memberByDevice.has(member.device_id)) {
+      memberByDevice.set(member.device_id, member.user_id);
+    }
+  });
+
+  const ownerByDevice = new Map<string, string>();
+  (devices as any[]).forEach((device) => {
+    if (device.owner_id) ownerByDevice.set(device.id, device.owner_id);
+  });
+
+  const candidateIds = [
+    ...new Set([...memberByDevice.values(), ...ownerByDevice.values()]),
+  ];
+
+  if (candidateIds.length === 0) return;
+
+  const users = await db.User.findAll({
+    where: { id: { [Op.in]: candidateIds } },
+    attributes: ["id", "name", "email"],
+    raw: true,
+  });
+
+  const userById = new Map(
+    (users as any[]).map((user) => [user.id, user] as [string, any])
+  );
+
+  orphans.forEach((row: any) => {
+    const resolvedId =
+      memberByDevice.get(row.device_id) || ownerByDevice.get(row.device_id);
+    const user = resolvedId ? userById.get(resolvedId) : undefined;
+
+    if (!user) return;
+
+    // Keep `user_id` untouched: it is the real recipient of the row and stays
+    // NULL in the DB. The resolved user is exposed separately for the panel.
+    const payload = { id: user.id, name: user.name, email: user.email };
+    if (typeof row.setDataValue === "function") {
+      row.setDataValue("UserNotification", payload);
+    } else {
+      row.UserNotification = payload;
+    }
+    row.resolved_recipient_id = user.id;
+  });
+}
+
 // Get all notifications (admin view) - supports search by device_id, imei, device_name, title, createdAt, type[], is_read, and general search with pagination
 async function getAllNotifications(
   req: Request,
@@ -82,7 +166,7 @@ async function getAllNotifications(
         { "$DeviceNotification.imei$": { [Op.iLike]: `%${search}%` } },
         { "$DeviceNotification.device_name$": { [Op.iLike]: `%${search}%` } },
         { title: { [Op.iLike]: `%${search}%` } },
-        { type: { [Op.iLike]: `%${type}%` } },
+        { type: { [Op.iLike]: `%${search}%` } },
         isReadCondition,
         createdAtCondition,
       ].filter((condition) => condition !== undefined);
@@ -108,6 +192,14 @@ async function getAllNotifications(
       limit: Number(limit),
       offset,
     });
+
+    // `Notifications.user_id` is NULL whenever an alert was stored without a
+    // resolved recipient (see createNotification in notification.service.ts),
+    // so the `UserNotification` include returns null for those rows. Resolve a
+    // fallback recipient — first DeviceMember of the watch, else the device
+    // owner — in a single batched lookup so the admin list can always render
+    // the "sent to" user.
+    await attachFallbackRecipients(rows);
 
     return successPagination(res, "Notifications fetched successfully", rows, {
       page: Number(page),
