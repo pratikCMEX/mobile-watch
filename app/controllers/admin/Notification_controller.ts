@@ -243,14 +243,13 @@ async function getAllNotifications(
         createdAtCondition,
       ].filter((condition) => condition !== undefined);
     }
-    where.user_id! = null;
     const { count, rows } = await db.Notification.findAndCountAll({
       where,
       include: [
         {
           model: db.Device,
           as: "DeviceNotification",
-          attributes: ["id", "user_id", "imei", "device_name"],
+          attributes: ["id", "imei", "device_name"],
           required: false,
         },
         {
