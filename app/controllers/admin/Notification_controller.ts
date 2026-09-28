@@ -206,6 +206,12 @@ async function getAllNotifications(
       const types: string[] = Array.isArray(type) ? type : [type];
       where.type = { [Op.in]: types.map((t) => String(t).toLowerCase()) };
     }
+    // Only surface notifications that have a real recipient. Device-level
+    // alerts stored without one (`user_id IS NULL`, see createNotification in
+    // notification.service.ts) have no `UserNotification` to render, so they
+    // are excluded from the list and from `count`.
+    where.user_id = { [Op.ne]: null };
+
     // General search parameter - searches device_id, imei (through device), device_name (through device), title, createdAt, type, and is_read
     if (search && search !== "") {
       // is_read is stored as the ENUM strings "0"/"1" — never compare it
@@ -264,12 +270,10 @@ async function getAllNotifications(
       offset,
     });
 
-    // `Notifications.user_id` is NULL whenever an alert was stored without a
-    // resolved recipient (see createNotification in notification.service.ts),
-    // so the `UserNotification` include returns null for those rows. Resolve a
-    // fallback recipient — first DeviceMember of the watch, else the device
-    // owner — in a single batched lookup so the admin list can always render
-    // the "sent to" user.
+    // Defensive: the `where` above already excludes `user_id IS NULL`, so this
+    // is a no-op for the current query. It still guards the response shape if
+    // the filter is ever relaxed, resolving a recipient for rows that reach it
+    // with a NULL `user_id`.
     await attachFallbackRecipients(rows);
 
     return successPagination(res, "Notifications fetched successfully", rows, {
