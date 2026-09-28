@@ -40,6 +40,13 @@ async function getDashboardStats(
     // Get total device count
     const totalDevices = await db.Device.count({ where: deviceWhere });
 
+    const total_geofences = await db.Geofence.count({
+      where: {
+        ...deviceWhere,
+        is_active: true,
+      },
+    });
+
     // Scope notifications by the same device list, but Notifications use
     // `device_id` (not `id`), so build the scope separately.
     const notificationDeviceScope = deviceScope
@@ -53,6 +60,20 @@ async function getDashboardStats(
       },
     });
 
+    const totalLowBattery = await db.Notification.count({
+      where: {
+        ...notificationDeviceScope,
+        type: "low_battery",
+        is_admin_show: "1",
+      },
+    });
+    const totalFallDetection = await db.Notification.count({
+      where: {
+        ...notificationDeviceScope,
+        type: "fall_detection",
+        is_admin_show: "1",
+      },
+    });
     // Get online devices count
     const onlineDevices = await db.Device.count({
       where: {
@@ -97,6 +118,9 @@ async function getDashboardStats(
         total_users: totalUsers,
         total_devices: totalDevices,
         total_sos_alerts: totalSosAlerts,
+        total_geofences: total_geofences,
+        total_low_battery: totalLowBattery,
+        total_fall_down: totalFallDetection,
         // active_users: activeUsers,
         // inactive_users: inactiveUsers,
         online_devices: onlineDevices,
