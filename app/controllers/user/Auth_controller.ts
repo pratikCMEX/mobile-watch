@@ -295,7 +295,7 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
     const { name, email, password } = req.body;
 
     if (!email || !password) {
-      return errorMessage(res, "Email and password are required", 400);
+      return errorMessage(res, "Email and password are required", 200);
     }
 
     // Check if user already exists
@@ -431,7 +431,7 @@ const forgotPassword = async (
     const { email } = req.body;
 
     if (!email) {
-      return customMessage(res, 400, "Email is required", null);
+      return customMessage(res, 200, "Email is required", null);
     }
 
     const normalizedEmail = email.toLowerCase().trim();
@@ -530,7 +530,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
       await clearOtpState(user);
       return customMessage(
         res,
-        400,
+        200,
         "OTP has expired, request a new one",
         null
       );
@@ -553,7 +553,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
 
       await user.update({ otp_attempts: attempts });
 
-      return customMessage(res, 400, "Invalid OTP", {
+      return customMessage(res, 200, "Invalid OTP", {
         attempts_remaining: MAX_OTP_ATTEMPTS - attempts,
       });
     }
@@ -597,17 +597,17 @@ const changePassword = async (
     const { reset_token, new_password, confirm_password } = req.body;
 
     if (!reset_token || !new_password || !confirm_password) {
-      return customMessage(res, 400, "All fields are required", null);
+      return customMessage(res, 200, "All fields are required", null);
     }
 
     if (new_password !== confirm_password) {
-      return customMessage(res, 400, "Passwords do not match", null);
+      return customMessage(res, 200, "Passwords do not match", null);
     }
 
     if (new_password.length < 6) {
       return customMessage(
         res,
-        400,
+        200,
         "Password must be at least 6 characters",
         null
       );
@@ -618,12 +618,12 @@ const changePassword = async (
     });
 
     if (!user) {
-      return customMessage(res, 400, "Invalid or expired reset token", null);
+      return customMessage(res, 200, "Invalid or expired reset token", null);
     }
 
     if (!user.reset_token_expiry || new Date() > user.reset_token_expiry) {
       await user.update({ reset_token: null, reset_token_expiry: null });
-      return customMessage(res, 400, "Reset token has expired", null);
+      return customMessage(res, 200, "Reset token has expired", null);
     }
 
     const hashedPassword = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
