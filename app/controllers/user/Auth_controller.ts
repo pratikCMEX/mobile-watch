@@ -454,7 +454,11 @@ const forgotPassword = async (
     );
 
     if (!user) {
-      return GENERIC_RESPONSE;
+      return successMessage(
+        res,
+        "User does not exist for this email address",
+        null
+      );
     }
 
     // Any previous reset attempt is discarded when a new OTP is requested.
