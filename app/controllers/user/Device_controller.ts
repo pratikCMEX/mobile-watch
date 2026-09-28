@@ -4810,7 +4810,7 @@ const listVoiceMessages = async function (
     const VOICE_UPLOAD_DIR = "uploads/voice";
 
     const { count, rows } = await db.DeviceVoiceMessage.findAndCountAll({
-      where: { device_id },
+      where: { device_id, is_text: 0 },
       order: [["createdAt", "DESC"]],
       limit: limitNum,
       offset,
