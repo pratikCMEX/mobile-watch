@@ -3563,6 +3563,25 @@ class TcpServer {
           `Placeholder Device created for protocol id ${deviceId} ` +
             `with imei ${imei} (DB id: ${device.id})`
         );
+        // Send UPLOAD command to set upload interval to 60 seconds
+        try {
+          const sent = this.sendUploadIntervalCommand(deviceId, 60);
+          if (sent) {
+            Logging.info(
+              `UPLOAD command sent to device ${deviceId} with interval 60s`
+            );
+          } else {
+            Logging.warn(
+              `Device ${deviceId} not connected, UPLOAD command not sent`
+            );
+          }
+        } catch (cmdErr: any) {
+          Logging.error(
+            `Failed to send UPLOAD command to device ${deviceId}: ${
+              cmdErr.message || cmdErr
+            }`
+          );
+        }
       } catch (error: any) {
         /**
          * A concurrent request inserted the row between our checks
@@ -3736,6 +3755,25 @@ class TcpServer {
             `Placeholder Device created for protocol id ${deviceId} ` +
               `(DB id: ${createdDevice.id})`
           );
+          // Send UPLOAD command to set upload interval to 60 seconds
+          try {
+            const sent = this.sendUploadIntervalCommand(deviceId, 60);
+            if (sent) {
+              Logging.info(
+                `UPLOAD command sent to device ${deviceId} with interval 60s`
+              );
+            } else {
+              Logging.warn(
+                `Device ${deviceId} not connected, UPLOAD command not sent`
+              );
+            }
+          } catch (cmdErr: any) {
+            Logging.error(
+              `Failed to send UPLOAD command to device ${deviceId}: ${
+                cmdErr.message || cmdErr
+              }`
+            );
+          }
         }
 
         device = createdDevice;

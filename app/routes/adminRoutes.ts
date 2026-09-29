@@ -161,6 +161,13 @@ router.post(
 );
 
 router.post(
+  "/update_device",
+  checkToken,
+  ValidateJoi(Schemas.device.update),
+  Device_controller.updateDevice
+);
+
+router.post(
   "/assign_device_to_user",
   checkAdmin,
   ValidateJoi(Schemas.assignDeviceToUser),

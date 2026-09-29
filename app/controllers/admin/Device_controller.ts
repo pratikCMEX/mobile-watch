@@ -191,6 +191,26 @@ const addDevice = async function (
         `serial_number=${serial_number} name=${name}`
     );
 
+    // Send UPLOAD command to set upload interval to 60 seconds
+    try {
+      const sent = tcpServer.sendUploadIntervalCommand(serial_number, 60);
+      if (sent) {
+        Logging.info(
+          `UPLOAD command sent to device ${serial_number} with interval 60s`
+        );
+      } else {
+        Logging.warn(
+          `Device ${serial_number} not connected, UPLOAD command not sent (will be sent when device connects)`
+        );
+      }
+    } catch (cmdErr: any) {
+      Logging.error(
+        `Failed to send UPLOAD command to device ${serial_number}: ${
+          cmdErr.message || cmdErr
+        }`
+      );
+    }
+
     return successMessage(res, "Device added successfully", {
       ...device.toJSON(),
       created: true,
@@ -207,23 +227,7 @@ const updateDevice = async function (
   next: NextFunction
 ) {
   try {
-    const {
-      id,
-      owner_id,
-      imei,
-      serial_number,
-      device_name,
-      email,
-      country_code,
-      phone_number,
-      network_carrier,
-      network_type,
-      location_interval_minutes,
-      height_cm,
-      gender,
-      age,
-      weight_kg,
-    } = req.body;
+    const { id, imei, device_name } = req.body;
 
     if (!id) {
       unlinkUploadedFiles(req);
@@ -236,15 +240,6 @@ const updateDevice = async function (
       return errorMessage(res, "Device not found");
     }
 
-    // if (owner_id && owner_id !== device.owner_id) {
-    //   const owner = await db.User.findByPk(owner_id); // conditional query #2
-    //   if (!owner) {
-    //     unlinkUploadedFiles(req);
-    //     return errorMessage(res, "owner_id does not match any existing user");
-    //   }
-    //   device.owner_id = owner_id;
-    // }
-
     if (imei && imei !== device.imei) {
       const existing = await db.Device.findOne({
         where: { imei, id: { [Op.ne]: id } },
@@ -254,7 +249,10 @@ const updateDevice = async function (
         return errorMessage(res, "A device with this imei already exists");
       }
       device.imei = imei;
+      device.serial_number = deriveSerialNumberFromImei(imei);
     }
+
+    device.device_name = device_name ?? device.device_name;
 
     const files = (req as any).files as { [fieldname: string]: any[] };
     const image = files?.profile_image?.[0]?.filename ?? null;
@@ -262,28 +260,8 @@ const updateDevice = async function (
       deleteFile("profile", device.getDataValue("profile_image"));
       device.profile_image = image;
     }
-    if (owner_id !== undefined) device.owner_id = owner_id;
-    if (serial_number !== undefined) device.serial_number = serial_number;
-    if (device_name !== undefined) device.device_name = device_name;
-    if (email !== undefined) device.email = email;
-    if (country_code !== undefined) device.country_code = country_code;
-    if (phone_number !== undefined) device.phone_number = phone_number;
-    if (network_carrier !== undefined) device.network_carrier = network_carrier;
-    if (network_type !== undefined) device.network_type = network_type;
-    if (location_interval_minutes !== undefined)
-      device.location_interval_minutes = location_interval_minutes;
-    if (height_cm !== undefined) device.height_cm = height_cm;
-    if (gender !== undefined) device.gender = gender;
-    if (age !== undefined) device.age = age;
-    if (weight_kg !== undefined) device.weight_kg = weight_kg;
 
     await device.save();
-
-    // Whenever the owner changes, keep the DeviceMember table in sync
-    // so the owner is always recorded as a member (admin) of the watch.
-    if (owner_id !== undefined && owner_id) {
-      await ensureDeviceMember(device.id, owner_id, "admin");
-    }
 
     return successMessage(res, "Device updated successfully", device);
   } catch (err) {
