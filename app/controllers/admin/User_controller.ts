@@ -174,13 +174,11 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     // data with it. The watches are unassigned instead: owner_id is set to
     // NULL and the rows stay in the Devices table, available for reassignment
     // via /assign_device_to_user.
-    const ownedDevices = await db.Device.findAll({
-      where: { owner_id: id },
-      attributes: ["id", "imei", "serial_number", "device_name"],
+    const ownedDevices = await db.DeviceMember.findAll({
+      where: { user_id: id },
     });
 
     if (ownedDevices.length > 0) {
-      await db.Device.update({ owner_id: null }, { where: { owner_id: id } });
       await db.DeviceMember.destroy({ where: { user_id: id } });
     }
 
@@ -189,12 +187,12 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
 
     return successMessage(res, "User deleted successfully", {
       user_id: id,
-      unassigned_devices: ownedDevices.map((device: any) => ({
-        id: device.id,
-        imei: device.imei,
-        serial_number: device.serial_number,
-        device_name: device.device_name,
-      })),
+      // unassigned_devices: ownedDevices.map((device: any) => ({
+      //   id: device.id,
+      //   imei: device.imei,
+      //   serial_number: device.serial_number,
+      //   device_name: device.device_name,
+      // })),
     });
   } catch (err) {
     console.error("deleteUser error:", err);
