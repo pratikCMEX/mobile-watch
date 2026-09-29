@@ -57,6 +57,7 @@ async function getDashboardStats(
         ...notificationDeviceScope,
         type: "sos",
         is_admin_show: "1",
+        user_id: { [db.Sequelize.Op.ne]: null },
       },
     });
 
@@ -65,6 +66,7 @@ async function getDashboardStats(
         ...notificationDeviceScope,
         type: "low_battery",
         is_admin_show: "1",
+        user_id: { [db.Sequelize.Op.ne]: null },
       },
     });
     const totalFallDetection = await db.Notification.count({
@@ -72,6 +74,7 @@ async function getDashboardStats(
         ...notificationDeviceScope,
         type: "fall_detection",
         is_admin_show: "1",
+        user_id: { [db.Sequelize.Op.ne]: null },
       },
     });
     // Get online devices count
@@ -179,6 +182,7 @@ async function getDashboardAlerts(
       // is flagged is_admin_show = "1" (by createNotification), so the
       // admin dashboard shows each alert exactly once.
       is_admin_show: "1",
+      user_id: { [db.Sequelize.Op.ne]: null },
     };
     if (deviceScope) {
       where.device_id = deviceScope;
