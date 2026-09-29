@@ -151,6 +151,15 @@ router.post(
   ValidateJoi(Schemas.getAllNotifications),
   Notification_controller.getAllNotifications
 );
+// Add a watch using only its name and IMEI; the serial number is derived
+// from the IMEI (trailing 10 digits).
+router.post(
+  "/add_device",
+  checkAdmin,
+  ValidateJoi(Schemas.addDevice),
+  Device_controller.addDevice
+);
+
 router.post(
   "/assign_device_to_user",
   checkAdmin,

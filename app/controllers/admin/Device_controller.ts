@@ -96,6 +96,109 @@ const createDevice = async function (
   }
 };
 
+/**
+ * Derive the device serial number from its IMEI.
+ *
+ * An IMEI is 15 digits: a 5-digit type allocation code (TAC) followed by a
+ * 10-digit serial number. The watch protocol uses that trailing 10 digits as
+ * the device id (see linkDeviceIdentity()/findDevice() in tcpServer.ts), e.g.
+ * IMEI 351266770150383 -> serial number 6677015038. Shorter input (a 14-digit
+ * IMEI) is used as-is.
+ */
+const deriveSerialNumberFromImei = (imei: string): string => {
+  const digits = String(imei).replace(/\D/g, "");
+  return digits.length > 10 ? digits.slice(-10) : digits;
+};
+
+// Admin: add a watch using only its name and IMEI. The serial number is
+// derived from the IMEI (trailing 10 digits) so the row is immediately
+// reachable by the TCP layer, which keys devices on serial_number.
+const addDevice = async function (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    const { device_name, imei } = req.body || {};
+
+    if (!device_name || !String(device_name).trim()) {
+      return errorMessage(res, "device_name is required");
+    }
+
+    const cleanImei = String(imei ?? "").trim();
+    if (!/^\d{14,16}$/.test(cleanImei)) {
+      return errorMessage(res, "imei must be a 14 to 16 digit number");
+    }
+
+    const name = String(device_name).trim();
+    const serial_number = deriveSerialNumberFromImei(cleanImei);
+
+    const existingByImei = await db.Device.findOne({
+      where: { imei: cleanImei },
+    });
+    if (existingByImei) {
+      return errorMessage(res, "A device with this imei already exists");
+    }
+
+    // The TCP layer auto-registers unknown watches as placeholders keyed by
+    // serial_number (linkDeviceIdentity()/findDevice() in tcpServer.ts).
+    // Reuse that placeholder instead of inserting a second row for the same
+    // physical watch, otherwise the device ends up registered twice.
+    const existingBySerial = await db.Device.findOne({
+      where: { serial_number },
+    });
+
+    if (existingBySerial) {
+      if (existingBySerial.imei) {
+        return errorMessage(
+          res,
+          `A different device (imei ${existingBySerial.imei}) is already registered with serial number ${serial_number}`
+        );
+      }
+
+      existingBySerial.imei = cleanImei;
+      existingBySerial.device_name = name;
+      await existingBySerial.save();
+
+      Logging.info(
+        `Device ${existingBySerial.id} linked to imei=${cleanImei} ` +
+          `serial_number=${serial_number} (existing placeholder reused)`
+      );
+
+      return successMessage(res, "Device added successfully", {
+        ...existingBySerial.toJSON(),
+        created: false,
+      });
+    }
+
+    const device = await db.Device.create({
+      owner_id: null,
+      imei: cleanImei,
+      serial_number,
+      device_name: name,
+      connection_status: "offline",
+      signal_status: null,
+      battery_percentage: null,
+      is_online: false,
+      last_updated_at: null,
+      location_interval_minutes: 1,
+    });
+
+    Logging.info(
+      `Device created: id=${device.id} imei=${cleanImei} ` +
+        `serial_number=${serial_number} name=${name}`
+    );
+
+    return successMessage(res, "Device added successfully", {
+      ...device.toJSON(),
+      created: true,
+    });
+  } catch (err) {
+    console.error("addDevice error:", err);
+    return errorMessage(res, "Error adding device");
+  }
+};
+
 const updateDevice = async function (
   req: Request,
   res: Response,
@@ -2045,6 +2148,7 @@ const removeMember = async function (
 
 export default {
   createDevice,
+  addDevice,
   updateDevice,
   deleteDevice,
   getDeviceSettings,

@@ -190,6 +190,20 @@ export const Schemas = {
     user_id: Joi.string().required(),
     device_name: Joi.string().required(),
   }),
+  // Admin "add device" — only the watch name and its IMEI are supplied; the
+  // serial number is derived from the IMEI in the controller.
+  addDevice: Joi.object({
+    device_name: Joi.string().trim().required(),
+    imei: Joi.string()
+      .trim()
+      .pattern(/^\d{14,16}$/)
+      .required()
+      .messages({
+        "string.empty": "imei is required",
+        "any.required": "imei is required",
+        "string.pattern.base": "imei must be a 14 to 16 digit number",
+      }),
+  }),
   // ── Multi-user watch sharing (DeviceMembers) ──────────────────
   // A watch can be shared with several users. Each member is either
   // "admin" (full access + can manage members) or "member" (view +

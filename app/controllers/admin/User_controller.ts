@@ -33,7 +33,7 @@ async function createUser(req: Request, res: Response, next: NextFunction) {
     const password_hash = await bcrypt.hash(password, 10);
     const user = await db.User.create({
       name,
-      email,
+      email: email.toLowerCase(),
       password: password_hash,
       phone_number,
       country_code,
@@ -164,9 +164,35 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     if (!user || !(await canAccessUser(req, user.id))) {
       return errorMessage(res, "User not found");
     }
+
+    // Deleting a user must never delete the watches they own. The
+    // Devices.owner_id foreign key used to be ON DELETE CASCADE, so removing
+    // the user row silently removed every watch they owned — and, through the
+    // cascading keys on settings/locations/notifications, all of that watch
+    // data with it. The watches are unassigned instead: owner_id is set to
+    // NULL and the rows stay in the Devices table, available for reassignment
+    // via /assign_device_to_user.
+    const ownedDevices = await db.Device.findAll({
+      where: { owner_id: id },
+      attributes: ["id", "imei", "serial_number", "device_name"],
+    });
+
+    if (ownedDevices.length > 0) {
+      await db.Device.update({ owner_id: null }, { where: { owner_id: id } });
+      // await db.DeviceMember.destroy({ where: { user_id: id } });
+    }
+
     await db.User.destroy({ where: { id }, force: true });
 
-    return successMessage(res, "User deleted successfully");
+    return successMessage(res, "User deleted successfully", {
+      user_id: id,
+      unassigned_devices: ownedDevices.map((device: any) => ({
+        id: device.id,
+        imei: device.imei,
+        serial_number: device.serial_number,
+        device_name: device.device_name,
+      })),
+    });
   } catch (err) {
     console.error("deleteUser error:", err);
     return errorMessage(res, "Error deleting user");

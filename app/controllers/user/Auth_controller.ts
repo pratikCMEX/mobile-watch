@@ -64,7 +64,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     }
 
     const user = await db.User.findOne({
-      where: { email },
+      where: { email: email.toLowerCase() },
     });
 
     if (!user) {
@@ -347,34 +347,36 @@ const deleteAccount = async (
       return errorMessage(res, "User not found");
     }
 
-    // A watch that is shared with other users must NOT be wiped when
-    // one member deletes their account — only the leaving member's
-    // DeviceMember row is removed (FK onDelete CASCADE handles that
-    // when the User row is destroyed). Devices this user is the sole
-    // member of are deleted too, preserving the old single-owner
-    // behaviour for non-shared watches.
-    const memberDeviceIds = await getUserDeviceIds(userId);
-    if (memberDeviceIds.length) {
-      const soleOwnedDeviceIds: string[] = [];
-      for (const deviceId of memberDeviceIds) {
-        const otherMembers = await db.DeviceMember.count({
-          where: { device_id: deviceId, user_id: { [Op.ne]: userId } },
-        });
-        if (otherMembers === 0) soleOwnedDeviceIds.push(deviceId);
-      }
+    // Deleting an account must never delete a watch. The watches stay in
+    // the Devices table and are only unassigned: owner_id is set to NULL and
+    // the leaving member's DeviceMember rows are removed (FK onDelete
+    // CASCADE handles those when the User row is destroyed). The row can
+    // then be reassigned to another account by an admin. This applies both
+    // to shared watches and to watches this user was the sole member of.
+    const ownedDevices = await db.Device.findAll({
+      where: { owner_id: userId },
+      attributes: ["id", "imei", "serial_number", "device_name"],
+    });
 
-      if (soleOwnedDeviceIds.length) {
-        await db.Device.destroy({
-          where: { id: { [Op.in]: soleOwnedDeviceIds } },
-        });
-      }
+    if (ownedDevices.length) {
+      await db.Device.update(
+        { owner_id: null },
+        { where: { owner_id: userId } }
+      );
     }
 
     // Destroying the User row cascades their DeviceMember rows
     // (FK onDelete CASCADE), then removes the account itself.
     await user.destroy({ force: true });
 
-    return successMessage(res, "Account deleted successfully");
+    return successMessage(res, "Account deleted successfully", {
+      unassigned_devices: ownedDevices.map((device: any) => ({
+        id: device.id,
+        imei: device.imei,
+        serial_number: device.serial_number,
+        device_name: device.device_name,
+      })),
+    });
   } catch (error: any) {
     console.error("Delete account error:", error);
     return res.status(500).json({ message: error.message });

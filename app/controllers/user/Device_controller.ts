@@ -4481,13 +4481,6 @@ const registerDeviceByImei = async function (
       weight_kg,
     }: any = req.body;
 
-    // ── Derive serial number from the IMEI ─────────────────────
-    // IMEI layout used by this device family:
-    //   TAC (4) | Serial Number (10) | Check Digit (1)  = 15 digits
-    // e.g. 868017032159118  →  SN = "1703215911", CD = "8"
-    // The SN is everything between the 4-digit TAC and the final
-    // check digit. Fall back to the caller-supplied value when the
-    // IMEI shape is unexpected.
     const derivedSerialNumber =
       imei && /^\d{15}$/.test(imei) ? imei.slice(4, -1) : serial_number ?? null;
 
@@ -4495,20 +4488,40 @@ const registerDeviceByImei = async function (
       return errorMessage(res, "imei or serial_number is required");
     }
 
+    // Membership state of the current user for a device (checked in DeviceMember).
+    const getMembershipState = async (deviceId: string) => {
+      const isMember = !!(await db.DeviceMember.findOne({
+        where: { device_id: deviceId, user_id: userId },
+      }));
+      const memberCount = isMember
+        ? 1
+        : await db.DeviceMember.count({ where: { device_id: deviceId } });
+      return { isMember, isFirstMember: memberCount === 0 };
+    };
+
     // ── 1) A device row already exists with this serial_number ──
     const existingBySerial = await db.Device.findOne({
       where: { serial_number: derivedSerialNumber },
     });
     if (existingBySerial) {
-      if (!existingBySerial.owner_id) {
+      const { isMember, isFirstMember } = await getMembershipState(
+        existingBySerial.id
+      );
+
+      if (isMember) {
+        return successMessage(
+          res,
+          "Device already registered",
+          existingBySerial
+        );
+      }
+
+      if (isFirstMember) {
         /**
-         * Serial exists but has no owner yet — this is an
-         * unclaimed placeholder (with or without an IMEI). Link the
-         * owner + imei + any provided fields in place instead of
-         * inserting a duplicate row, and report it as "added" since
-         * the device is now being registered for the first time.
+         * Serial exists but has no members yet — unclaimed placeholder.
+         * Update provided fields in place and add the user as admin.
+         * owner_id is intentionally not touched.
          */
-        existingBySerial.owner_id = userId;
         existingBySerial.imei = imei ?? existingBySerial.imei ?? null;
         if (device_name) existingBySerial.device_name = device_name;
         if (email !== undefined) existingBySerial.email = email;
@@ -4529,7 +4542,6 @@ const registerDeviceByImei = async function (
         if (weight_kg !== undefined) existingBySerial.weight_kg = weight_kg;
         await existingBySerial.save();
 
-        // Register the claiming user as a member (primary owner → admin).
         await ensureDeviceMember(existingBySerial.id, userId, "admin");
 
         return successMessage(
@@ -4538,14 +4550,8 @@ const registerDeviceByImei = async function (
           existingBySerial
         );
       }
-      if (existingBySerial.owner_id === userId) {
-        return successMessage(
-          res,
-          "Device already registered",
-          existingBySerial
-        );
-      }
-      // Serial is owned by a different user — add current user as a member.
+
+      // Device already has members — add current user as a member.
       await ensureDeviceMember(existingBySerial.id, userId, "member");
       return successMessage(
         res,
@@ -4559,19 +4565,23 @@ const registerDeviceByImei = async function (
     if (imei) {
       const existingByImei = await db.Device.findOne({ where: { imei } });
       if (existingByImei) {
-        if (existingByImei.owner_id === userId) {
+        const { isMember, isFirstMember } = await getMembershipState(
+          existingByImei.id
+        );
+
+        if (isMember) {
           return successMessage(
             res,
             "Device already registered",
             existingByImei
           );
         }
-        if (!existingByImei.owner_id) {
+
+        if (isFirstMember) {
           /**
-           * IMEI exists on an unclaimed placeholder — link the owner
-           * in place instead of refusing (no other account owns it).
+           * IMEI exists on an unclaimed placeholder (no members) —
+           * update fields in place and add the user as admin.
            */
-          existingByImei.owner_id = userId;
           if (device_name) existingByImei.device_name = device_name;
           if (email !== undefined) existingByImei.email = email;
           if (phone_number !== undefined)
@@ -4591,7 +4601,6 @@ const registerDeviceByImei = async function (
           if (weight_kg !== undefined) existingByImei.weight_kg = weight_kg;
           await existingByImei.save();
 
-          // Register the claiming user as a member (primary owner → admin).
           await ensureDeviceMember(existingByImei.id, userId, "admin");
 
           return successMessage(
@@ -4600,7 +4609,8 @@ const registerDeviceByImei = async function (
             existingByImei
           );
         }
-        // IMEI is owned by a different user — add current user as a member.
+
+        // Device already has members — add current user as a member.
         await ensureDeviceMember(existingByImei.id, userId, "member");
         return successMessage(
           res,
@@ -4611,15 +4621,6 @@ const registerDeviceByImei = async function (
     }
 
     // ── 3) Neither serial nor imei exists — insert a new record ─
-    /**
-     * Guarded insert: serial_number is intentionally NOT unique and
-     * imei is only unique when non-null, so a check-then-create race
-     * (two concurrent requests for the same identity) could otherwise
-     * insert two rows — or, for the imei path, throw a
-     * SequelizeUniqueConstraintError that escapes as an unhandled
-     * rejection. findOrCreate() keeps the create atomic; the catch
-     * below re-fetches the winner if we lost the race.
-     */
     const whereClause = imei
       ? { imei }
       : { serial_number: derivedSerialNumber, imei: null };
@@ -4629,7 +4630,6 @@ const registerDeviceByImei = async function (
       const [createdDevice, created] = await db.Device.findOrCreate({
         where: whereClause,
         defaults: {
-          owner_id: userId,
           imei: imei ?? null,
           serial_number: derivedSerialNumber,
           device_name: device_name ?? "Device".concat(derivedSerialNumber),
@@ -4654,36 +4654,21 @@ const registerDeviceByImei = async function (
       device = createdDevice;
 
       if (!created) {
-        /**
-         * A concurrent request inserted the row between our checks.
-         * Link the owner if it isn't already linked to this user.
-         */
-        const hadNoOwner = !device.owner_id;
-        if (device.owner_id !== userId) {
-          device.owner_id = userId;
-          if (device_name) device.device_name = device_name;
-          if (email !== undefined) device.email = email;
-          if (phone_number !== undefined) device.phone_number = phone_number;
-          if (country_code !== undefined) device.country_code = country_code;
-          if (network_carrier !== undefined)
-            device.network_carrier = network_carrier;
-          if (network_type !== undefined) device.network_type = network_type;
-          if (location_interval_minutes !== undefined)
-            device.location_interval_minutes = location_interval_minutes;
-          if (height_cm !== undefined) device.height_cm = height_cm;
-          if (gender !== undefined) device.gender = gender;
-          if (age !== undefined) device.age = age;
-          if (weight_kg !== undefined) device.weight_kg = weight_kg;
-          await device.save();
+        // A concurrent request inserted the row between our checks.
+        const { isMember, isFirstMember } = await getMembershipState(device.id);
+        if (isMember) {
+          return successMessage(res, "Device already registered", device);
         }
-        // Ensure the claiming user is recorded as a member of this
-        // watch (primary owner → admin), even on the race path.
-        await ensureDeviceMember(device.id, userId, "admin");
+        await ensureDeviceMember(
+          device.id,
+          userId,
+          isFirstMember ? "admin" : "member"
+        );
         return successMessage(
           res,
-          hadNoOwner
+          isFirstMember
             ? "Device added successfully"
-            : "Device already registered",
+            : "Device registered successfully",
           device
         );
       }
@@ -4702,24 +4687,27 @@ const registerDeviceByImei = async function (
         if (!device) {
           return errorMessage(res, "Error registering device: race detected");
         }
-        const hadNoOwner = !device.owner_id;
-        if (device.owner_id !== userId) {
-          device.owner_id = userId;
-          await device.save();
+        const { isMember, isFirstMember } = await getMembershipState(device.id);
+        if (isMember) {
+          return successMessage(res, "Device already registered", device);
         }
-        await ensureDeviceMember(device.id, userId, "admin");
+        await ensureDeviceMember(
+          device.id,
+          userId,
+          isFirstMember ? "admin" : "member"
+        );
         return successMessage(
           res,
-          hadNoOwner
+          isFirstMember
             ? "Device added successfully"
-            : "Device already registered",
+            : "Device registered successfully",
           device
         );
       }
       throw error;
     }
 
-    // Newly created device — register the claiming user as a member.
+    // Newly created device — first member is the admin.
     await ensureDeviceMember(device.id, userId, "admin");
 
     return successMessage(res, "Device registered successfully", device);
