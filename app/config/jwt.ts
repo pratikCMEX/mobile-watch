@@ -72,9 +72,12 @@ export const checkToken = async (req: any, res: any, next: any) => {
       attributes: ["id", "session_token"],
     });
 
-    // if (!user) {
-    //   return errorMessage(res, "User not found");
-    // }
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Session expired. Please login again.",
+      });
+    }
 
     if (user.session_token !== token) {
       return res.status(401).json({
