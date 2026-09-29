@@ -204,25 +204,10 @@ const addDevice = async function (
         `serial_number=${serial_number} name=${name}`
     );
 
-    // Send UPLOAD command to set upload interval to 60 seconds
-    try {
-      const sent = tcpServer.sendUploadIntervalCommand(serial_number, 60);
-      if (sent) {
-        Logging.info(
-          `UPLOAD command sent to device ${serial_number} with interval 60s`
-        );
-      } else {
-        Logging.warn(
-          `Device ${serial_number} not connected, UPLOAD command not sent (will be sent when device connects)`
-        );
-      }
-    } catch (cmdErr: any) {
-      Logging.error(
-        `Failed to send UPLOAD command to device ${serial_number}: ${
-          cmdErr.message || cmdErr
-        }`
-      );
-    }
+    // Send UPLOAD,60 to the watch and mirror it into DeviceSettings, so
+    // the DB records the interval the device was actually given. Shared
+    // with the TCP auto-registration path.
+    await tcpServer.applyDefaultUploadInterval(device, serial_number);
 
     return successMessage(res, "Device added successfully", {
       ...device.toJSON(),

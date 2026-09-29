@@ -403,6 +403,18 @@ class TcpServer {
   private readonly deviceRegistrationQueue: Map<string, Promise<void>> =
     new Map();
 
+  /**
+   * Dynamic-state upload interval, in seconds, applied to a watch as
+   * soon as it is registered.
+   *
+   * Matches the wire value sent in
+   *   [3G*<deviceId>*LEN*UPLOAD,<seconds>]
+   * and is persisted to DeviceSetting.upload_interval_seconds so the
+   * admin panel and the /upload-interval API read back what the device
+   * was actually told.
+   */
+  private static readonly DEFAULT_UPLOAD_INTERVAL_SECONDS = 60;
+
   private readonly port: number;
   private readonly host: string;
 
@@ -451,6 +463,70 @@ class TcpServer {
     });
 
     return result;
+  }
+
+  /**
+   * Apply the default upload interval to a freshly registered watch.
+   *
+   * Two things must happen together, and both are best-effort so that a
+   * transport or database hiccup can never abort device registration:
+   *
+   *   1. Send `[3G*<id>*LEN*UPLOAD,60]` so the watch starts reporting
+   *      every 60 seconds. Skipped with a warning when the socket is not
+   *      connected yet — the command is retried on the next connection.
+   *   2. Persist 60 to DeviceSetting.upload_interval_seconds, creating the
+   *      settings row if this is the watch's first write. Otherwise the DB
+   *      would claim a default the device was never actually given.
+   *
+   * Public so the admin add-watch endpoint applies the exact same rule
+   * as the TCP auto-registration path.
+   *
+   * @param device   The Device model instance (for its DB id)
+   * @param deviceId The protocol device id used on the wire
+   */
+  async applyDefaultUploadInterval(
+    device: any,
+    deviceId: string
+  ): Promise<void> {
+    const seconds = TcpServer.DEFAULT_UPLOAD_INTERVAL_SECONDS;
+
+    // 1. Push the interval to the watch.
+    try {
+      const sent = this.sendUploadIntervalCommand(deviceId, seconds);
+
+      if (sent) {
+        Logging.info(
+          `UPLOAD command sent to device ${deviceId} with interval ${seconds}s`
+        );
+      } else {
+        Logging.warn(
+          `Device ${deviceId} not connected, UPLOAD command not sent`
+        );
+      }
+    } catch (cmdErr: any) {
+      Logging.error(
+        `Failed to send UPLOAD command to device ${deviceId}: ` +
+          `${cmdErr.message || cmdErr}`
+      );
+    }
+
+    // 2. Mirror the value into DeviceSettings.
+    try {
+      await db.DeviceSetting.upsert({
+        device_id: device.id,
+        upload_interval_seconds: seconds,
+      });
+
+      Logging.info(
+        `DeviceSetting.upload_interval_seconds=${seconds} stored for ` +
+          `device ${deviceId} (DB id: ${device.id})`
+      );
+    } catch (settingErr: any) {
+      Logging.error(
+        `Failed to store upload_interval_seconds for device ${deviceId}: ` +
+          `${settingErr.message || settingErr}`
+      );
+    }
   }
 
   // ───────────────────────────────────────────────────────────
@@ -3643,25 +3719,8 @@ class TcpServer {
           `Placeholder Device created for protocol id ${deviceId} ` +
             `with imei ${imei} (DB id: ${device.id})`
         );
-        // Send UPLOAD command to set upload interval to 60 seconds
-        try {
-          const sent = this.sendUploadIntervalCommand(deviceId, 60);
-          if (sent) {
-            Logging.info(
-              `UPLOAD command sent to device ${deviceId} with interval 60s`
-            );
-          } else {
-            Logging.warn(
-              `Device ${deviceId} not connected, UPLOAD command not sent`
-            );
-          }
-        } catch (cmdErr: any) {
-          Logging.error(
-            `Failed to send UPLOAD command to device ${deviceId}: ${
-              cmdErr.message || cmdErr
-            }`
-          );
-        }
+        // Send UPLOAD,60 to the watch and mirror it into DeviceSettings.
+        await this.applyDefaultUploadInterval(device, deviceId);
       } catch (error: any) {
         /**
          * A concurrent request inserted the row between our checks
@@ -3850,25 +3909,8 @@ class TcpServer {
             `Placeholder Device created for protocol id ${deviceId} ` +
               `(DB id: ${createdDevice.id})`
           );
-          // Send UPLOAD command to set upload interval to 60 seconds
-          try {
-            const sent = this.sendUploadIntervalCommand(deviceId, 60);
-            if (sent) {
-              Logging.info(
-                `UPLOAD command sent to device ${deviceId} with interval 60s`
-              );
-            } else {
-              Logging.warn(
-                `Device ${deviceId} not connected, UPLOAD command not sent`
-              );
-            }
-          } catch (cmdErr: any) {
-            Logging.error(
-              `Failed to send UPLOAD command to device ${deviceId}: ${
-                cmdErr.message || cmdErr
-              }`
-            );
-          }
+          // Send UPLOAD,60 to the watch and mirror it into DeviceSettings.
+          await this.applyDefaultUploadInterval(createdDevice, deviceId);
         }
 
         device = createdDevice;
