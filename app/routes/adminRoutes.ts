@@ -168,9 +168,9 @@ router.post(
 );
 
 router.delete(
-  "/delete_device/:id",
+  "/delete_device",
   checkAdmin,
-  ValidateJoi(Schemas.device.delete, "params"),
+  ValidateJoi(Schemas.device.delete),
   Device_controller.deleteDevice
 );
 

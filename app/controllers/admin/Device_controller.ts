@@ -276,7 +276,7 @@ const deleteDevice = async function (
   next: NextFunction
 ) {
   try {
-    const { id } = req.params;
+    const { id } = req.body;
     const device = await db.Device.findOne({ where: { id } });
     if (!device) {
       return errorMessage(res, "Device not found");
