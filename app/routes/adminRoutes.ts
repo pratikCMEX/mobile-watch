@@ -167,6 +167,13 @@ router.post(
   Device_controller.updateDevice
 );
 
+router.delete(
+  "/delete_device/:id",
+  checkAdmin,
+  ValidateJoi(Schemas.device.delete, "params"),
+  Device_controller.deleteDevice
+);
+
 router.post(
   "/assign_device_to_user",
   checkAdmin,
