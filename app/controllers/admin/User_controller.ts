@@ -214,7 +214,7 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     });
   } catch (err: any) {
     console.error("deleteUser error:", err);
-    return errorMessage(res, `Error deleting user: ${err.message || err}`);
+    return errorMessage(res, `Error deleting user`);
   }
 }
 async function getUserDetail(req: Request, res: Response, next: NextFunction) {
