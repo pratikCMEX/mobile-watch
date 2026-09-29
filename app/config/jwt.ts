@@ -72,9 +72,9 @@ export const checkToken = async (req: any, res: any, next: any) => {
       attributes: ["id", "session_token"],
     });
 
-    if (!user) {
-      return errorMessage(res, "User not found");
-    }
+    // if (!user) {
+    //   return errorMessage(res, "User not found");
+    // }
 
     if (user.session_token !== token) {
       return res.status(401).json({
