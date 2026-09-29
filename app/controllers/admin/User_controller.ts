@@ -66,7 +66,7 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
 
     const offset = (Number(page) - 1) * Number(limit);
 
-    const whereCondition: any = {};
+    const whereCondition: any = { deletedAt: null };
     const userIds = await getAccessibleUserIds(req);
     if (userIds) {
       whereCondition.id = { [Op.in]: userIds };
@@ -148,7 +148,9 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
       return errorMessage(res, "User not found");
     }
 
-    const updatedUser = await db.User.findOne({ where: { id } });
+    const updatedUser = await db.User.findOne({
+      where: { id, deletedAt: null },
+    });
 
     return successMessage(res, "User updated successfully", updatedUser);
   } catch (err) {
@@ -160,7 +162,7 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
 async function deleteUser(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.body;
-    const user = await db.User.findOne({ where: { id } });
+    const user = await db.User.findOne({ where: { id, deletedAt: null } });
     if (!user || !(await canAccessUser(req, user.id))) {
       return errorMessage(res, "User not found");
     }
@@ -182,7 +184,8 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
       // await db.DeviceMember.destroy({ where: { user_id: id } });
     }
 
-    await db.User.destroy({ where: { id }, force: true });
+    // Soft delete the user (sets deletedAt timestamp)
+    await db.User.destroy({ where: { id } });
 
     return successMessage(res, "User deleted successfully", {
       user_id: id,
@@ -205,7 +208,7 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
       return errorMessage(res, "User ID is required");
     }
     const user = await db.User.findOne({
-      where: { id },
+      where: { id, deletedAt: null },
       attributes: { exclude: ["password"] },
     });
     if (!user || !(await canAccessUser(req, user.id))) {

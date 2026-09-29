@@ -64,7 +64,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     }
 
     const user = await db.User.findOne({
-      where: { email: email.toLowerCase() },
+      where: { email: email.toLowerCase(), deletedAt: null },
     });
 
     if (!user) {
@@ -171,7 +171,9 @@ const logout = async (req: Request, res: Response, next: NextFunction) => {
       return errorMessage(res, "Invalid token payload", 401);
     }
 
-    const user = await db.User.findByPk(userId);
+    const user = await db.User.findOne({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
       return errorMessage(res, "User not found", 404);
     }
@@ -201,7 +203,9 @@ const updateProfile = async (
       return errorMessage(res, "Invalid token payload", 401);
     }
 
-    const user = await db.User.findByPk(userId);
+    const user = await db.User.findOne({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
       return errorMessage(res, "User not found", 404);
     }
@@ -218,7 +222,7 @@ const updateProfile = async (
     // If email is being changed, ensure it isn't taken by another user
     if (email && email !== user.email) {
       const existing = await db.User.findOne({
-        where: { email, id: { [Op.ne]: userId } },
+        where: { email, deletedAt: null, id: { [Op.ne]: userId } },
       });
       if (existing) {
         return errorMessage(res, "Email already in use by another account");
@@ -279,7 +283,9 @@ const getProfile = async (req: Request, res: Response, next: NextFunction) => {
       return errorMessage(res, "Invalid token payload", 401);
     }
 
-    const user = await db.User.findByPk(userId);
+    const user = await db.User.findOne({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
       return errorMessage(res, "User not found", 404);
     }
@@ -298,8 +304,10 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
       return errorMessage(res, "Email and password are required", 200);
     }
 
-    // Check if user already exists
-    const existingUser = await db.User.findOne({ where: { email } });
+    // Check if user already exists (excluding soft-deleted users)
+    const existingUser = await db.User.findOne({
+      where: { email, deletedAt: null },
+    });
     if (existingUser) {
       return errorMessage(res, "User with this email already exists", 409);
     }
@@ -340,7 +348,7 @@ const deleteAccount = async (
   try {
     const userId = (req as any)?.userinfo?.payload?.id;
     const user = await db.User.findOne({
-      where: { id: userId },
+      where: { id: userId, deletedAt: null },
     });
 
     if (!user) {
@@ -365,9 +373,8 @@ const deleteAccount = async (
       );
     }
 
-    // Destroying the User row cascades their DeviceMember rows
-    // (FK onDelete CASCADE), then removes the account itself.
-    await user.destroy({ force: true });
+    // Soft delete the user (sets deletedAt timestamp)
+    await user.destroy();
 
     return successMessage(res, "Account deleted successfully", {
       unassigned_devices: ownedDevices.map((device: any) => ({
@@ -439,7 +446,7 @@ const forgotPassword = async (
     const normalizedEmail = email.toLowerCase().trim();
 
     const user = await db.User.findOne({
-      where: { email: normalizedEmail },
+      where: { email: normalizedEmail, deletedAt: null },
     });
     if (!user) {
       return errorMessage(res, "User does not exist for this email address", {
@@ -505,7 +512,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
     const normalizedEmail = email.toLowerCase().trim();
 
     const user = await db.User.findOne({
-      where: { email: normalizedEmail },
+      where: { email: normalizedEmail, deletedAt: null },
     });
 
     if (!user || !user.otp_hash) {
@@ -600,7 +607,7 @@ const changePassword = async (
     }
 
     const user = await db.User.findOne({
-      where: { reset_token },
+      where: { reset_token, deletedAt: null },
     });
 
     if (!user) {

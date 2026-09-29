@@ -20,7 +20,8 @@ const sendTestNotification = async (
     }
 
     // Verify user exists and has an FCM token
-    const user = await db.User.findByPk(user_id, {
+    const user = await db.User.findOne({
+      where: { id: user_id, deletedAt: null },
       attributes: ["id", "name", "fcm_token"],
     });
 

@@ -283,7 +283,8 @@ export const pushToUser = async (
     metadata?: Record<string, any>;
   }
 ): Promise<any> => {
-  const user = await db.User.findByPk(userId, {
+  const user = await db.User.findOne({
+    where: { id: userId, deletedAt: null },
     attributes: ["fcm_token", "device_type"],
   });
 

@@ -68,7 +68,7 @@ export const checkToken = async (req: any, res: any, next: any) => {
     }
 
     const user = await db.User.findOne({
-      where: { id: userId },
+      where: { id: userId, deletedAt: null },
       attributes: ["id", "session_token"],
     });
 

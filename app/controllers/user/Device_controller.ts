@@ -4457,10 +4457,12 @@ const registerDeviceByImei = async function (
   try {
     const userId = (req as any)?.userinfo?.payload?.id;
     if (!userId) {
-      return errorMessage(res, "Invalid token payload", 401);
+      return errorMessage(res, "Invalid token payload", 200);
     }
 
-    const user = await db.User.findByPk(userId);
+    const user = await db.User.findOne({
+      where: { id: userId, deletedAt: null },
+    });
     if (!user) {
       return errorMessage(res, "User not found", 404);
     }

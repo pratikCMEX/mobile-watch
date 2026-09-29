@@ -42,7 +42,9 @@ const createDevice = async function (
     } = req.body;
 
     if (owner_id) {
-      const owner = await db.User.findByPk(owner_id);
+      const owner = await db.User.findOne({
+        where: { id: owner_id, deletedAt: null },
+      });
       if (!owner) {
         unlinkUploadedFiles(req);
         return errorMessage(res, "owner_id does not match any existing user");
@@ -712,7 +714,9 @@ const assignOwner = async function (
       return errorMessage(res, "Device not found");
     }
 
-    const owner = await db.User.findByPk(owner_id);
+    const owner = await db.User.findOne({
+      where: { id: owner_id, deletedAt: null },
+    });
     if (!owner) {
       return errorMessage(res, "owner_id does not match any existing user");
     }
@@ -1266,7 +1270,9 @@ const assignDeviceToUser = async function (
       return errorMessage(res, "Device not found");
     }
 
-    const user = await db.User.findOne({ where: { id: user_id } });
+    const user = await db.User.findOne({
+      where: { id: user_id, deletedAt: null },
+    });
     if (!user) {
       return errorMessage(res, "User not found");
     }
@@ -1819,7 +1825,9 @@ const addMember = async function (
       return errorMessage(res, "Device not found");
     }
 
-    const user = await db.User.findByPk(user_id);
+    const user = await db.User.findOne({
+      where: { id: user_id, deletedAt: null },
+    });
     if (!user) {
       return errorMessage(res, "User not found");
     }
@@ -1974,7 +1982,9 @@ const addMembers = async function (
     const skipped: { user_id: string; reason: string }[] = [];
 
     for (const user_id of user_ids) {
-      const user = await db.User.findByPk(user_id);
+      const user = await db.User.findOne({
+        where: { id: user_id, deletedAt: null },
+      });
       if (!user) {
         skipped.push({ user_id, reason: "user not found" });
         continue;
