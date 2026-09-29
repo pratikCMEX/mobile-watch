@@ -68,7 +68,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     });
 
     if (!user) {
-      return errorMessage(res, "Invalid email or password", null);
+      return errorMessage(res, "User does not exist", null);
     }
 
     const isMatch = await bcrypt.compare(password, user.password);

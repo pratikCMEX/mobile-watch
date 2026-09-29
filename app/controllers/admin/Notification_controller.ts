@@ -1,8 +1,25 @@
 import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { errorMessage, successPagination } from "../../library/Response";
-import { Op } from "sequelize";
+import { Op, cast, col, where } from "sequelize";
 import { canAccessDevice, deviceIdScope } from "../../helper/WatchAccess";
+
+/**
+ * Case-insensitive "contains" on a column that may not be text.
+ *
+ * `ILIKE` is only defined for text-ish types. In Postgres it does not
+ * exist for `uuid` or for a user-defined `enum`, so searching those
+ * columns directly fails with
+ *   ERROR: operator does not exist: uuid ~~* unknown
+ * and takes the whole request down with a 500 — which is why searching
+ * by device id or type silently returned nothing at all.
+ *
+ * Casting to TEXT first makes the comparison valid for every column type
+ * while keeping the pattern bound as a parameter, so this stays safe
+ * against SQL injection.
+ */
+const iLikeAny = (column: string, value: string) =>
+  where(cast(col(column), "TEXT"), { [Op.iLike]: `%${value}%` } as any);
 
 /**
  * Fill in `UserNotification` for notification rows whose `user_id` is NULL.
@@ -173,7 +190,6 @@ async function getAllNotifications(
 
     const where: any = {};
 
-    // If IMEI is provided, find device first and filter by device_id
     if (imei && imei !== "") {
       const device = await db.Device.findOne({
         where: { imei: imei as string },
@@ -212,10 +228,12 @@ async function getAllNotifications(
     // are excluded from the list and from `count`.
     where.user_id = { [Op.ne]: null };
 
-    // General search parameter - searches device_id, imei (through device), device_name (through device), title, createdAt, type, and is_read
+    // General search parameter - searches device_id, imei (through device),
+    // device_name (through device), title, createdAt and type.
     if (search && search !== "") {
-      // is_read is stored as the ENUM strings "0"/"1" — never compare it
-      // to a boolean (Postgres rejects `enum = boolean`).
+      // is_read is stored as the ENUM strings "0"/"1" - never compare it to a
+      // boolean (Postgres rejects `enum = boolean`), and use `=` rather than
+      // ILIKE because ILIKE does not exist for enum types.
       const isReadCondition =
         search === "true"
           ? { is_read: "1" }
@@ -239,14 +257,25 @@ async function getAllNotifications(
         };
       }
 
+      /**
+       * iLikeAny() is used for every column so the behaviour is uniform
+       * and stays correct if a column's type ever changes. Only `title`,
+       * `imei` and `device_name` are natively text, but casting them is a
+       * no-op.
+       *
+       * Columns are fully qualified (alias.column) because several of
+       * these live on the joined `DeviceNotification` table, and the same
+       * query shape is also used by the dashboard controller.
+       */
       where[Op.or] = [
-        { device_id: { [Op.iLike]: `%${search}%` } },
-        { "$DeviceNotification.imei$": { [Op.iLike]: `%${search}%` } },
-        { "$DeviceNotification.device_name$": { [Op.iLike]: `%${search}%` } },
-        { title: { [Op.iLike]: `%${search}%` } },
-        { type: { [Op.iLike]: `%${search}%` } },
-        isReadCondition,
+        iLikeAny("Notification.device_id", search),
+        iLikeAny("DeviceNotification.imei", search),
+        iLikeAny("DeviceNotification.device_name", search),
+        iLikeAny("Notification.title", search),
+        iLikeAny("Notification.body", search),
+        iLikeAny("Notification.type", search),
         createdAtCondition,
+        isReadCondition,
       ].filter((condition) => condition !== undefined);
     }
     const { count, rows } = await db.Notification.findAndCountAll({
