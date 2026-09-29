@@ -162,7 +162,7 @@ router.post(
 
 router.post(
   "/update_device",
-  checkToken,
+  checkAdmin,
   ValidateJoi(Schemas.device.update),
   Device_controller.updateDevice
 );
