@@ -7,6 +7,7 @@ import {
 } from "../../library/Response";
 import { Op } from "sequelize";
 import bcrypt from "bcrypt";
+import Logging from "../../library/Logging";
 
 import { generateAuthToken, sendWelcomeEmail } from "../../helper/Helper";
 import { getAccessibleUserIds } from "../../helper/WatchAccess";
@@ -174,11 +175,21 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     // data with it. The watches are unassigned instead: owner_id is set to
     // NULL and the rows stay in the Devices table, available for reassignment
     // via /assign_device_to_user.
-    const ownedDevices = await db.DeviceMember.findAll({
-      where: { user_id: id },
+    const ownedDevices = await db.Device.findAll({
+      where: { owner_id: id },
+      attributes: ["id", "imei", "serial_number", "device_name"],
     });
 
     if (ownedDevices.length > 0) {
+      await db.Device.update({ owner_id: null }, { where: { owner_id: id } });
+    }
+
+    // Also remove DeviceMember entries for this user (shared devices)
+    const deviceMembers = await db.DeviceMember.findAll({
+      where: { user_id: id },
+    });
+
+    if (deviceMembers.length > 0) {
       await db.DeviceMember.destroy({ where: { user_id: id } });
     }
 
@@ -189,8 +200,8 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     user.device_type = "";
     await user.save();
 
-    // Soft delete the user (sets deletedAt timestamp)
-    await db.User.destroy({ where: { id } });
+    // Soft delete the user (sets deletedAt timestamp) - use instance method
+    await user.destroy();
 
     return successMessage(res, "User deleted successfully", {
       user_id: id,
