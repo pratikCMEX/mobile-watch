@@ -373,6 +373,13 @@ const deleteAccount = async (
       );
     }
 
+    // Logout user from all devices by clearing session_token and fcm_token
+    // This mimics the multi-device logout functionality
+    user.session_token = "";
+    user.fcm_token = "";
+    user.device_type = "";
+    await user.save();
+
     // Soft delete the user (sets deletedAt timestamp)
     await user.destroy();
 
