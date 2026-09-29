@@ -146,12 +146,36 @@ const addDevice = async function (
     // serial_number (linkDeviceIdentity()/findDevice() in tcpServer.ts).
     // Reuse that placeholder instead of inserting a second row for the same
     // physical watch, otherwise the device ends up registered twice.
-    const existingBySerial = await db.Device.findOne({
+    //
+    // The previous code did findOne() here and create() further below, which
+    // is a find-then-insert race: a watch packet arriving between the two
+    // would let both paths insert. findOrCreate() collapses the lookup+insert
+    // into one statement, and the partial unique index on serial_number
+    // (migration 20260929090000) is the database-level backstop - the loser of
+    // any remaining race is rejected instead of producing a second row.
+    const [existingBySerial, createdBySerial] = await db.Device.findOrCreate({
       where: { serial_number },
+      defaults: {
+        owner_id: null,
+        imei: cleanImei,
+        serial_number,
+        device_name: name,
+        connection_status: "offline",
+        signal_status: null,
+        battery_percentage: null,
+        is_online: false,
+        last_updated_at: null,
+        location_interval_minutes: 1,
+      },
     });
 
-    if (existingBySerial) {
-      if (existingBySerial.imei) {
+    if (!createdBySerial) {
+      /**
+       * The row already existed. A non-null imei means it is a different
+       * physical watch that happens to share this serial number - never
+       * silently overwrite it.
+       */
+      if (existingBySerial.imei && existingBySerial.imei !== cleanImei) {
         return errorMessage(
           res,
           `A different device (imei ${existingBySerial.imei}) is already registered with serial number ${serial_number}`
@@ -173,18 +197,7 @@ const addDevice = async function (
       });
     }
 
-    const device = await db.Device.create({
-      owner_id: null,
-      imei: cleanImei,
-      serial_number,
-      device_name: name,
-      connection_status: "offline",
-      signal_status: null,
-      battery_percentage: null,
-      is_online: false,
-      last_updated_at: null,
-      location_interval_minutes: 1,
-    });
+    const device = existingBySerial;
 
     Logging.info(
       `Device created: id=${device.id} imei=${cleanImei} ` +

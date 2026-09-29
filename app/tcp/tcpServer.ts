@@ -387,6 +387,22 @@ class TcpServer {
   private readonly deviceRequestCache: Map<string, DeviceRequestEntry> =
     new Map();
 
+  /**
+   * Serialises the "register this watch" work (findDevice() and
+   * linkDeviceIdentity()) per protocol deviceId.
+   *
+   * A watch that powers on for the first time sends ICCID/RYIMEI and
+   * its normal data packets within the same tick. Both paths used to do
+   * an unguarded find-then-INSERT, so two rows could be created for one
+   * physical watch. Chaining every registration task for a deviceId
+   * behind the previous one removes that window entirely.
+   *
+   * The entry is deleted as soon as the queue drains, so the map only
+   * holds deviceIds that are actively registering.
+   */
+  private readonly deviceRegistrationQueue: Map<string, Promise<void>> =
+    new Map();
+
   private readonly port: number;
   private readonly host: string;
 
@@ -399,6 +415,42 @@ class TcpServer {
     });
 
     this.registerServerEvents();
+  }
+
+  /**
+   * Run `task` with exclusive access to `deviceId`'s registration slot.
+   *
+   * Tasks for the same deviceId run one after another; tasks for
+   * different devices are unaffected. A rejection in one task does not
+   * break the chain for the next one.
+   */
+  private withDeviceRegistrationLock<T>(
+    deviceId: string,
+    task: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.deviceRegistrationQueue.get(deviceId) ?? null;
+
+    const result = previous ? previous.then(task, task) : task();
+
+    /**
+     * The queue entry is a settling barrier, never a rejection: callers
+     * must still see their own task's error.
+     */
+    const barrier = result.then(
+      () => undefined,
+      () => undefined
+    );
+
+    this.deviceRegistrationQueue.set(deviceId, barrier);
+
+    barrier.then(() => {
+      // Only clear if we are still the tail (a newer task may have queued).
+      if (this.deviceRegistrationQueue.get(deviceId) === barrier) {
+        this.deviceRegistrationQueue.delete(deviceId);
+      }
+    });
+
+    return result;
   }
 
   // ───────────────────────────────────────────────────────────
@@ -2595,7 +2647,17 @@ class TcpServer {
     const imei = parts[1];
 
     if (imei) {
-      this.linkDeviceIdentity(packet.deviceId, imei);
+      /**
+       * Not awaited deliberately — the handler is synchronous and the
+       * identity link does its own lookups. The .catch() is required:
+       * an unhandled rejection here would take the process down, and
+       * the registration lock already serialises the work.
+       */
+      this.linkDeviceIdentity(packet.deviceId, imei).catch((error: Error) =>
+        Logging.error(
+          `linkDeviceIdentity failed for ${packet.deviceId}: ${error.message}`
+        )
+      );
     }
   }
 
@@ -2612,7 +2674,11 @@ class TcpServer {
     if (imei) {
       client.imei = imei;
 
-      this.linkDeviceIdentity(packet.deviceId, imei);
+      this.linkDeviceIdentity(packet.deviceId, imei).catch((error: Error) =>
+        Logging.error(
+          `linkDeviceIdentity failed for ${packet.deviceId}: ${error.message}`
+        )
+      );
     }
   }
 
@@ -3493,6 +3559,20 @@ class TcpServer {
     deviceId: string,
     imei: string
   ): Promise<void> {
+    return this.withDeviceRegistrationLock(deviceId, () =>
+      this.resolveDeviceIdentity(deviceId, imei)
+    );
+  }
+
+  /**
+   * Body of linkDeviceIdentity(), run under the same per-deviceId
+   * registration lock as findDevice() so the two can never both
+   * decide the watch is unregistered and both INSERT.
+   */
+  private async resolveDeviceIdentity(
+    deviceId: string,
+    imei: string
+  ): Promise<void> {
     /**
      * Race-safe device linking.
      *
@@ -3683,6 +3763,17 @@ class TcpServer {
    *   - owner_id = null (assigned later via admin API)
    */
   private async findDevice(deviceId: string): Promise<any | null> {
+    return this.withDeviceRegistrationLock(deviceId, () =>
+      this.resolveDevice(deviceId)
+    );
+  }
+
+  /**
+   * Body of findDevice(), run while holding the deviceId's registration
+   * lock so a concurrent linkDeviceIdentity() cannot interleave its
+   * lookups and INSERT between ours.
+   */
+  private async resolveDevice(deviceId: string): Promise<any | null> {
     const tag = `[findDevice:${deviceId}]`;
 
     let device = await db.Device.findOne({
@@ -3705,17 +3796,21 @@ class TcpServer {
        * No registered Device found. Auto-create a placeholder so
        * incoming data is not lost.
        *
-       * NOTE: serial_number is intentionally NOT a unique column (a
-       * device may be re-registered under a different SN later, and
-       * multiple placeholders with imei=null must be allowed to
-       * coexist without violating the imei unique constraint).
+       * The lookup above is keyed on serial_number ALONE. It used to
+       * be `where: { serial_number: deviceId, imei: null }` here in
+       * findOrCreate(), which was the actual source of the duplicate
+       * rows: once linkDeviceIdentity() had already written the real
+       * IMEI onto the row for this serial_number, that predicate no
+       * longer matched it, so findOrCreate() judged the watch
+       * "unregistered" and INSERTed a second row with imei=null.
+       * PostgreSQL does not stop this either — NULLs are distinct in
+       * a unique index, and serial_number carries no unique index of
+       * its own.
        *
-       * That means a find-then-create race is possible: two packets
-       * for the same deviceId processed concurrently can both pass
-       * the checks above and both INSERT. findOrCreate() keeps the
-       * create atomic (one row), and the catch below re-fetches the
-       * winner if we lost the race — so we never return null when a
-       * row actually exists, and we never leak a duplicate.
+       * serial_number is now unique (partial index, migration
+       * 20260929090000), and the creation path is serialised per
+       * deviceId by withDeviceRegistrationLock(), so the race is
+       * closed at both the application and the database level.
        */
       Logging.info(
         `No registered Device found for protocol id ${deviceId} - ` +
@@ -3724,7 +3819,7 @@ class TcpServer {
 
       try {
         const [createdDevice, created] = await db.Device.findOrCreate({
-          where: { serial_number: deviceId, imei: null },
+          where: { serial_number: deviceId },
           defaults: {
             serial_number: deviceId,
             imei: null,
@@ -3794,12 +3889,8 @@ class TcpServer {
           );
           device =
             (await db.Device.findOne({
-              where: { serial_number: deviceId, imei: null },
-            })) ||
-            (await db.Device.findOne({
               where: { serial_number: deviceId },
-            })) ||
-            (await db.Device.findOne({ where: { imei: deviceId } }));
+            })) || (await db.Device.findOne({ where: { imei: deviceId } }));
         } else {
           Logging.error(
             `Failed to create placeholder Device for ${deviceId}: ` +
