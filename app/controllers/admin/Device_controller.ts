@@ -108,8 +108,9 @@ const createDevice = async function (
  * IMEI) is used as-is.
  */
 const deriveSerialNumberFromImei = (imei: string): string => {
-  const digits = String(imei).replace(/\D/g, "");
-  return digits.length > 10 ? digits.slice(-10) : digits;
+  const digits = String(imei ?? "").replace(/\D/g, "");
+
+  return digits.length === 15 ? digits.slice(4, 14) : digits;
 };
 
 // Admin: add a watch using only its name and IMEI. The serial number is
