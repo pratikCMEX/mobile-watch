@@ -212,9 +212,9 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
         device_name: device.device_name,
       })),
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error("deleteUser error:", err);
-    return errorMessage(res, "Error deleting user");
+    return errorMessage(res, `Error deleting user: ${err.message || err}`);
   }
 }
 async function getUserDetail(req: Request, res: Response, next: NextFunction) {
