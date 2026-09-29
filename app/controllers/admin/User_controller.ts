@@ -181,7 +181,7 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
 
     if (ownedDevices.length > 0) {
       await db.Device.update({ owner_id: null }, { where: { owner_id: id } });
-      // await db.DeviceMember.destroy({ where: { user_id: id } });
+      await db.DeviceMember.destroy({ where: { user_id: id } });
     }
 
     // Soft delete the user (sets deletedAt timestamp)
