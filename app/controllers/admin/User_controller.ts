@@ -197,7 +197,7 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     // This mimics the multi-device logout functionality
     user.session_token = "";
     user.fcm_token = "";
-    user.device_type = "";
+    user.device_type = null;
     await user.save();
 
     // Soft delete the user (sets deletedAt timestamp) - use instance method
