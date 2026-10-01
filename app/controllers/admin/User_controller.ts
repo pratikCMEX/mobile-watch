@@ -32,12 +32,21 @@ async function createUser(req: Request, res: Response, next: NextFunction) {
       return errorMessage(res, "A user with this email already exists");
     }
     const password_hash = await bcrypt.hash(password, 10);
+
+    // A user may be assigned to at most one staff. When the caller is a
+    // staff member (Admin.role === "staff") the newly created user is bound
+    // to them; when the caller is an admin the user has no staff assignment.
+    const caller = (req as any).user;
+    const assigned_staff_id =
+      caller && caller.role === "staff" ? caller.id : null;
+
     const user = await db.User.create({
       name,
       email: email.toLowerCase(),
       password: password_hash,
       phone_number,
       country_code,
+      assigned_staff_id,
     });
 
     // Send welcome email with credentials
@@ -92,7 +101,16 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
         "email",
         "country_code",
         "phone_number",
+        "assigned_staff_id",
         "createdAt",
+      ],
+      include: [
+        {
+          model: db.Admin,
+          as: "AssignedStaff",
+          attributes: ["id", "name", "username", "role"],
+          required: false,
+        },
       ],
       order: [["createdAt", sorting]],
       limit: Number(limit),
@@ -229,6 +247,14 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
     const user = await db.User.findOne({
       where: { id, deletedAt: null },
       attributes: { exclude: ["password"] },
+      include: [
+        {
+          model: db.Admin,
+          as: "AssignedStaff",
+          attributes: ["id", "name", "username", "role"],
+          required: false,
+        },
+      ],
     });
     if (!user || !(await canAccessUser(req, user.id))) {
       return errorMessage(res, "User not found");

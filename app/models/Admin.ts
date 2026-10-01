@@ -18,7 +18,13 @@ export interface AdminAttributes {
 
 type AdminCreationAttributes = Optional<
   AdminAttributes,
-  "id" | "role" | "all_watches" | "status" | "session_token" | "createdAt" | "updatedAt"
+  | "id"
+  | "role"
+  | "all_watches"
+  | "status"
+  | "session_token"
+  | "createdAt"
+  | "updatedAt"
 >;
 
 class Admin
@@ -54,6 +60,13 @@ class Admin
     Admin.hasMany(models.AdminLoginLog, {
       foreignKey: "admin_id",
       as: "LoginLogs",
+    });
+    // Users assigned to this staff member (only meaningful when role='staff').
+    // A user may be assigned to at most one staff, so this is a 1-to-many
+    // from the staff side.
+    Admin.hasMany(models.User, {
+      foreignKey: "assigned_staff_id",
+      as: "AssignedUsers",
     });
   }
 }
@@ -131,7 +144,7 @@ export default (sequelize: Sequelize, DataTypes: any) => {
           }
         },
         beforeUpdate: async (admin: any) => {
-          if (admin.changed('password')) {
+          if (admin.changed("password")) {
             admin.password = await bcrypt.hash(admin.password, 10);
           }
         },

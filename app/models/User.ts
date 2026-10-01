@@ -19,6 +19,7 @@ export interface UserAttributes {
   otp_attempts?: number;
   reset_token?: string | null;
   reset_token_expiry?: Date | null;
+  assigned_staff_id?: string | null;
   deletedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -48,6 +49,7 @@ class User
   public otp_attempts?: number;
   public reset_token?: string | null;
   public reset_token_expiry?: Date | null;
+  public assigned_staff_id?: string | null;
 
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -71,6 +73,10 @@ class User
     User.hasMany(models.Notification, {
       foreignKey: "user_id",
       as: "UserNotification",
+    });
+    User.belongsTo(models.Admin, {
+      foreignKey: "assigned_staff_id",
+      as: "AssignedStaff",
     });
   }
 }
@@ -175,6 +181,15 @@ export default (sequelize: Sequelize, DataTypes: any) => {
         allowNull: true,
         defaultValue: null,
         comment: "Expiry timestamp of reset_token",
+      },
+      assigned_staff_id: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        defaultValue: null,
+        references: { model: "Admins", key: "id" },
+        onDelete: "SET NULL",
+        comment:
+          "Staff (Admin with role='staff') this user is assigned to. Nullable — admin-created or self-signed-up users have none. At most one staff per user.",
       },
       deletedAt: {
         type: DataTypes.DATE,
