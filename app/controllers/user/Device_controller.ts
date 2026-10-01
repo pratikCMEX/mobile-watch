@@ -2465,11 +2465,15 @@ const setLanguageTimezone = async (
         `(device_id=${device.id}, language=${langArg}, timezone=${tzArg})`
     );
 
+    // The GMT offset is formatted here (not left to the translation) so every
+    // locale renders the same `+8` / `-5.5` form the firmware expects.
+    const gmtOffset = `${tzArg! >= 0 ? "+" : ""}${tzArg}`;
+
     return successMessage(
       res,
       langArg !== null
-        ? "Language set successfully"
-        : "Time zone set successfully",
+        ? "language_set_successfully"
+        : "time_zone_set_successfully",
       {
         serial_number,
         device_id: device.id,
@@ -2477,14 +2481,25 @@ const setLanguageTimezone = async (
         language: langArg,
         timezone: tzArg,
         command_sent: true,
+        // Translated here because successMessage only localises the top-level
+        // message — everything inside the data payload is passed through as-is.
         command_message:
           langArg !== null
-            ? `Set watch language to code ${langArg} on device ${serial_number}. The other setting (time zone) was left unchanged.`
-            : `Set watch time zone to GMT${
-                tzArg! >= 0 ? "+" : ""
-              }${tzArg} on device ${serial_number}. The other setting (language) was left unchanged.`,
+            ? t(
+                req,
+                "watch_language_set_to_code_on_device_other_setting_left_unchanged",
+                [langArg, serial_number]
+              )
+            : t(
+                req,
+                "watch_time_zone_set_to_gmt_offset_on_device_other_setting_left_unchanged",
+                [gmtOffset, serial_number]
+              ),
         command_protocol: result.protocol,
-        note: "Device will reply with [3G*<id>*0002*LZ] (ack = success) or [3G*<id>*0004*LZ,0] (failure).",
+        note: t(
+          req,
+          "device_will_reply_with_lz_ack_on_success_or_lz_0_on_failure"
+        ),
         timestamp: new Date().toISOString(),
       }
     );
