@@ -106,86 +106,6 @@ async function getDashboardStats(
     // Get offline devices count
     const offlineDevices = totalDevices - onlineDevices;
 
-    // Users assigned to the logged-in staff, each paired with the watches
-    // they own/use (via DeviceMembers). For admins this is every user, so
-    // it is only populated when the caller is a staff member.
-    const caller = (req as any).user;
-    const isStaff = !!(
-      caller &&
-      caller.role === "staff" &&
-      !caller.all_watches
-    );
-    let assignedUsersList: any[] = [];
-    if (isStaff && assignedIds && assignedIds.length > 0) {
-      const assignedUsers = await db.User.findAll({
-        where: { id: { [db.Sequelize.Op.in]: assignedIds } },
-        attributes: [
-          "id",
-          "name",
-          "email",
-          "phone_number",
-          "assigned_staff_id",
-        ],
-        include: [
-          {
-            model: db.Device,
-            as: "DeviceOwner",
-            attributes: [
-              "id",
-              "imei",
-              "device_name",
-              "is_online",
-              "connection_status",
-            ],
-            required: false,
-          },
-          {
-            model: db.DeviceMember,
-            as: "DeviceUser",
-            attributes: ["id", "role"],
-            required: false,
-            include: [
-              {
-                model: db.Device,
-                attributes: [
-                  "id",
-                  "imei",
-                  "device_name",
-                  "is_online",
-                  "connection_status",
-                ],
-                required: false,
-              },
-            ],
-          },
-        ],
-      });
-
-      // Flatten the union of owned + member devices per user into a single
-      // deduplicated watch list, so the payload is easy to consume.
-      assignedUsersList = assignedUsers.map((u: any) => {
-        const plain = typeof u.get === "function" ? u.get({ plain: true }) : u;
-        const watchMap = new Map<string, any>();
-        for (const d of plain.DeviceOwner || []) {
-          if (d?.id) watchMap.set(d.id, { ...d, relation: "owner" });
-        }
-        for (const m of plain.DeviceUser || []) {
-          const d = m?.Device;
-          if (d?.id && !watchMap.has(d.id)) {
-            watchMap.set(d.id, {
-              ...d,
-              relation: "member",
-              member_role: m.role,
-            });
-          }
-        }
-        return {
-          ...plain,
-          watches: Array.from(watchMap.values()),
-        };
-      });
-    }
-
     // Get all devices with latest location and other info
     const devices = await db.Device.findAll({
       attributes: [
@@ -228,7 +148,6 @@ async function getDashboardStats(
         online_devices: onlineDevices,
         offline_devices: offlineDevices,
       },
-      assigned_users: assignedUsersList,
       devices: devices,
     };
 
