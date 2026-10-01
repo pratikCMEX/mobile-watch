@@ -10,7 +10,10 @@ import bcrypt from "bcrypt";
 import Logging from "../../library/Logging";
 
 import { generateAuthToken, sendWelcomeEmail } from "../../helper/Helper";
-import { getAccessibleUserIds } from "../../helper/WatchAccess";
+import {
+  getAccessibleUserIds,
+  getAssignedUserIds,
+} from "../../helper/WatchAccess";
 
 // Staff limited to specific watches can only manage the owners of those
 // watches.
@@ -77,9 +80,18 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
     const offset = (Number(page) - 1) * Number(limit);
 
     const whereCondition: any = { deletedAt: null };
-    const userIds = await getAccessibleUserIds(req);
-    if (userIds) {
-      whereCondition.id = { [Op.in]: userIds };
+
+    // Staff see the users explicitly assigned to them. Admins (and staff
+    // with all_watches) fall back to the watch-based scope, which is null
+    // (= unrestricted) for them.
+    const assignedIds = await getAssignedUserIds(req);
+    if (assignedIds) {
+      whereCondition.id = { [Op.in]: assignedIds };
+    } else {
+      const userIds = await getAccessibleUserIds(req);
+      if (userIds) {
+        whereCondition.id = { [Op.in]: userIds };
+      }
     }
     if (search) {
       whereCondition[Op.or] = [

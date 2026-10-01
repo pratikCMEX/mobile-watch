@@ -76,6 +76,24 @@ export const getAccessibleUserIds = async (
   return [...new Set<string>(members.map((m: any) => m.user_id))];
 };
 
+// Ids of users explicitly assigned to the logged-in staff member (via
+// Users.assigned_staff_id). Returns null when the caller is unrestricted
+// (admin or staff with all_watches), so callers can fall back to the
+// wider device-based scope.
+export const getAssignedUserIds = async (
+  req: Request
+): Promise<string[] | null> => {
+  const user = (req as any).user;
+  if (!user || user.role !== "staff" || user.all_watches) return null;
+
+  const rows = await db.User.findAll({
+    where: { assigned_staff_id: user.id, deletedAt: null },
+    attributes: ["id"],
+    raw: true,
+  });
+  return rows.map((r: any) => r.id);
+};
+
 // ─── Device ↔ User membership (many-to-many via DeviceMembers) ──
 // A watch can be shared with multiple users. The DeviceMembers join
 // table is the single source of truth for "which users may use this

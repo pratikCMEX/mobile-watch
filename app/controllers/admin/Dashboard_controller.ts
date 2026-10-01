@@ -2,7 +2,11 @@ import { NextFunction, Request, Response } from "express";
 import db from "../../models";
 import { Op } from "sequelize";
 import { errorMessage, successMessage } from "../../library/Response";
-import { deviceIdScope, getAccessibleUserIds } from "../../helper/WatchAccess";
+import {
+  deviceIdScope,
+  getAccessibleUserIds,
+  getAssignedUserIds,
+} from "../../helper/WatchAccess";
 
 // Notification types surfaced on the dashboard alert list.
 const DASHBOARD_ALERT_TYPES = ["sos", "fall_detection", "low_battery"];
@@ -16,13 +20,27 @@ async function getDashboardStats(
     // Staff only see watches assigned to them (and those watches' owners)
     const deviceScope = await deviceIdScope(req);
     const deviceWhere: any = deviceScope ? { id: deviceScope } : {};
-    const userIds = await getAccessibleUserIds(req);
+
+    // A staff member's user scope is the set of users explicitly assigned
+    // to them. Admins (and staff with all_watches) fall back to the
+    // watch-based scope, which is null (= unrestricted) for them.
+    const assignedIds = await getAssignedUserIds(req);
+    const userIds = assignedIds ?? (await getAccessibleUserIds(req));
     const userWhere: any = userIds
       ? { id: { [db.Sequelize.Op.in]: userIds } }
       : {};
 
     // Get total user count
     const totalUsers = await db.User.count({ where: userWhere });
+
+    // Users explicitly assigned to the logged-in staff (only meaningful for
+    // staff; for admins this equals totalUsers since userWhere is unrestricted).
+    const assignedUsers = await db.User.count({
+      where: {
+        ...userWhere,
+        assigned_staff_id: { [db.Sequelize.Op.ne]: null },
+      },
+    });
 
     // Get active users (users with non-empty session_token - currently logged in)
     const activeUsers = await db.User.count({
@@ -119,6 +137,7 @@ async function getDashboardStats(
     const dashboardData = {
       stats: {
         total_users: totalUsers,
+        assigned_users: assignedUsers,
         total_devices: totalDevices,
         total_sos_alerts: totalSosAlerts,
         total_geofences: total_geofences,
