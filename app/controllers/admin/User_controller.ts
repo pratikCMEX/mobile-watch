@@ -12,14 +12,18 @@ import Logging from "../../library/Logging";
 import { generateAuthToken, sendWelcomeEmail } from "../../helper/Helper";
 import {
   getAccessibleUserIds,
-  getAssignedUserIds,
+  getStaffUserIds,
 } from "../../helper/WatchAccess";
 
 // Staff limited to specific watches can only manage the owners of those
-// watches.
+// watches — plus any users they created / were assigned to them.
 const canAccessUser = async (req: Request, userId: string) => {
-  const userIds = await getAccessibleUserIds(req);
-  return userIds === null || userIds.includes(userId);
+  const userIds = await getStaffUserIds(req);
+  if (userIds === null) return true;
+  if (userIds.includes(userId)) return true;
+  // Fall back to the watch-based scope for backwards compatibility.
+  const watchUserIds = await getAccessibleUserIds(req);
+  return watchUserIds === null || watchUserIds.includes(userId);
 };
 
 async function createUser(req: Request, res: Response, next: NextFunction) {
@@ -81,12 +85,13 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
 
     const whereCondition: any = { deletedAt: null };
 
-    // Staff see the users explicitly assigned to them. Admins (and staff
+    // Staff see the union of (a) the users who use the watches assigned to
+    // them and (b) the users they created / were assigned. Admins (and staff
     // with all_watches) fall back to the watch-based scope, which is null
     // (= unrestricted) for them.
-    const assignedIds = await getAssignedUserIds(req);
-    if (assignedIds) {
-      whereCondition.id = { [Op.in]: assignedIds };
+    const staffUserIds = await getStaffUserIds(req);
+    if (staffUserIds) {
+      whereCondition.id = { [Op.in]: staffUserIds };
     } else {
       const userIds = await getAccessibleUserIds(req);
       if (userIds) {

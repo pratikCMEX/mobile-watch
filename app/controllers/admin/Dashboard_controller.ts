@@ -5,7 +5,7 @@ import { errorMessage, successMessage } from "../../library/Response";
 import {
   deviceIdScope,
   getAccessibleUserIds,
-  getAssignedUserIds,
+  getStaffUserIds,
 } from "../../helper/WatchAccess";
 
 // Notification types surfaced on the dashboard alert list.
@@ -21,11 +21,12 @@ async function getDashboardStats(
     const deviceScope = await deviceIdScope(req);
     const deviceWhere: any = deviceScope ? { id: deviceScope } : {};
 
-    // A staff member's user scope is the set of users explicitly assigned
-    // to them. Admins (and staff with all_watches) fall back to the
-    // watch-based scope, which is null (= unrestricted) for them.
-    const assignedIds = await getAssignedUserIds(req);
-    const userIds = assignedIds ?? (await getAccessibleUserIds(req));
+    // A staff member's user scope is the union of the users who use the
+    // watches assigned to them and the users they created / were assigned.
+    // Admins (and staff with all_watches) fall back to the watch-based
+    // scope, which is null (= unrestricted) for them.
+    const staffUserIds = await getStaffUserIds(req);
+    const userIds = staffUserIds ?? (await getAccessibleUserIds(req));
     const userWhere: any = userIds
       ? { id: { [db.Sequelize.Op.in]: userIds } }
       : {};

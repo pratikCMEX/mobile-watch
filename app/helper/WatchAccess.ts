@@ -94,6 +94,29 @@ export const getAssignedUserIds = async (
   return rows.map((r: any) => r.id);
 };
 
+// Combined user scope for a staff member: the union of (a) the users who
+// use the watches assigned to this staff (via DeviceMembers) and (b) the
+// users explicitly created by / assigned to this staff (Users.assigned_staff_id).
+// Returns null when the caller is unrestricted (admin or staff with
+// all_watches), so callers can fall back to the wider device-based scope.
+export const getStaffUserIds = async (
+  req: Request
+): Promise<string[] | null> => {
+  const user = (req as any).user;
+  if (!user || user.role !== "staff" || user.all_watches) return null;
+
+  const [watchUserIds, assignedUserIds] = await Promise.all([
+    getAccessibleUserIds(req),
+    getAssignedUserIds(req),
+  ]);
+
+  const merged = new Set<string>([
+    ...(Array.isArray(watchUserIds) ? watchUserIds : []),
+    ...(Array.isArray(assignedUserIds) ? assignedUserIds : []),
+  ]);
+  return [...merged];
+};
+
 // ─── Device ↔ User membership (many-to-many via DeviceMembers) ──
 // A watch can be shared with multiple users. The DeviceMembers join
 // table is the single source of truth for "which users may use this
