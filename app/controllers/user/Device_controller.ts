@@ -90,7 +90,11 @@ const updateDeviceSettings = async function (
       if (isNaN(levelNum) || levelNum < 1 || levelNum > maxLevel) {
         return errorMessage(
           res,
-          t(req, "invalid_fall_down_level_must_be_1_device", [fall_down_level, maxLevel, isRtOs ? "RT OS" : "Android"])
+          t(req, "invalid_fall_down_level_must_be_1_device", [
+            fall_down_level,
+            maxLevel,
+            isRtOs ? "RT OS" : "Android",
+          ])
         );
       }
     }
@@ -1411,9 +1415,11 @@ const listAutoAnswer = async (
     if (!device) {
       return errorMessage(
         res,
-        t(req, "device_with_id_not_found_generic", [device_id
+        t(req, "device_with_id_not_found_generic", [
+          device_id
             ? `id '${device_id}'`
-            : `serial_number '${device.serial_number}'`])
+            : `serial_number '${device.serial_number}'`,
+        ])
       );
     }
 
@@ -2293,7 +2299,11 @@ const setFallDownSensitivity = async (
     if (isNaN(levelNum) || levelNum < 1 || levelNum > maxLevel) {
       return errorMessage(
         res,
-        t(req, "invalid_fall_down_sensitivity_level_must_be_1_device", [levelNum, maxLevel, isRtOs ? "RT OS" : "Android"])
+        t(req, "invalid_fall_down_sensitivity_level_must_be_1_device", [
+          levelNum,
+          maxLevel,
+          isRtOs ? "RT OS" : "Android",
+        ])
       );
     }
 
@@ -2697,7 +2707,10 @@ const setSilenceTime = async (
   } catch (err: any) {
     console.error("setSilenceTime error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, t(req, "error_sending_silencetime_command", [msg]));
+    return errorMessage(
+      res,
+      t(req, "error_sending_silencetime_command", [msg])
+    );
   }
 };
 
@@ -2745,9 +2758,11 @@ const getDoNotDisturb = async (
     if (!device) {
       return errorMessage(
         res,
-        t(req, "device_with_id_not_found_generic", [device_id
+        t(req, "device_with_id_not_found_generic", [
+          device_id
             ? `id '${device_id}'`
-            : `serial_number '${device.serial_number}'`])
+            : `serial_number '${device.serial_number}'`,
+        ])
       );
     }
 
@@ -2823,7 +2838,8 @@ const getDoNotDisturb = async (
     const msg = (err && err.message) || String(err);
     return errorMessage(
       res,
-      t(req, "error_fetching_do_not_disturb_configuration", [msg]));
+      t(req, "error_fetching_do_not_disturb_configuration", [msg])
+    );
   }
 };
 
@@ -2894,7 +2910,10 @@ const requestBodyTemperature = async function (
   } catch (err: any) {
     console.error("requestBodyTemperature error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, t(req, "error_requesting_body_temperature", [msg]));
+    return errorMessage(
+      res,
+      t(req, "error_requesting_body_temperature", [msg])
+    );
   }
 };
 
@@ -3055,11 +3074,14 @@ const requestHeartRateAndBodyTemperature = async function (
         `Request ID: ${requestId}. Use GET /user/device/health-result?request_id=${requestId} to poll for results.`
     );
 
+    // The helper localises the top-level `message` from its own key, while the
+    // per-branch guidance inside `data` has no such hook — so it is translated
+    // here with t(req, ...) and passed already localised.
     return successMessage(
       res,
       alreadyInProgress
-        ? "Health data request already in progress."
-        : "Fetching health data from device.",
+        ? "health_data_request_already_in_progress"
+        : "health_data_request_initiated",
       {
         status: "processing",
         request_id: requestId,
@@ -3068,8 +3090,8 @@ const requestHeartRateAndBodyTemperature = async function (
         device_name: device.device_name,
         already_in_progress: alreadyInProgress,
         message: alreadyInProgress
-          ? "A previous request for this device is still being processed. The same request_id is returned — poll /user/device/health-result with it until you receive completed status."
-          : "Temperature command sent first, heart rate command will be sent after temperature response. Poll /user/device/health-result with the request_id to get the final result.",
+          ? t(req, "health_data_request_previous_still_processing")
+          : t(req, "health_data_request_temperature_sent_first"),
         timestamp: new Date().toISOString(),
       }
     );
@@ -3078,7 +3100,8 @@ const requestHeartRateAndBodyTemperature = async function (
     const msg = (err && err.message) || String(err);
     return errorMessage(
       res,
-      t(req, "error_requesting_heart_rate_and_body_temperature", [msg]));
+      t(req, "error_requesting_heart_rate_and_body_temperature", [msg])
+    );
   }
 };
 
@@ -3126,7 +3149,12 @@ const getHealthResult = async function (
     }
 
     if (status.status === "failed") {
-      return errorMessage(res, status.error || "Request failed.");
+      // status.error is a runtime detail, not a translation key, so it is
+      // interpolated into the localised wrapper instead of replacing it.
+      return errorMessage(
+        res,
+        t(req, "health_data_request_failed", [status.error || ""])
+      );
     }
 
     // Processing
@@ -3134,8 +3162,7 @@ const getHealthResult = async function (
       status: "processing",
       request_id: status.requestId,
       serial_number: status.serialNumber,
-      message:
-        "Temperature and/or heart rate data not yet received. Poll again.",
+      message: t(req, "health_data_not_yet_received_poll_again"),
       timestamp: new Date().toISOString(),
     });
   } catch (err: any) {
@@ -4018,7 +4045,9 @@ const getSleepTime = async function (
     if (!device) {
       return errorMessage(
         res,
-        t(req, "device_not_found_with_value", [serial_number ? `with serial_number '${serial_number}'` : ""])
+        t(req, "device_not_found_with_value", [
+          serial_number ? `with serial_number '${serial_number}'` : "",
+        ])
       );
     }
 
