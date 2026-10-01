@@ -17,6 +17,7 @@ import {
   deviceIdScope,
   ensureDeviceMember,
 } from "../../helper/WatchAccess";
+import { t } from "../../i18n/index";
 
 const createDevice = async function (
   req: Request,
@@ -47,7 +48,7 @@ const createDevice = async function (
       });
       if (!owner) {
         unlinkUploadedFiles(req);
-        return errorMessage(res, "owner_id does not match any existing user");
+        return errorMessage(res, "owner_id_does_not_match_any_existing_user");
       }
     }
 
@@ -55,7 +56,7 @@ const createDevice = async function (
       const existing = await db.Device.findOne({ where: { imei } });
       if (existing) {
         unlinkUploadedFiles(req);
-        return errorMessage(res, "A device with this imei already exists");
+        return errorMessage(res, "a_device_with_this_imei_already_exists");
       }
     }
 
@@ -90,11 +91,11 @@ const createDevice = async function (
       await ensureDeviceMember(device.id, owner_id, "admin");
     }
 
-    return successMessage(res, "Device created successfully", device);
+    return successMessage(res, "device_created_successfully", device);
   } catch (err) {
     console.error("createDevice error:", err);
     unlinkUploadedFiles(req);
-    return errorMessage(res, "Error creating device");
+    return errorMessage(res, "error_creating_device");
   }
 };
 
@@ -125,12 +126,12 @@ const addDevice = async function (
     const { device_name, imei } = req.body || {};
 
     if (!device_name || !String(device_name).trim()) {
-      return errorMessage(res, "device_name is required");
+      return errorMessage(res, "device_name_is_required");
     }
 
     const cleanImei = String(imei ?? "").trim();
     if (!/^\d{14,16}$/.test(cleanImei)) {
-      return errorMessage(res, "imei must be a 14 to 16 digit number");
+      return errorMessage(res, "imei_must_be_a_14_to_16_digit_number");
     }
 
     const name = String(device_name).trim();
@@ -140,7 +141,7 @@ const addDevice = async function (
       where: { imei: cleanImei },
     });
     if (existingByImei) {
-      return errorMessage(res, "A device with this imei already exists");
+      return errorMessage(res, "a_device_with_this_imei_already_exists");
     }
 
     // The TCP layer auto-registers unknown watches as placeholders keyed by
@@ -179,7 +180,7 @@ const addDevice = async function (
       if (existingBySerial.imei && existingBySerial.imei !== cleanImei) {
         return errorMessage(
           res,
-          `A different device (imei ${existingBySerial.imei}) is already registered with serial number ${serial_number}`
+          t(req, "a_different_device_imei_is_already_registered_with_serial_number", [existingBySerial.imei, serial_number])
         );
       }
 
@@ -192,7 +193,7 @@ const addDevice = async function (
           `serial_number=${serial_number} (existing placeholder reused)`
       );
 
-      return successMessage(res, "Device added successfully", {
+      return successMessage(res, "device_added_successfully", {
         ...existingBySerial.toJSON(),
         created: false,
       });
@@ -210,13 +211,13 @@ const addDevice = async function (
     // with the TCP auto-registration path.
     await tcpServer.applyDefaultUploadInterval(device, serial_number);
 
-    return successMessage(res, "Device added successfully", {
+    return successMessage(res, "device_added_successfully", {
       ...device.toJSON(),
       created: true,
     });
   } catch (err) {
     console.error("addDevice error:", err);
-    return errorMessage(res, "Error adding device");
+    return errorMessage(res, "error_adding_device");
   }
 };
 
@@ -230,13 +231,13 @@ const updateDevice = async function (
 
     if (!id) {
       unlinkUploadedFiles(req);
-      return errorMessage(res, "id is required");
+      return errorMessage(res, "id_is_required");
     }
 
     const device = await db.Device.findByPk(id);
     if (!device) {
       unlinkUploadedFiles(req);
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     if (imei && imei !== device.imei) {
@@ -245,7 +246,7 @@ const updateDevice = async function (
       });
       if (existing) {
         unlinkUploadedFiles(req);
-        return errorMessage(res, "A device with this imei already exists");
+        return errorMessage(res, "a_device_with_this_imei_already_exists");
       }
       device.imei = imei;
       device.serial_number = deriveSerialNumberFromImei(imei);
@@ -262,11 +263,11 @@ const updateDevice = async function (
 
     await device.save();
 
-    return successMessage(res, "Device updated successfully", device);
+    return successMessage(res, "device_updated_successfully", device);
   } catch (err) {
     console.error("updateDevice error:", err);
     unlinkUploadedFiles(req);
-    return errorMessage(res, "Error updating device");
+    return errorMessage(res, "error_updating_device");
   }
 };
 
@@ -279,14 +280,14 @@ const deleteDevice = async function (
     const { id } = req.body;
     const device = await db.Device.findOne({ where: { id } });
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
     deleteFile("profile", device.profile_image);
     await db.Device.destroy({ where: { id } });
-    return successMessage(res, "Device deleted successfully");
+    return successMessage(res, "device_deleted_successfully");
   } catch (err) {
     console.error("deleteDevice error:", err);
-    return errorMessage(res, "Error deleting device");
+    return errorMessage(res, "error_deleting_device");
   }
 };
 
@@ -299,7 +300,7 @@ const getDeviceSettings = async function (
     const { device_id } = req.params;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const settings = await db.DeviceSetting.findOne({
@@ -308,12 +309,12 @@ const getDeviceSettings = async function (
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
     if (!settings) {
       return successMessage(
         res,
-        "No settings found, returning default values",
+        "no_settings_found_returning_default_values",
         {
           sms_alert_enabled: "0",
           take_off_device_alert: "0",
@@ -332,7 +333,7 @@ const getDeviceSettings = async function (
       );
     }
 
-    return successMessage(res, "Device settings fetched successfully", {
+    return successMessage(res, "device_settings_fetched_successfully", {
       ...settings.toJSON(),
       language: device.language,
       timezone: device.timezone,
@@ -340,7 +341,7 @@ const getDeviceSettings = async function (
     });
   } catch (err) {
     console.error("getDeviceSettings error:", err);
-    return errorMessage(res, "Error fetching device settings");
+    return errorMessage(res, "error_fetching_device_settings");
   }
 };
 
@@ -357,11 +358,11 @@ const sendVoiceMessage = async function (
       | undefined;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (!voiceFile) {
-      return errorMessage(res, "voice_file (AMR audio) is required");
+      return errorMessage(res, "voice_file_amr_audio_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -370,7 +371,7 @@ const sendVoiceMessage = async function (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -378,7 +379,7 @@ const sendVoiceMessage = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -397,7 +398,7 @@ const sendVoiceMessage = async function (
       );
       return errorMessage(
         res,
-        "Could not process the uploaded audio file (unsupported format or conversion failure)"
+        "could_not_process_the_uploaded_audio_file_unsupported_format_or_conversion_failure"
       );
     }
 
@@ -409,7 +410,7 @@ const sendVoiceMessage = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -439,7 +440,7 @@ const sendVoiceMessage = async function (
         `(uploaded_as=${voiceFile.originalname}, sent_as=AMR, sent_size=${amrBuffer.length} bytes)`
     );
 
-    return successMessage(res, "Voice message sent successfully", {
+    return successMessage(res, "voice_message_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -454,7 +455,7 @@ const sendVoiceMessage = async function (
     });
   } catch (err) {
     console.error("sendVoiceMessage error:", err);
-    return errorMessage(res, "Error sending voice message");
+    return errorMessage(res, "error_sending_voice_message");
   }
 };
 
@@ -477,22 +478,22 @@ const sendReminder = async function (
       | undefined;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
     if (!type) {
       return errorMessage(
         res,
-        "type is required (pill, water, general, sedentary)"
+        "type_is_required_pill_water_general_sedentary"
       );
     }
     if (!reminder_settings) {
       return errorMessage(
         res,
-        "reminder_settings is required (e.g. 11:25-1-2)"
+        "reminder_settings_is_required_e_g_11_25_1_2"
       );
     }
     if (!number) {
-      return errorMessage(res, "number is required (1-3)");
+      return errorMessage(res, "number_is_required_1_3");
     }
 
     const device = await db.Device.findOne({
@@ -501,7 +502,7 @@ const sendReminder = async function (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -509,7 +510,7 @@ const sendReminder = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -538,7 +539,7 @@ const sendReminder = async function (
         );
         return errorMessage(
           res,
-          "Could not process the uploaded audio file (unsupported format or conversion failure)"
+          "could_not_process_the_uploaded_audio_file_unsupported_format_or_conversion_failure"
         );
       }
     }
@@ -554,7 +555,7 @@ const sendReminder = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -590,13 +591,13 @@ const sendReminder = async function (
     if (id) {
       const existing = await db.Reminder.findByPk(id);
       if (!existing) {
-        return errorMessage(res, `Reminder with id '${id}' not found`);
+        return errorMessage(res, t(req, "reminder_with_id_not_found", [id]));
       }
       // Safety: refuse to reassign a reminder to a different device.
       if (existing.device_id !== device.id) {
         return errorMessage(
           res,
-          `Reminder '${id}' does not belong to device '${serial_number}'`
+          t(req, "reminder_does_not_belong_to_device", [id, serial_number])
         );
       }
       await existing.update(reminderPayload);
@@ -612,7 +613,7 @@ const sendReminder = async function (
         `(type=${type}, settings=${reminder_settings}, number=${num})`
     );
 
-    return successMessage(res, "Reminder sent successfully", {
+    return successMessage(res, "reminder_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -632,7 +633,7 @@ const sendReminder = async function (
     });
   } catch (err) {
     console.error("sendReminder error:", err);
-    return errorMessage(res, "Error sending reminder");
+    return errorMessage(res, "error_sending_reminder");
   }
 };
 
@@ -661,7 +662,7 @@ const listUnlinkedDevices = async function (
       order: [["createdAt", "DESC"]],
     });
 
-    return successMessage(res, "Unlinked devices fetched successfully", {
+    return successMessage(res, "unlinked_devices_fetched_successfully", {
       devices: rows,
       total: count,
       page: Number(page),
@@ -670,7 +671,7 @@ const listUnlinkedDevices = async function (
     });
   } catch (err) {
     console.error("listUnlinkedDevices error:", err);
-    return errorMessage(res, "Error fetching unlinked devices");
+    return errorMessage(res, "error_fetching_unlinked_devices");
   }
 };
 
@@ -683,19 +684,19 @@ const assignOwner = async function (
     const { device_id, owner_id } = req.body;
 
     if (!device_id || !owner_id) {
-      return errorMessage(res, "device_id and owner_id are required");
+      return errorMessage(res, "device_id_and_owner_id_are_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const owner = await db.User.findOne({
       where: { id: owner_id, deletedAt: null },
     });
     if (!owner) {
-      return errorMessage(res, "owner_id does not match any existing user");
+      return errorMessage(res, "owner_id_does_not_match_any_existing_user");
     }
 
     await device.update({ owner_id });
@@ -705,10 +706,10 @@ const assignOwner = async function (
     // can legitimately be shared across multiple users.
     await ensureDeviceMember(device.id, owner_id, "admin");
 
-    return successMessage(res, "Owner assigned successfully", device);
+    return successMessage(res, "owner_assigned_successfully", device);
   } catch (err) {
     console.error("assignOwner error:", err);
-    return errorMessage(res, "Error assigning owner");
+    return errorMessage(res, "error_assigning_owner");
   }
 };
 
@@ -721,12 +722,12 @@ const updateDeviceIdentity = async function (
     const { device_id, imei, serial_number } = req.body;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const updates: any = {};
@@ -737,7 +738,7 @@ const updateDeviceIdentity = async function (
           where: { imei, id: { [Op.ne]: device_id } },
         });
         if (existing) {
-          return errorMessage(res, "A device with this imei already exists");
+          return errorMessage(res, "a_device_with_this_imei_already_exists");
         }
       }
       updates.imei = imei;
@@ -749,10 +750,10 @@ const updateDeviceIdentity = async function (
 
     await device.update(updates);
 
-    return successMessage(res, "Device identity updated successfully", device);
+    return successMessage(res, "device_identity_updated_successfully", device);
   } catch (err) {
     console.error("updateDeviceIdentity error:", err);
-    return errorMessage(res, "Error updating device identity");
+    return errorMessage(res, "error_updating_device_identity");
   }
 };
 
@@ -888,7 +889,7 @@ const listDevicesOld = async function (
       };
     });
 
-    return successMessage(res, "Devices fetched successfully", {
+    return successMessage(res, "devices_fetched_successfully", {
       devices: devicesWithOwner,
       total: count,
       page: Number(page),
@@ -897,7 +898,7 @@ const listDevicesOld = async function (
     });
   } catch (err) {
     console.error("listDevices error:", err);
-    return errorMessage(res, "Error fetching devices");
+    return errorMessage(res, "error_fetching_devices");
   }
 };
 const listDevices = async function (
@@ -1034,16 +1035,16 @@ const listDevices = async function (
     // device object directly instead of a paginated list.
     if (id) {
       if (!devicesWithOwner.length) {
-        return errorMessage(res, "Device not found");
+        return errorMessage(res, "device_not_found");
       }
       return successMessage(
         res,
-        "Device fetched successfully",
+        "device_fetched_successfully",
         devicesWithOwner[0]
       );
     }
 
-    return successMessage(res, "Devices fetched successfully", {
+    return successMessage(res, "devices_fetched_successfully", {
       devices: devicesWithOwner,
       total: count,
       page: Number(page),
@@ -1052,7 +1053,7 @@ const listDevices = async function (
     });
   } catch (err) {
     console.error("listDevices error:", err);
-    return errorMessage(res, "Error fetching devices");
+    return errorMessage(res, "error_fetching_devices");
   }
 };
 
@@ -1155,12 +1156,12 @@ const getAllDevices = async function (
 
     return successMessage(
       res,
-      "Devices fetched successfully",
+      "devices_fetched_successfully",
       devicesWithOwner
     );
   } catch (err) {
     console.error("getAllDevices error:", err);
-    return errorMessage(res, "Error fetching devices");
+    return errorMessage(res, "error_fetching_devices");
   }
 };
 
@@ -1177,13 +1178,13 @@ const getAllDeviceImei = async function (
       order: [["createdAt", "DESC"]],
     });
 
-    return successMessage(res, "All device IMEIs fetched successfully", {
+    return successMessage(res, "all_device_imeis_fetched_successfully", {
       devices,
       total: devices.length,
     });
   } catch (err) {
     console.error("getAllDeviceImei error:", err);
-    return errorMessage(res, "Error fetching device IMEIs");
+    return errorMessage(res, "error_fetching_device_imeis");
   }
 };
 
@@ -1197,7 +1198,7 @@ const deleteMultipleDevices = async function (
     const { ids } = req.body;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return errorMessage(res, "Device IDs array is required");
+      return errorMessage(res, "device_ids_array_is_required");
     }
 
     const devices = await db.Device.findAll({
@@ -1205,13 +1206,13 @@ const deleteMultipleDevices = async function (
     });
 
     if (devices.length === 0) {
-      return errorMessage(res, "No devices found with the provided IDs");
+      return errorMessage(res, "no_devices_found_with_the_provided_ids");
     }
 
     if (!(await canAccessAllDevices(req, ids))) {
       return errorMessage(
         res,
-        "You do not have access to one or more of these devices"
+        "you_do_not_have_access_to_one_or_more_of_these_devices"
       );
     }
 
@@ -1219,11 +1220,11 @@ const deleteMultipleDevices = async function (
 
     return successMessage(
       res,
-      `${devices.length} devices deleted successfully`
+      t(req, "devices_deleted_successfully", [devices.length])
     );
   } catch (err) {
     console.error("deleteMultipleDevices error:", err);
-    return errorMessage(res, "Error deleting devices");
+    return errorMessage(res, "error_deleting_devices");
   }
 };
 
@@ -1238,20 +1239,20 @@ const assignDeviceToUser = async function (
     if (!device_id || !user_id || !device_name) {
       return errorMessage(
         res,
-        "device_id, user_id and device_name are required"
+        "device_id_user_id_and_device_name_are_required"
       );
     }
 
     const device = await db.Device.findOne({ where: { id: device_id } });
     if (!device || !(await canAccessDevice(req, device.id))) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const user = await db.User.findOne({
       where: { id: user_id, deletedAt: null },
     });
     if (!user) {
-      return errorMessage(res, "User not found");
+      return errorMessage(res, "user_not_found");
     }
 
     device.owner_id = user_id;
@@ -1263,10 +1264,10 @@ const assignDeviceToUser = async function (
     // can legitimately be shared across multiple users.
     await ensureDeviceMember(device.id, user_id, "admin");
 
-    return successMessage(res, "Device assigned to user successfully", device);
+    return successMessage(res, "device_assigned_to_user_successfully", device);
   } catch (err) {
     console.error("assignDeviceToUser error:", err);
-    return errorMessage(res, "Error assigning device to user");
+    return errorMessage(res, "error_assigning_device_to_user");
   }
 };
 
@@ -1279,7 +1280,7 @@ const changeServerPortal = async function (
     const { serial_number, host, port } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1287,7 +1288,7 @@ const changeServerPortal = async function (
     });
 
     if (!device) {
-      return errorMessage(res, `Device with imei '${serial_number}' not found`);
+      return errorMessage(res, t(req, "device_with_imei_not_found", [serial_number]));
     }
 
     /**
@@ -1321,7 +1322,7 @@ const changeServerPortal = async function (
 
     return successMessage(
       res,
-      "Server portal change request saved successfully",
+      "server_portal_change_request_saved_successfully",
       {
         serial_number,
         device_id: device.id,
@@ -1338,7 +1339,7 @@ const changeServerPortal = async function (
     );
   } catch (err) {
     console.error("changeServerPortal error:", err);
-    return errorMessage(res, "Error changing server portal");
+    return errorMessage(res, "error_changing_server_portal");
   }
 };
 
@@ -1362,11 +1363,11 @@ const sendDeviceCommand = async (
     const { serial_number, command } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (command === undefined || command === null) {
-      return errorMessage(res, "command is required");
+      return errorMessage(res, "command_is_required");
     }
 
     // Validate command type
@@ -1378,7 +1379,7 @@ const sendDeviceCommand = async (
     if (!validCommands.includes(command)) {
       return errorMessage(
         res,
-        "Invalid command. Must be 1 (restart), 2 (shutdown), or 3 (factory_reset)"
+        "invalid_command_must_be_1_restart_2_shutdown_or_3_factory_reset"
       );
     }
 
@@ -1388,7 +1389,7 @@ const sendDeviceCommand = async (
     if (!device || !(await canAccessDevice(req, device.id))) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1397,7 +1398,7 @@ const sendDeviceCommand = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1512,7 +1513,7 @@ const sendDeviceCommand = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1522,7 +1523,7 @@ const sendDeviceCommand = async (
 
     return successMessage(
       res,
-      `${COMMAND_NAMES[command]} command sent successfully`,
+      t(req, "command_sent_successfully", [COMMAND_NAMES[command]]),
       {
         serial_number,
         device_id: device.id,
@@ -1537,7 +1538,7 @@ const sendDeviceCommand = async (
     );
   } catch (err) {
     console.error("sendDeviceCommand error:", err);
-    return errorMessage(res, "Error sending command to device");
+    return errorMessage(res, "error_sending_command_to_device");
   }
 };
 const findDevice = async (req: Request, res: Response, next: NextFunction) => {
@@ -1545,7 +1546,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     const { serial_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1554,7 +1555,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!device || !(await canAccessDevice(req, device.id))) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1563,7 +1564,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1584,7 +1585,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
       if (!sceneModeCommandSent) {
         return errorMessage(
           res,
-          "Failed to set the device to vibration and ringing mode."
+          "failed_to_set_the_device_to_vibration_and_ringing_mode"
         );
       }
 
@@ -1627,7 +1628,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1637,7 +1638,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
       `Find device command sent to device ${serial_number} (device_id: ${device.id})`
     );
 
-    return successMessage(res, "Find device command sent successfully", {
+    return successMessage(res, "find_device_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1649,7 +1650,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     });
   } catch (err) {
     console.error("findDevice error:", err);
-    return errorMessage(res, "Error sending find device command");
+    return errorMessage(res, "error_sending_find_device_command");
   }
 };
 
@@ -1684,13 +1685,13 @@ const getTravelHistory = async (
     if (!serial_number || !start_time || !end_time) {
       return errorMessage(
         res,
-        "serial_number, start_time and end_time are required"
+        "serial_number_start_time_and_end_time_are_required"
       );
     }
 
     const device = await db.Device.findOne({ where: { serial_number } });
     if (!device) {
-      return errorMessage(res, "Device not found for given serial_number");
+      return errorMessage(res, "device_not_found_for_given_serial_number");
     }
 
     const start = new Date(start_time);
@@ -1707,7 +1708,7 @@ const getTravelHistory = async (
     });
 
     if (!locations.length) {
-      return successMessage(res, "Travel history fetched successfully", {
+      return successMessage(res, "travel_history_fetched_successfully", {
         serial_number,
         total_distance: "0 km",
         points: [],
@@ -1769,14 +1770,14 @@ const getTravelHistory = async (
     }
     pushCluster(clusterStart, clusterEnd);
 
-    return successMessage(res, "Travel history fetched successfully", {
+    return successMessage(res, "travel_history_fetched_successfully", {
       serial_number,
       total_distance: `${totalDistanceKm.toFixed(2)} km`,
       points,
     });
   } catch (err) {
     console.error("getTravelHistory error:", err);
-    return errorMessage(res, "Error fetching travel history");
+    return errorMessage(res, "error_fetching_travel_history");
   }
 };
 
@@ -1794,19 +1795,19 @@ const addMember = async function (
     const { device_id, user_id, role = "member" } = req.body;
 
     if (!device_id || !user_id) {
-      return errorMessage(res, "device_id and user_id are required");
+      return errorMessage(res, "device_id_and_user_id_are_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device || !(await canAccessDevice(req, device.id))) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const user = await db.User.findOne({
       where: { id: user_id, deletedAt: null },
     });
     if (!user) {
-      return errorMessage(res, "User not found");
+      return errorMessage(res, "user_not_found");
     }
 
     // Refuse to demote the owner: the owner is always an admin.
@@ -1826,10 +1827,10 @@ const addMember = async function (
       ],
     });
 
-    return successMessage(res, "Member added successfully", member);
+    return successMessage(res, "member_added_successfully", member);
   } catch (err) {
     console.error("addMember error:", err);
-    return errorMessage(res, "Error adding member");
+    return errorMessage(res, "error_adding_member");
   }
 };
 
@@ -1852,12 +1853,12 @@ const addMember = async function (
 //     } = req.body;
 
 //     if (!device_id || !Array.isArray(user_ids) || !user_ids.length) {
-//       return errorMessage(res, "device_id and user_ids array are required");
+//       return errorMessage(res, "device_id_and_user_ids_array_are_required");
 //     }
 
 //     const device = await db.Device.findByPk(device_id);
 //     if (!device || !(await canAccessDevice(req, device.id))) {
-//       return errorMessage(res, "Device not found");
+//       return errorMessage(res, "device_not_found");
 //     }
 //     if (device_name !== undefined) {
 //       device.device_name = device_name;
@@ -1891,7 +1892,7 @@ const addMember = async function (
 //       added.push({ user_id, role: finalRole });
 //     }
 
-//     return successMessage(res, "Members added successfully", {
+//     return successMessage(res, "members_added_successfully", {
 //       removed_count: removed,
 //       added,
 //       skipped,
@@ -1900,7 +1901,7 @@ const addMember = async function (
 //     });
 //   } catch (err) {
 //     console.error("addMembers error:", err);
-//     return errorMessage(res, "Error adding members");
+//     return errorMessage(res, "error_adding_members");
 //   }
 // };
 
@@ -1923,12 +1924,12 @@ const addMembers = async function (
     } = req.body;
 
     if (!device_id || !Array.isArray(user_ids) || !user_ids.length) {
-      return errorMessage(res, "device_id and user_ids array are required");
+      return errorMessage(res, "device_id_and_user_ids_array_are_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device || !(await canAccessDevice(req, device.id))) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
     if (device_name !== undefined) {
       device.device_name = device_name;
@@ -1986,7 +1987,7 @@ const addMembers = async function (
       );
     }
 
-    return successMessage(res, "Members updated successfully", {
+    return successMessage(res, "members_updated_successfully", {
       removed_count: removed,
       added,
       skipped,
@@ -1995,7 +1996,7 @@ const addMembers = async function (
     });
   } catch (err) {
     console.error("addMembers error:", err);
-    return errorMessage(res, "Error adding members");
+    return errorMessage(res, "error_adding_members");
   }
 };
 const listMembers = async function (
@@ -2007,12 +2008,12 @@ const listMembers = async function (
     const { device_id, page = 1, limit = 20, search = "" } = req.body;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device || !(await canAccessDevice(req, device.id))) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const offset = (Number(page) - 1) * Number(limit);
@@ -2074,14 +2075,14 @@ const listMembers = async function (
       };
     });
 
-    return successPagination(res, "Members fetched successfully", data, {
+    return successPagination(res, "members_fetched_successfully", data, {
       page: Number(page),
       limit: Number(limit),
       total: count,
     });
   } catch (err) {
     console.error("listMembers error:", err);
-    return errorMessage(res, "Error fetching members");
+    return errorMessage(res, "error_fetching_members");
   }
 };
 
@@ -2094,12 +2095,12 @@ const removeMember = async function (
     const { device_id, user_id } = req.body;
 
     if (!device_id || !user_id) {
-      return errorMessage(res, "device_id and user_id are required");
+      return errorMessage(res, "device_id_and_user_id_are_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device || !(await canAccessDevice(req, device.id))) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     // Remove ANY member — admin or owner alike. The Devices.owner_id
@@ -2112,14 +2113,14 @@ const removeMember = async function (
     });
 
     if (!member) {
-      return errorMessage(res, "User is not a member of this watch");
+      return errorMessage(res, "user_is_not_a_member_of_this_watch");
     }
 
     const wasOwner = device.owner_id === user_id;
 
     await member.destroy();
 
-    return successMessage(res, "Member removed successfully", {
+    return successMessage(res, "member_removed_successfully", {
       device_id: device.id,
       user_id,
       was_owner: wasOwner,
@@ -2129,7 +2130,7 @@ const removeMember = async function (
     });
   } catch (err) {
     console.error("removeMember error:", err);
-    return errorMessage(res, "Error removing member");
+    return errorMessage(res, "error_removing_member");
   }
 };
 

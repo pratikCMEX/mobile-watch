@@ -14,6 +14,7 @@ import {
   getAccessibleUserIds,
   getStaffUserIds,
 } from "../../helper/WatchAccess";
+import { t } from "../../i18n/index";
 
 // Staff limited to specific watches can only manage the owners of those
 // watches — plus any users they created / were assigned to them.
@@ -30,13 +31,13 @@ async function createUser(req: Request, res: Response, next: NextFunction) {
   try {
     const { name, email, password, phone_number, country_code } = req.body;
     if (!name || !email || !password) {
-      return errorMessage(res, "Name, email and password are required");
+      return errorMessage(res, "name_email_and_password_are_required");
     }
     const existing = await db.User.findOne({
       where: { email, deletedAt: null },
     });
     if (existing) {
-      return errorMessage(res, "A user with this email already exists");
+      return errorMessage(res, "a_user_with_this_email_already_exists");
     }
     const password_hash = await bcrypt.hash(password, 10);
 
@@ -64,10 +65,10 @@ async function createUser(req: Request, res: Response, next: NextFunction) {
       // Continue with response even if email fails
     }
 
-    return successMessage(res, "User created successfully", user);
+    return successMessage(res, "user_created_successfully", user);
   } catch (err) {
     console.error("createUser error:", err);
-    return errorMessage(res, "Error creating user");
+    return errorMessage(res, "error_creating_user");
   }
 }
 const allUsers = async (req: Request, res: Response, next: NextFunction) => {
@@ -134,25 +135,25 @@ const allUsers = async (req: Request, res: Response, next: NextFunction) => {
       offset,
     });
 
-    return successPagination(res, "Users fetched successfully", rows, {
+    return successPagination(res, "users_fetched_successfully", rows, {
       page,
       limit,
       total: count,
     });
   } catch (error) {
     console.error("allUsers error:", error);
-    return errorMessage(res, "Error fetching users");
+    return errorMessage(res, "error_fetching_users");
   }
 };
 async function updateUser(req: Request, res: Response, next: NextFunction) {
   try {
     const { id, name, email, password, phone_number, country_code } = req.body;
     if (!id) {
-      return errorMessage(res, "User ID is required");
+      return errorMessage(res, "user_id_is_required");
     }
 
     if (!(await canAccessUser(req, id))) {
-      return errorMessage(res, "User not found");
+      return errorMessage(res, "user_not_found");
     }
 
     const updateData: any = {};
@@ -168,7 +169,7 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
         },
       });
       if (existingUser) {
-        return errorMessage(res, "Email already in use by another user");
+        return errorMessage(res, "email_already_in_use_by_another_user");
       }
       updateData.email = email;
     }
@@ -181,17 +182,17 @@ async function updateUser(req: Request, res: Response, next: NextFunction) {
     const user = await db.User.update(updateData, { where: { id } });
 
     if (!user) {
-      return errorMessage(res, "User not found");
+      return errorMessage(res, "user_not_found");
     }
 
     const updatedUser = await db.User.findOne({
       where: { id, deletedAt: null },
     });
 
-    return successMessage(res, "User updated successfully", updatedUser);
+    return successMessage(res, "user_updated_successfully", updatedUser);
   } catch (err) {
     console.error("updateUser error:", err);
-    return errorMessage(res, "Error updating user");
+    return errorMessage(res, "error_updating_user");
   }
 }
 
@@ -200,7 +201,7 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     const { id } = req.body;
     const user = await db.User.findOne({ where: { id, deletedAt: null } });
     if (!user || !(await canAccessUser(req, user.id))) {
-      return errorMessage(res, "User not found");
+      return errorMessage(res, "user_not_found");
     }
 
     // Deleting a user must never delete the watches they own. The
@@ -238,7 +239,7 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     // Soft delete the user (sets deletedAt timestamp) - use instance method
     await user.destroy();
 
-    return successMessage(res, "User deleted successfully", {
+    return successMessage(res, "user_deleted_successfully", {
       user_id: id,
       unassigned_devices: ownedDevices.map((device: any) => ({
         id: device.id,
@@ -251,7 +252,7 @@ async function deleteUser(req: Request, res: Response, next: NextFunction) {
     console.error("deleteUser error:", err);
     return errorMessage(
       res,
-      `Error deleting user: ${err.message || JSON.stringify(err)}`
+      t(req, "error_deleting_user", [err.message || JSON.stringify(err)])
     );
   }
 }
@@ -259,7 +260,7 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.body;
     if (!id) {
-      return errorMessage(res, "User ID is required");
+      return errorMessage(res, "user_id_is_required");
     }
     const user = await db.User.findOne({
       where: { id, deletedAt: null },
@@ -274,12 +275,12 @@ async function getUserDetail(req: Request, res: Response, next: NextFunction) {
       ],
     });
     if (!user || !(await canAccessUser(req, user.id))) {
-      return errorMessage(res, "User not found");
+      return errorMessage(res, "user_not_found");
     }
-    return successMessage(res, "User fetched successfully", user);
+    return successMessage(res, "user_fetched_successfully", user);
   } catch (err) {
     console.error("getUserDetail error:", err);
-    return errorMessage(res, "Error fetching user");
+    return errorMessage(res, "error_fetching_user");
   }
 }
 
@@ -291,7 +292,7 @@ async function getCurrentAdmin(
   try {
     const adminData = (req as any).user;
     if (!adminData) {
-      return errorMessage(res, "Admin not found in request");
+      return errorMessage(res, "admin_not_found_in_request");
     }
 
     const admin = await db.Admin.findOne({
@@ -309,13 +310,13 @@ async function getCurrentAdmin(
     });
 
     if (!admin) {
-      return errorMessage(res, "Admin not found");
+      return errorMessage(res, "admin_not_found");
     }
 
-    return successMessage(res, "Admin fetched successfully", admin);
+    return successMessage(res, "admin_fetched_successfully", admin);
   } catch (err) {
     console.error("getCurrentAdmin error:", err);
-    return errorMessage(res, "Error fetching admin");
+    return errorMessage(res, "error_fetching_admin");
   }
 }
 

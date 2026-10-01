@@ -18,23 +18,23 @@ async function adminLogin(req: Request, res: Response, next: NextFunction) {
     const { username, password } = req.body;
 
     if (!username || !password) {
-      return errorMessage(res, "Username and password are required");
+      return errorMessage(res, "username_and_password_are_required");
     }
 
     const admin = await db.Admin.findOne({ where: { username } });
 
     if (!admin) {
-      return errorMessage(res, "Invalid credentials");
+      return errorMessage(res, "invalid_credentials");
     }
 
     if (admin.status !== "active") {
-      return errorMessage(res, "Admin account is inactive");
+      return errorMessage(res, "admin_account_is_inactive");
     }
 
     const isPasswordValid = await admin.comparePassword(password);
 
     if (!isPasswordValid) {
-      return errorMessage(res, "Invalid credentials");
+      return errorMessage(res, "invalid_credentials");
     }
 
     const token = generateAuthToken({
@@ -61,7 +61,7 @@ async function adminLogin(req: Request, res: Response, next: NextFunction) {
     res.setHeader("Authorization", `Bearer ${token}`);
     res.setHeader("Access-Control-Expose-Headers", "Authorization");
 
-    return successMessage(res, "Login successful", {
+    return successMessage(res, "login_successful", {
       admin: {
         id: admin.id,
         name: admin.name,
@@ -75,7 +75,7 @@ async function adminLogin(req: Request, res: Response, next: NextFunction) {
     });
   } catch (err) {
     console.error("adminLogin error:", err);
-    return errorMessage(res, "Error logging in");
+    return errorMessage(res, "error_logging_in");
   }
 }
 
@@ -85,23 +85,23 @@ async function updatePassword(req: Request, res: Response, next: NextFunction) {
     const adminId = (req as any).user?.id;
 
     if (!adminId) {
-      return errorMessage(res, "Admin not authenticated");
+      return errorMessage(res, "admin_not_authenticated");
     }
 
     if (!oldPassword || !newPassword) {
-      return errorMessage(res, "oldPassword and newPassword are required");
+      return errorMessage(res, "oldpassword_and_newpassword_are_required");
     }
 
     const admin = await db.Admin.findOne({ where: { id: adminId } });
 
     if (!admin) {
-      return errorMessage(res, "Admin not found");
+      return errorMessage(res, "admin_not_found");
     }
 
     const isOldPasswordValid = await admin.comparePassword(oldPassword);
 
     if (!isOldPasswordValid) {
-      return errorMessage(res, "Old password is incorrect");
+      return errorMessage(res, "old_password_is_incorrect");
     }
 
     admin.password = newPassword;
@@ -109,10 +109,10 @@ async function updatePassword(req: Request, res: Response, next: NextFunction) {
 
     const allAdmins = await listAdminsFor(req);
 
-    return successMessage(res, "Password updated successfully", allAdmins);
+    return successMessage(res, "password_updated_successfully", allAdmins);
   } catch (err) {
     console.error("updatePassword error:", err);
-    return errorMessage(res, "Error updating password");
+    return errorMessage(res, "error_updating_password");
   }
 }
 
@@ -120,10 +120,10 @@ async function logout(req: Request, res: Response, next: NextFunction) {
   try {
     const allAdmins = await listAdminsFor(req);
 
-    return successMessage(res, "Logout successful", allAdmins);
+    return successMessage(res, "logout_successful", allAdmins);
   } catch (err) {
     console.error("logout error:", err);
-    return errorMessage(res, "Error logging out");
+    return errorMessage(res, "error_logging_out");
   }
 }
 

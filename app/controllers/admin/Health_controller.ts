@@ -7,6 +7,7 @@ import {
   canAccessDevice,
   deviceIdScope,
 } from "../../helper/WatchAccess";
+import { t } from "../../i18n/index";
 
 // Cumulative metric types whose stored value is a running counter. For
 // these, the listing applies the same baseline + daily-delta logic that
@@ -110,7 +111,7 @@ async function getAllHealthMetrics(
       });
 
       if (!metric || !(await canAccessDevice(req, metric.device_id))) {
-        return errorMessage(res, "Health metric not found");
+        return errorMessage(res, "health_metric_not_found");
       }
 
       // Plain object — Sequelize instances carry the DeviceHealthMetric
@@ -120,7 +121,7 @@ async function getAllHealthMetrics(
 
       return successMessage(
         res,
-        "Health metric retrieved successfully",
+        "health_metric_retrieved_successfully",
         plainMetric
       );
     }
@@ -133,7 +134,7 @@ async function getAllHealthMetrics(
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this IMEI");
+        return errorMessage(res, "device_not_found_with_this_imei");
       }
 
       const metrics = await db.HealthMetric.findAll({
@@ -165,7 +166,7 @@ async function getAllHealthMetrics(
         typeof r.get === "function" ? r.get({ plain: true }) : r
       );
 
-      return successMessage(res, "Health metrics retrieved successfully", {
+      return successMessage(res, "health_metrics_retrieved_successfully", {
         device: {
           id: device.id,
           imei: device.imei,
@@ -189,7 +190,7 @@ async function getAllHealthMetrics(
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this device_id");
+        return errorMessage(res, "device_not_found_with_this_device_id");
       }
 
       listWhere.device_id = device.id;
@@ -330,7 +331,7 @@ async function getAllHealthMetrics(
       );
     }
 
-    return successMessage(res, "Health metrics retrieved successfully", {
+    return successMessage(res, "health_metrics_retrieved_successfully", {
       metrics,
       pagination: {
         total: count,
@@ -341,7 +342,7 @@ async function getAllHealthMetrics(
     });
   } catch (err) {
     console.error("getAllHealthMetrics error:", err);
-    return errorMessage(res, "Error retrieving health metrics");
+    return errorMessage(res, "error_retrieving_health_metrics");
   }
 }
 
@@ -390,7 +391,7 @@ async function getHealthMetricsGraph(
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this IMEI");
+        return errorMessage(res, "device_not_found_with_this_imei");
       }
 
       where.device_id = device.id;
@@ -421,7 +422,7 @@ async function getHealthMetricsGraph(
 
       return successMessage(
         res,
-        "Health metrics graph data retrieved successfully",
+        "health_metrics_graph_data_retrieved_successfully",
         {
           device: {
             id: device.id,
@@ -467,7 +468,7 @@ async function getHealthMetricsGraph(
 
     return successMessage(
       res,
-      "Health metrics graph data retrieved successfully",
+      "health_metrics_graph_data_retrieved_successfully",
       {
         graph_data: graphData,
         period,
@@ -475,7 +476,7 @@ async function getHealthMetricsGraph(
     );
   } catch (err) {
     console.error("getHealthMetricsGraph error:", err);
-    return errorMessage(res, "Error retrieving health metrics graph data");
+    return errorMessage(res, "error_retrieving_health_metrics_graph_data");
   }
 }
 
@@ -489,7 +490,7 @@ async function deleteHealthMetric(
     const { id } = req.body;
 
     if (!id) {
-      return errorMessage(res, "Health metric ID is required");
+      return errorMessage(res, "health_metric_id_is_required");
     }
 
     const healthMetric = await db.HealthMetric.findOne({ where: { id } });
@@ -497,15 +498,15 @@ async function deleteHealthMetric(
       !healthMetric ||
       !(await canAccessDevice(req, healthMetric.device_id))
     ) {
-      return errorMessage(res, "Health metric not found");
+      return errorMessage(res, "health_metric_not_found");
     }
 
     await db.HealthMetric.destroy({ where: { id } });
 
-    return successMessage(res, "Health metric deleted successfully");
+    return successMessage(res, "health_metric_deleted_successfully");
   } catch (err) {
     console.error("deleteHealthMetric error:", err);
-    return errorMessage(res, "Error deleting health metric");
+    return errorMessage(res, "error_deleting_health_metric");
   }
 }
 
@@ -519,7 +520,7 @@ async function deleteMultipleHealthMetrics(
     const { ids } = req.body;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return errorMessage(res, "Health metric IDs array is required");
+      return errorMessage(res, "health_metric_ids_array_is_required");
     }
 
     const healthMetrics = await db.HealthMetric.findAll({
@@ -527,7 +528,7 @@ async function deleteMultipleHealthMetrics(
     });
 
     if (healthMetrics.length === 0) {
-      return errorMessage(res, "No health metrics found with the provided IDs");
+      return errorMessage(res, "no_health_metrics_found_with_the_provided_ids");
     }
 
     if (
@@ -538,7 +539,7 @@ async function deleteMultipleHealthMetrics(
     ) {
       return errorMessage(
         res,
-        "You do not have access to one or more of these health metrics"
+        "you_do_not_have_access_to_one_or_more_of_these_health_metrics"
       );
     }
 
@@ -546,11 +547,11 @@ async function deleteMultipleHealthMetrics(
 
     return successMessage(
       res,
-      `${healthMetrics.length} health metrics deleted successfully`
+      t(req, "health_metrics_deleted_successfully", [healthMetrics.length])
     );
   } catch (err) {
     console.error("deleteMultipleHealthMetrics error:", err);
-    return errorMessage(res, "Error deleting health metrics");
+    return errorMessage(res, "error_deleting_health_metrics");
   }
 }
 

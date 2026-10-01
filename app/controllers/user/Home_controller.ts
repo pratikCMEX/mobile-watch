@@ -132,12 +132,12 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
     const deviceId = (req.params.device_id as string) || null;
 
     if (!deviceId) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(deviceId);
     if (!device) {
-      return successMessage(res, "Device not found", {
+      return successMessage(res, "device_not_found", {
         device: null,
         last_location: null,
       });
@@ -190,7 +190,7 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
       });
     }
 
-    return successMessage(res, "Home data fetched successfully", {
+    return successMessage(res, "home_data_fetched_successfully", {
       device: formatDevice(device),
       last_location: formatLocation(lastLocation),
       health_overview: healthOverview,
@@ -198,7 +198,7 @@ const getHome = async (req: Request, res: Response, next: NextFunction) => {
     });
   } catch (err) {
     console.error("getHome error:", err);
-    return errorMessage(res, "Error fetching home data");
+    return errorMessage(res, "error_fetching_home_data");
   }
 };
 
@@ -237,13 +237,13 @@ const getTravelHistory = async (
     if (!serial_number || !start_time || !end_time) {
       return errorMessage(
         res,
-        "serial_number, start_time and end_time are required"
+        "serial_number_start_time_and_end_time_are_required"
       );
     }
 
     const device = await db.Device.findOne({ where: { serial_number } });
     if (!device) {
-      return errorMessage(res, "Device not found for given serial_number");
+      return errorMessage(res, "device_not_found_for_given_serial_number");
     }
 
     const start = new Date(start_time);
@@ -260,7 +260,7 @@ const getTravelHistory = async (
     });
 
     if (!locations.length) {
-      return successMessage(res, "Travel history fetched successfully", {
+      return successMessage(res, "travel_history_fetched_successfully", {
         serial_number,
         total_distance: "0 km",
         points: [],
@@ -322,14 +322,14 @@ const getTravelHistory = async (
     }
     pushCluster(clusterStart, clusterEnd);
 
-    return successMessage(res, "Travel history fetched successfully", {
+    return successMessage(res, "travel_history_fetched_successfully", {
       serial_number,
       total_distance: `${totalDistanceKm.toFixed(2)} km`,
       points,
     });
   } catch (err) {
     console.error("getTravelHistory error:", err);
-    return errorMessage(res, "Error fetching travel history");
+    return errorMessage(res, "error_fetching_travel_history");
   }
 };
 

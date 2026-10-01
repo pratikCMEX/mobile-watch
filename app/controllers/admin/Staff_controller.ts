@@ -89,12 +89,12 @@ async function createStaff(req: Request, res: Response, next: NextFunction) {
 
     if (await usernameTaken(username)) {
       await transaction.rollback();
-      return errorMessage(res, "Username already exists");
+      return errorMessage(res, "username_already_exists");
     }
 
     if (await emailTaken(email)) {
       await transaction.rollback();
-      return errorMessage(res, "Email already exists");
+      return errorMessage(res, "email_already_exists");
     }
 
     if (!all_watches && device_ids.length) {
@@ -125,11 +125,11 @@ async function createStaff(req: Request, res: Response, next: NextFunction) {
     await transaction.commit();
 
     const created = await findStaffWithDevices(staff.id);
-    return successMessage(res, "Staff created successfully", created);
+    return successMessage(res, "staff_created_successfully", created);
   } catch (err) {
     await transaction.rollback();
     console.error("createStaff error:", err);
-    return errorMessage(res, "Error creating staff");
+    return errorMessage(res, "error_creating_staff");
   }
 }
 
@@ -142,13 +142,13 @@ async function updateStaff(req: Request, res: Response, next: NextFunction) {
     const staff = await db.Admin.findOne({ where: { id, role: "staff" } });
     if (!staff) {
       await transaction.rollback();
-      return errorMessage(res, "Staff not found");
+      return errorMessage(res, "staff_not_found");
     }
 
     if (username !== undefined && username !== staff.username) {
       if (await usernameTaken(username, id)) {
         await transaction.rollback();
-        return errorMessage(res, "Username already exists");
+        return errorMessage(res, "username_already_exists");
       }
       staff.username = username;
     }
@@ -156,7 +156,7 @@ async function updateStaff(req: Request, res: Response, next: NextFunction) {
     if (email !== undefined && email !== staff.email) {
       if (await emailTaken(email, id)) {
         await transaction.rollback();
-        return errorMessage(res, "Email already exists");
+        return errorMessage(res, "email_already_exists");
       }
       staff.email = email;
     }
@@ -185,11 +185,11 @@ async function updateStaff(req: Request, res: Response, next: NextFunction) {
     await transaction.commit();
 
     const updated = await findStaffWithDevices(staff.id);
-    return successMessage(res, "Staff updated successfully", updated);
+    return successMessage(res, "staff_updated_successfully", updated);
   } catch (err) {
     await transaction.rollback();
     console.error("updateStaff error:", err);
-    return errorMessage(res, "Error updating staff");
+    return errorMessage(res, "error_updating_staff");
   }
 }
 
@@ -203,19 +203,19 @@ async function updateStaffStatus(
 
     const staff = await db.Admin.findOne({ where: { id, role: "staff" } });
     if (!staff) {
-      return errorMessage(res, "Staff not found");
+      return errorMessage(res, "staff_not_found");
     }
 
     staff.status = status;
     await staff.save();
 
-    return successMessage(res, "Staff status updated successfully", {
+    return successMessage(res, "staff_status_updated_successfully", {
       id: staff.id,
       status: staff.status,
     });
   } catch (err) {
     console.error("updateStaffStatus error:", err);
-    return errorMessage(res, "Error updating staff status");
+    return errorMessage(res, "error_updating_staff_status");
   }
 }
 
@@ -225,15 +225,15 @@ async function deleteStaff(req: Request, res: Response, next: NextFunction) {
 
     const staff = await db.Admin.findOne({ where: { id, role: "staff" } });
     if (!staff) {
-      return errorMessage(res, "Staff not found");
+      return errorMessage(res, "staff_not_found");
     }
 
     await staff.destroy(); // soft delete (paranoid)
 
-    return successMessage(res, "Staff deleted successfully");
+    return successMessage(res, "staff_deleted_successfully");
   } catch (err) {
     console.error("deleteStaff error:", err);
-    return errorMessage(res, "Error deleting staff");
+    return errorMessage(res, "error_deleting_staff");
   }
 }
 
@@ -274,14 +274,14 @@ async function listStaff(req: Request, res: Response, next: NextFunction) {
       offset,
     });
 
-    return successPagination(res, "Staff fetched successfully", rows, {
+    return successPagination(res, "staff_fetched_successfully", rows, {
       page: Number(page),
       limit: Number(limit),
       total: count,
     });
   } catch (err) {
     console.error("listStaff error:", err);
-    return errorMessage(res, "Error fetching staff");
+    return errorMessage(res, "error_fetching_staff");
   }
 }
 
@@ -291,13 +291,13 @@ async function getStaffDetail(req: Request, res: Response, next: NextFunction) {
 
     const staff = await findStaffWithDevices(id);
     if (!staff) {
-      return errorMessage(res, "Staff not found");
+      return errorMessage(res, "staff_not_found");
     }
 
-    return successMessage(res, "Staff fetched successfully", staff);
+    return successMessage(res, "staff_fetched_successfully", staff);
   } catch (err) {
     console.error("getStaffDetail error:", err);
-    return errorMessage(res, "Error fetching staff");
+    return errorMessage(res, "error_fetching_staff");
   }
 }
 
@@ -306,18 +306,18 @@ async function getCurrentStaff(req: Request, res: Response, next: NextFunction) 
     const staffId = (req as any).user?.id;
 
     if (!staffId) {
-      return errorMessage(res, "Staff not authenticated");
+      return errorMessage(res, "staff_not_authenticated");
     }
 
     const staff = await findStaffWithDevices(staffId);
     if (!staff) {
-      return errorMessage(res, "Staff not found");
+      return errorMessage(res, "staff_not_found");
     }
 
-    return successMessage(res, "Staff profile fetched successfully", staff);
+    return successMessage(res, "staff_profile_fetched_successfully", staff);
   } catch (err) {
     console.error("getCurrentStaff error:", err);
-    return errorMessage(res, "Error fetching staff profile");
+    return errorMessage(res, "error_fetching_staff_profile");
   }
 }
 
@@ -329,19 +329,19 @@ async function updateCurrentStaff(req: Request, res: Response, next: NextFunctio
 
     if (!staffId) {
       await transaction.rollback();
-      return errorMessage(res, "Staff not authenticated");
+      return errorMessage(res, "staff_not_authenticated");
     }
 
     const staff = await db.Admin.findOne({ where: { id: staffId, role: "staff" } });
     if (!staff) {
       await transaction.rollback();
-      return errorMessage(res, "Staff not found");
+      return errorMessage(res, "staff_not_found");
     }
 
     if (username !== undefined && username !== staff.username) {
       if (await usernameTaken(username, staffId)) {
         await transaction.rollback();
-        return errorMessage(res, "Username already exists");
+        return errorMessage(res, "username_already_exists");
       }
       staff.username = username;
     }
@@ -349,7 +349,7 @@ async function updateCurrentStaff(req: Request, res: Response, next: NextFunctio
     if (email !== undefined && email !== staff.email) {
       if (await emailTaken(email, staffId)) {
         await transaction.rollback();
-        return errorMessage(res, "Email already exists");
+        return errorMessage(res, "email_already_exists");
       }
       staff.email = email;
     }
@@ -380,11 +380,11 @@ async function updateCurrentStaff(req: Request, res: Response, next: NextFunctio
     await transaction.commit();
 
     const updated = await findStaffWithDevices(staff.id);
-    return successMessage(res, "Staff profile updated successfully", updated);
+    return successMessage(res, "staff_profile_updated_successfully", updated);
   } catch (err) {
     await transaction.rollback();
     console.error("updateCurrentStaff error:", err);
-    return errorMessage(res, "Error updating staff profile");
+    return errorMessage(res, "error_updating_staff_profile");
   }
 }
 
@@ -448,14 +448,14 @@ async function staffLoginLogs(req: Request, res: Response, next: NextFunction) {
       offset,
     });
 
-    return successPagination(res, "Staff login logs fetched successfully", rows, {
+    return successPagination(res, "staff_login_logs_fetched_successfully", rows, {
       page: Number(page),
       limit: Number(limit),
       total: count,
     });
   } catch (err) {
     console.error("staffLoginLogs error:", err);
-    return errorMessage(res, "Error fetching staff login logs");
+    return errorMessage(res, "error_fetching_staff_login_logs");
   }
 }
 

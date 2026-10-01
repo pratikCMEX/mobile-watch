@@ -13,7 +13,7 @@ const listNotifications = async (
     const user_id = (req as any)?.userinfo?.payload?.id;
 
     if (!user_id) {
-      return errorMessage(res, "User not authenticated");
+      return errorMessage(res, "user_not_authenticated");
     }
 
     const {
@@ -67,14 +67,14 @@ const listNotifications = async (
       offset,
     });
 
-    return successPagination(res, "Notifications fetched successfully", rows, {
+    return successPagination(res, "notifications_fetched_successfully", rows, {
       page: Number(page),
       limit: Number(limit),
       total: count,
     });
   } catch (err) {
     console.error("listNotifications error:", err);
-    return errorMessage(res, "Error fetching notifications");
+    return errorMessage(res, "error_fetching_notifications");
   }
 };
 

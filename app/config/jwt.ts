@@ -58,13 +58,13 @@ export const checkToken = async (req: any, res: any, next: any) => {
   try {
     const token = extractToken(req);
 
-    if (!token) return errorMessage(res, "Auth token is not supplied");
+    if (!token) return errorMessage(res, "auth_token_is_not_supplied");
 
     const decoded = verifyToken(token);
     const userId = decoded?.payload?.id;
 
     if (!userId) {
-      return errorMessage(res, "Invalid token payload");
+      return errorMessage(res, "invalid_token_payload");
     }
 
     const user = await db.User.findOne({
@@ -90,12 +90,12 @@ export const checkToken = async (req: any, res: any, next: any) => {
     next();
   } catch (error: any) {
     if (error?.name === "TokenExpiredError") {
-      return errorMessage(res, "Token expired. Please login again.");
+      return errorMessage(res, "token_expired_please_login_again");
     }
     if (error?.name === "JsonWebTokenError") {
-      return errorMessage(res, "Invalid token. Please login again.");
+      return errorMessage(res, "invalid_token_please_login_again");
     }
-    return errorMessage(res, "Invalid or expired token");
+    return errorMessage(res, "invalid_or_expired_token");
   }
 };
 
@@ -108,13 +108,13 @@ export const checkAdmin = async (
   try {
     const token = extractToken(req);
 
-    if (!token) return errorMessage(res, "Auth token is not supplied");
+    if (!token) return errorMessage(res, "auth_token_is_not_supplied");
 
     const decoded = verifyToken(token);
     const adminId = decoded?.payload?.id;
 
     if (!adminId) {
-      return errorMessage(res, "Invalid token payload");
+      return errorMessage(res, "invalid_token_payload");
     }
 
     const admin = await db.Admin.findOne({
@@ -123,11 +123,11 @@ export const checkAdmin = async (
     });
 
     if (!admin) {
-      return errorMessage(res, "Admin not found");
+      return errorMessage(res, "admin_not_found");
     }
 
     if (admin.status !== "active") {
-      return errorMessage(res, "Admin account is inactive");
+      return errorMessage(res, "admin_account_is_inactive");
     }
 
     (req as any).user = {
@@ -142,12 +142,12 @@ export const checkAdmin = async (
     console.error("checkAdmin error:", error.message);
     console.error("Error name:", error?.name);
     if (error?.name === "TokenExpiredError") {
-      return errorMessage(res, "Token expired. Please login again.");
+      return errorMessage(res, "token_expired_please_login_again");
     }
     if (error?.name === "JsonWebTokenError") {
-      return errorMessage(res, "Invalid token. Please login again.");
+      return errorMessage(res, "invalid_token_please_login_again");
     }
-    return errorMessage(res, "Invalid or expired token. Please login again.");
+    return errorMessage(res, "invalid_or_expired_token_please_login_again");
   }
 };
 

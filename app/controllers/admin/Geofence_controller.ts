@@ -113,14 +113,14 @@ const listGeofences = async (
       offset,
     });
 
-    return successPagination(res, "Geofences fetched successfully", rows, {
+    return successPagination(res, "geofences_fetched_successfully", rows, {
       page,
       limit,
       total: count,
     });
   } catch (error) {
     console.error("listGeofences error:", error);
-    return errorMessage(res, "Error fetching geofences");
+    return errorMessage(res, "error_fetching_geofences");
   }
 };
 
@@ -134,15 +134,15 @@ const deleteGeofence = async function (
 
     const geofence = await db.Geofence.findByPk(id);
     if (!geofence || !(await canAccessDevice(req, geofence.device_id))) {
-      return errorMessage(res, "Geofence not found", 404);
+      return errorMessage(res, "geofence_not_found", 404);
     }
 
     await geofence.destroy(); // hard delete — no deletedAt column on this table
 
-    return successMessage(res, "Geofence deleted successfully", null);
+    return successMessage(res, "geofence_deleted_successfully", null);
   } catch (err) {
     console.error("deleteGeofence error:", err);
-    return errorMessage(res, "Error deleting geofence");
+    return errorMessage(res, "error_deleting_geofence");
   }
 };
 
@@ -155,12 +155,12 @@ const toggleGeofenceStatus = async function (
     const { is_active, id } = req.body;
 
     if (is_active === undefined) {
-      return errorMessage(res, "is_active is required");
+      return errorMessage(res, "is_active_is_required");
     }
 
     const geofence = await db.Geofence.findByPk(id);
     if (!geofence || !(await canAccessDevice(req, geofence.device_id))) {
-      return errorMessage(res, "Geofence not found", 404);
+      return errorMessage(res, "geofence_not_found", 404);
     }
 
     geofence.is_active = is_active;
@@ -168,12 +168,12 @@ const toggleGeofenceStatus = async function (
 
     return successMessage(
       res,
-      "Geofence status updated successfully",
+      "geofence_status_updated_successfully",
       geofence
     );
   } catch (err) {
     console.error("toggleGeofenceStatus error:", err);
-    return errorMessage(res, "Error updating geofence status");
+    return errorMessage(res, "error_updating_geofence_status");
   }
 };
 
@@ -195,18 +195,18 @@ const createGeofence = async function (
     } = req.body;
 
     if (!imei) {
-      return errorMessage(res, "IMEI is required");
+      return errorMessage(res, "imei_is_required");
     }
 
     const device = await db.Device.findOne({ where: { imei } });
     if (!device || !(await canAccessDevice(req, device.id))) {
-      return errorMessage(res, "Device not found with this IMEI");
+      return errorMessage(res, "device_not_found_with_this_imei");
     }
 
     if (!latitude || !longitude || !radius_meters) {
       return errorMessage(
         res,
-        "latitude, longitude, and radius_meters are required"
+        "latitude_longitude_and_radius_meters_are_required"
       );
     }
 
@@ -221,10 +221,10 @@ const createGeofence = async function (
       fence_alarm_type,
     });
 
-    return successMessage(res, "Geofence created successfully", geofence);
+    return successMessage(res, "geofence_created_successfully", geofence);
   } catch (err) {
     console.error("createGeofence error:", err);
-    return errorMessage(res, "Error creating geofence");
+    return errorMessage(res, "error_creating_geofence");
   }
 };
 
@@ -246,12 +246,12 @@ const updateGeofence = async function (
     } = req.body;
 
     if (!id) {
-      return errorMessage(res, "Geofence ID is required");
+      return errorMessage(res, "geofence_id_is_required");
     }
 
     const geofence = await db.Geofence.findByPk(id);
     if (!geofence || !(await canAccessDevice(req, geofence.device_id))) {
-      return errorMessage(res, "Geofence not found", 404);
+      return errorMessage(res, "geofence_not_found", 404);
     }
 
     const updateData: any = {};
@@ -267,10 +267,10 @@ const updateGeofence = async function (
 
     await geofence.update(updateData);
 
-    return successMessage(res, "Geofence updated successfully", geofence);
+    return successMessage(res, "geofence_updated_successfully", geofence);
   } catch (err) {
     console.error("updateGeofence error:", err);
-    return errorMessage(res, "Error updating geofence");
+    return errorMessage(res, "error_updating_geofence");
   }
 };
 

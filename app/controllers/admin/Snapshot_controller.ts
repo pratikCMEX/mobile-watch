@@ -7,6 +7,7 @@ import {
   canAccessDevice,
   deviceIdScope,
 } from "../../helper/WatchAccess";
+import { t } from "../../i18n/index";
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 
@@ -16,7 +17,7 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
     const { id, imei } = req.query;
 
     if (!id && !imei) {
-      return errorMessage(res, "Either ID or IMEI is required");
+      return errorMessage(res, "either_id_or_imei_is_required");
     }
 
     // Search by snapshot ID
@@ -33,10 +34,10 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
       });
 
       if (!snapshot || !(await canAccessDevice(req, snapshot.device_id))) {
-        return errorMessage(res, "Snapshot not found");
+        return errorMessage(res, "snapshot_not_found");
       }
 
-      return successMessage(res, "Snapshot retrieved successfully", snapshot);
+      return successMessage(res, "snapshot_retrieved_successfully", snapshot);
     }
 
     // Search by IMEI number
@@ -47,7 +48,7 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this IMEI");
+        return errorMessage(res, "device_not_found_with_this_imei");
       }
 
       const snapshots = await db.Snapshot.findAll({
@@ -62,7 +63,7 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
         image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
       }));
 
-      return successMessage(res, "Snapshots retrieved successfully", {
+      return successMessage(res, "snapshots_retrieved_successfully", {
         device: {
           id: device.id,
           imei: device.imei,
@@ -73,7 +74,7 @@ async function searchSnapshot(req: Request, res: Response, next: NextFunction) {
     }
   } catch (err) {
     console.error("searchSnapshot error:", err);
-    return errorMessage(res, "Error searching snapshots");
+    return errorMessage(res, "error_searching_snapshots");
   }
 }
 
@@ -102,10 +103,10 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
       });
 
       if (!snapshot || !(await canAccessDevice(req, snapshot.device_id))) {
-        return errorMessage(res, "Snapshot not found");
+        return errorMessage(res, "snapshot_not_found");
       }
 
-      return successMessage(res, "Snapshot retrieved successfully", snapshot);
+      return successMessage(res, "snapshot_retrieved_successfully", snapshot);
     }
 
     // If imei is provided, use search logic with pagination
@@ -116,7 +117,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this IMEI");
+        return errorMessage(res, "device_not_found_with_this_imei");
       }
 
       const where: any = { device_id: device.id };
@@ -142,7 +143,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
         image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
       }));
 
-      return successMessage(res, "Snapshots retrieved successfully", {
+      return successMessage(res, "snapshots_retrieved_successfully", {
         snapshots: snapshotsWithFullUrl,
         pagination: {
           total: count,
@@ -211,7 +212,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
       image_url: snap.image_url ? `${BASE_URL}${snap.image_url}` : snap.image_url,
     }));
 
-    return successMessage(res, "Snapshots retrieved successfully", {
+    return successMessage(res, "snapshots_retrieved_successfully", {
       snapshots: snapshotsWithFullUrl,
       pagination: {
         total: count,
@@ -223,7 +224,7 @@ async function getAllSnapshots(req: Request, res: Response, next: NextFunction) 
   } catch (err) {
     console.error("getAllSnapshots error:", err);
     console.error("Error details:", JSON.stringify(err, null, 2));
-    return errorMessage(res, "Error retrieving snapshots");
+    return errorMessage(res, "error_retrieving_snapshots");
   }
 }
 
@@ -233,12 +234,12 @@ async function deleteSnapshot(req: Request, res: Response, next: NextFunction) {
     const { id } = req.body;
 
     if (!id) {
-      return errorMessage(res, "Snapshot ID is required");
+      return errorMessage(res, "snapshot_id_is_required");
     }
 
     const snapshot = await db.Snapshot.findOne({ where: { id } });
     if (!snapshot || !(await canAccessDevice(req, snapshot.device_id))) {
-      return errorMessage(res, "Snapshot not found");
+      return errorMessage(res, "snapshot_not_found");
     }
 
     // Delete the image file if it exists
@@ -250,10 +251,10 @@ async function deleteSnapshot(req: Request, res: Response, next: NextFunction) {
 
     await db.Snapshot.destroy({ where: { id } });
 
-    return successMessage(res, "Snapshot deleted successfully");
+    return successMessage(res, "snapshot_deleted_successfully");
   } catch (err) {
     console.error("deleteSnapshot error:", err);
-    return errorMessage(res, "Error deleting snapshot");
+    return errorMessage(res, "error_deleting_snapshot");
   }
 }
 
@@ -263,7 +264,7 @@ async function deleteMultipleSnapshots(req: Request, res: Response, next: NextFu
     const { ids } = req.body;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return errorMessage(res, "Snapshot IDs array is required");
+      return errorMessage(res, "snapshot_ids_array_is_required");
     }
 
     const snapshots = await db.Snapshot.findAll({
@@ -271,7 +272,7 @@ async function deleteMultipleSnapshots(req: Request, res: Response, next: NextFu
     });
 
     if (snapshots.length === 0) {
-      return errorMessage(res, "No snapshots found with the provided IDs");
+      return errorMessage(res, "no_snapshots_found_with_the_provided_ids");
     }
 
     if (
@@ -280,7 +281,7 @@ async function deleteMultipleSnapshots(req: Request, res: Response, next: NextFu
         snapshots.map((s: any) => s.device_id)
       ))
     ) {
-      return errorMessage(res, "You do not have access to one or more of these snapshots");
+      return errorMessage(res, "you_do_not_have_access_to_one_or_more_of_these_snapshots");
     }
 
     // Delete image files
@@ -294,10 +295,10 @@ async function deleteMultipleSnapshots(req: Request, res: Response, next: NextFu
 
     await db.Snapshot.destroy({ where: { id: { [Op.in]: ids } } });
 
-    return successMessage(res, `${snapshots.length} snapshots deleted successfully`);
+    return successMessage(res, t(req, "snapshots_deleted_successfully", [snapshots.length]));
   } catch (err) {
     console.error("deleteMultipleSnapshots error:", err);
-    return errorMessage(res, "Error deleting snapshots");
+    return errorMessage(res, "error_deleting_snapshots");
   }
 }
 

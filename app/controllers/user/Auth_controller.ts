@@ -60,7 +60,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     } = req.body;
 
     if (!email || !password) {
-      return errorMessage(res, "Email and password are required", null);
+      return errorMessage(res, "email_and_password_are_required", null);
     }
 
     const user = await db.User.findOne({
@@ -68,13 +68,13 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
     });
 
     if (!user) {
-      return errorMessage(res, "User does not exist", null);
+      return errorMessage(res, "user_does_not_exist", null);
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
-      return errorMessage(res, "Invalid email or password", null);
+      return errorMessage(res, "invalid_email_or_password", null);
     }
 
     // Return every watch this user is a member of (via DeviceMembers),
@@ -124,7 +124,7 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
      * device.session_token = current login session
      */
     if (!force_login && user.session_token) {
-      return errorMessage(res, "Device is already logged in", {
+      return errorMessage(res, "device_is_already_logged_in", {
         already_logged_in: true,
       });
     }
@@ -151,14 +151,14 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
      * Return all devices belonging to the user
      */
 
-    return successMessage(res, "Login successful", {
+    return successMessage(res, "login_successful", {
       token,
       user: userData,
       device: firstDevice,
     });
   } catch (error) {
     console.error("login error:", error);
-    return errorMessage(res, "Error logging in");
+    return errorMessage(res, "error_logging_in");
   }
 };
 
@@ -168,14 +168,14 @@ const logout = async (req: Request, res: Response, next: NextFunction) => {
     const userId = (req as any)?.userinfo?.payload?.id;
 
     if (!userId) {
-      return errorMessage(res, "Invalid token payload", 401);
+      return errorMessage(res, "invalid_token_payload", 401);
     }
 
     const user = await db.User.findOne({
       where: { id: userId, deletedAt: null },
     });
     if (!user) {
-      return errorMessage(res, "User not found", 404);
+      return errorMessage(res, "user_not_found", 404);
     }
 
     // Invalidate the active session by clearing the stored token.
@@ -185,10 +185,10 @@ const logout = async (req: Request, res: Response, next: NextFunction) => {
     user.fcm_token = "";
     await user.save();
 
-    return successMessage(res, "Logout successful", null);
+    return successMessage(res, "logout_successful", null);
   } catch (error) {
     console.error("logout error:", error);
-    return errorMessage(res, "Error logging out");
+    return errorMessage(res, "error_logging_out");
   }
 };
 
@@ -200,14 +200,14 @@ const updateProfile = async (
   try {
     const userId = (req as any)?.userinfo?.payload?.id;
     if (!userId) {
-      return errorMessage(res, "Invalid token payload", 401);
+      return errorMessage(res, "invalid_token_payload", 401);
     }
 
     const user = await db.User.findOne({
       where: { id: userId, deletedAt: null },
     });
     if (!user) {
-      return errorMessage(res, "User not found", 404);
+      return errorMessage(res, "user_not_found", 404);
     }
 
     const {
@@ -225,7 +225,7 @@ const updateProfile = async (
         where: { email, deletedAt: null, id: { [Op.ne]: userId } },
       });
       if (existing) {
-        return errorMessage(res, "Email already in use by another account");
+        return errorMessage(res, "email_already_in_use_by_another_account");
       }
       user.email = email;
     }
@@ -264,7 +264,7 @@ const updateProfile = async (
     const userData = user.toJSON();
     delete userData.password;
 
-    return successMessage(res, "Profile updated successfully", userData);
+    return successMessage(res, "profile_updated_successfully", userData);
   } catch (err: any) {
     console.error("updateProfile error:", err);
     return errorMessage(
@@ -280,20 +280,20 @@ const getProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any)?.userinfo?.payload?.id;
     if (!userId) {
-      return errorMessage(res, "Invalid token payload", 401);
+      return errorMessage(res, "invalid_token_payload", 401);
     }
 
     const user = await db.User.findOne({
       where: { id: userId, deletedAt: null },
     });
     if (!user) {
-      return errorMessage(res, "User not found", 404);
+      return errorMessage(res, "user_not_found", 404);
     }
 
-    return successMessage(res, "Profile fetched successfully", user);
+    return successMessage(res, "profile_fetched_successfully", user);
   } catch (error) {
     console.error("getProfile error:", error);
-    return errorMessage(res, "Error fetching profile");
+    return errorMessage(res, "error_fetching_profile");
   }
 };
 const createUser = async (req: Request, res: Response, next: NextFunction) => {
@@ -301,7 +301,7 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
     const { name, email, password } = req.body;
 
     if (!email || !password) {
-      return errorMessage(res, "Email and password are required", 200);
+      return errorMessage(res, "email_and_password_are_required", 200);
     }
 
     // Check if user already exists (excluding soft-deleted users)
@@ -309,7 +309,7 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
       where: { email, deletedAt: null },
     });
     if (existingUser) {
-      return errorMessage(res, "User with this email already exists", 409);
+      return errorMessage(res, "user_with_this_email_already_exists", 409);
     }
 
     // Hash the password
@@ -329,13 +329,13 @@ const createUser = async (req: Request, res: Response, next: NextFunction) => {
     const userData = user.toJSON();
     delete userData.password;
 
-    return successMessage(res, "User created successfully", {
+    return successMessage(res, "user_created_successfully", {
       // token,
       user: userData,
     });
   } catch (error) {
     console.error("createUser error:", error);
-    return errorMessage(res, "Error creating user");
+    return errorMessage(res, "error_creating_user");
   }
 };
 
@@ -352,7 +352,7 @@ const deleteAccount = async (
     });
 
     if (!user) {
-      return errorMessage(res, "User not found");
+      return errorMessage(res, "user_not_found");
     }
 
     // Deleting an account must never delete a watch. The watches stay in
@@ -383,7 +383,7 @@ const deleteAccount = async (
     // Soft delete the user (sets deletedAt timestamp)
     await user.destroy();
 
-    return successMessage(res, "Account deleted successfully", {
+    return successMessage(res, "account_deleted_successfully", {
       unassigned_devices: ownedDevices.map((device: any) => ({
         id: device.id,
         imei: device.imei,
@@ -447,7 +447,7 @@ const forgotPassword = async (
     const { email } = req.body;
 
     if (!email) {
-      return customMessage(res, 200, "Email is required", null);
+      return customMessage(res, 200, "email_is_required", null);
     }
 
     const normalizedEmail = email.toLowerCase().trim();
@@ -456,7 +456,7 @@ const forgotPassword = async (
       where: { email: normalizedEmail, deletedAt: null },
     });
     if (!user) {
-      return errorMessage(res, "User does not exist for this email address", {
+      return errorMessage(res, "user_does_not_exist_for_this_email_address", {
         email: normalizedEmail,
       });
     }
@@ -490,7 +490,7 @@ const forgotPassword = async (
       console.error("Failed to send OTP email:", emailError);
     }
 
-    return successMessage(res, "OTP sent to your email", {
+    return successMessage(res, "otp_sent_to_your_email", {
       message: "Please check your email for the verification code",
       email: user.email,
       expires_in_minutes: OTP_EXPIRY_MINUTES,
@@ -499,7 +499,7 @@ const forgotPassword = async (
     });
   } catch (error: any) {
     console.error("forgotPassword error:", error);
-    return errorMessage(res, "Error processing forgot password request");
+    return errorMessage(res, "error_processing_forgot_password_request");
   }
 };
 
@@ -513,7 +513,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
     const { email, otp } = req.body;
 
     if (!email || !otp) {
-      return customMessage(res, 200, "Email and OTP are required", null);
+      return customMessage(res, 200, "email_and_otp_are_required", null);
     }
 
     const normalizedEmail = email.toLowerCase().trim();
@@ -523,7 +523,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
     });
 
     if (!user || !user.otp_hash) {
-      return customMessage(res, 200, "Invalid or expired OTP", null);
+      return customMessage(res, 200, "invalid_or_expired_otp", null);
     }
 
     if (!user.otp_expiry || new Date() > user.otp_expiry) {
@@ -531,7 +531,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
       return customMessage(
         res,
         200,
-        "OTP has expired, request a new one",
+        "otp_has_expired_request_a_new_one",
         null
       );
     }
@@ -546,14 +546,14 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
         return customMessage(
           res,
           200,
-          "Too many incorrect attempts, request a new OTP",
+          "too_many_incorrect_attempts_request_a_new_otp",
           null
         );
       }
 
       await user.update({ otp_attempts: attempts });
 
-      return customMessage(res, 200, "Invalid OTP", {
+      return customMessage(res, 200, "invalid_otp", {
         attempts_remaining: MAX_OTP_ATTEMPTS - attempts,
       });
     }
@@ -571,7 +571,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
       reset_token_expiry: resetTokenExpiry,
     });
 
-    return successMessage(res, "OTP verified successfully", {
+    return successMessage(res, "otp_verified_successfully", {
       message: "Verification complete, you can now set a new password",
       email: user.email,
       reset_token: resetToken,
@@ -579,7 +579,7 @@ const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
     });
   } catch (error: any) {
     console.error("verifyOtp error:", error);
-    return errorMessage(res, "Error verifying OTP");
+    return errorMessage(res, "error_verifying_otp");
   }
 };
 
@@ -597,18 +597,18 @@ const changePassword = async (
     const { reset_token, new_password, confirm_password } = req.body;
 
     if (!reset_token || !new_password || !confirm_password) {
-      return customMessage(res, 200, "All fields are required", null);
+      return customMessage(res, 200, "all_fields_are_required", null);
     }
 
     if (new_password !== confirm_password) {
-      return customMessage(res, 200, "Passwords do not match", null);
+      return customMessage(res, 200, "passwords_do_not_match", null);
     }
 
     if (new_password.length < 6) {
       return customMessage(
         res,
         200,
-        "Password must be at least 6 characters",
+        "password_must_be_at_least_6_characters",
         null
       );
     }
@@ -618,12 +618,12 @@ const changePassword = async (
     });
 
     if (!user) {
-      return customMessage(res, 200, "Invalid or expired reset token", null);
+      return customMessage(res, 200, "invalid_or_expired_reset_token", null);
     }
 
     if (!user.reset_token_expiry || new Date() > user.reset_token_expiry) {
       await user.update({ reset_token: null, reset_token_expiry: null });
-      return customMessage(res, 200, "Reset token has expired", null);
+      return customMessage(res, 200, "reset_token_has_expired", null);
     }
 
     const hashedPassword = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
@@ -638,12 +638,12 @@ const changePassword = async (
       otp_attempts: 0,
     });
 
-    return successMessage(res, "Password changed successfully", {
+    return successMessage(res, "password_changed_successfully", {
       message: "Your password has been changed successfully",
     });
   } catch (error: any) {
     console.error("changePassword error:", error);
-    return errorMessage(res, "Error changing password");
+    return errorMessage(res, "error_changing_password");
   }
 };
 

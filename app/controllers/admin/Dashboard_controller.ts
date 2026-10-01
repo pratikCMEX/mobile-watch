@@ -154,12 +154,12 @@ async function getDashboardStats(
 
     return successMessage(
       res,
-      "Dashboard stats fetched successfully",
+      "dashboard_stats_fetched_successfully",
       dashboardData
     );
   } catch (err) {
     console.error("getDashboardStats error:", err);
-    return errorMessage(res, "Error fetching dashboard stats");
+    return errorMessage(res, "error_fetching_dashboard_stats");
   }
 }
 
@@ -233,13 +233,13 @@ async function getDashboardAlerts(
       typeof a.get === "function" ? a.get({ plain: true }) : a
     );
 
-    return successMessage(res, "Dashboard alerts fetched successfully", {
+    return successMessage(res, "dashboard_alerts_fetched_successfully", {
       total: plainAlerts.length,
       alerts: plainAlerts,
     });
   } catch (err) {
     console.error("getDashboardAlerts error:", err);
-    return errorMessage(res, "Error fetching dashboard alerts");
+    return errorMessage(res, "error_fetching_dashboard_alerts");
   }
 }
 

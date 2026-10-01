@@ -24,14 +24,14 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this IMEI");
+        return errorMessage(res, "device_not_found_with_this_imei");
       }
 
       where.device_id = device.id;
     } else if (device_id) {
       // If device_id is provided directly
       if (!(await canAccessDevice(req, device_id))) {
-        return errorMessage(res, "Device not found");
+        return errorMessage(res, "device_not_found");
       }
       where.device_id = device_id;
     } else {
@@ -94,14 +94,14 @@ async function getAllEmergencyContacts(req: Request, res: Response, next: NextFu
       offset,
     });
 
-    return successPagination(res, "Emergency contacts fetched successfully", rows, {
+    return successPagination(res, "emergency_contacts_fetched_successfully", rows, {
       page: Number(page),
       limit: Number(limit),
       total: count,
     });
   } catch (err) {
     console.error("getAllEmergencyContacts error:", err);
-    return errorMessage(res, "Error fetching emergency contacts");
+    return errorMessage(res, "error_fetching_emergency_contacts");
   }
 }
 
@@ -122,14 +122,14 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this IMEI");
+        return errorMessage(res, "device_not_found_with_this_imei");
       }
 
       where.device_id = device.id;
     } else if (device_id) {
       // If device_id is provided directly
       if (!(await canAccessDevice(req, device_id))) {
-        return errorMessage(res, "Device not found");
+        return errorMessage(res, "device_not_found");
       }
       where.device_id = device_id;
     } else {
@@ -192,14 +192,14 @@ async function getAllDevicePhonebook(req: Request, res: Response, next: NextFunc
       offset,
     });
 
-    return successPagination(res, "Device phonebook fetched successfully", rows, {
+    return successPagination(res, "device_phonebook_fetched_successfully", rows, {
       page: Number(page),
       limit: Number(limit),
       total: count,
     });
   } catch (err) {
     console.error("getAllDevicePhonebook error:", err);
-    return errorMessage(res, "Error fetching device phonebook");
+    return errorMessage(res, "error_fetching_device_phonebook");
   }
 }
 

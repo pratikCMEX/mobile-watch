@@ -10,6 +10,7 @@ import {
   sendCompleted,
   sendError,
 } from "../../library/Stream";
+import { t } from "../../i18n/index";
 
 const AddMetrics = async function (
   req: Request,
@@ -28,7 +29,7 @@ const AddMetrics = async function (
     ) {
       return errorMessage(
         res,
-        "device_id,metric_type,value_primary,value_secondary and unit are required"
+        "device_id_metric_type_value_primary_value_secondary_and_unit_are_required"
       );
     }
 
@@ -46,7 +47,7 @@ const AddMetrics = async function (
 
       return successMessage(
         res,
-        "Healthmetric added successfully",
+        "healthmetric_added_successfully",
         result.data
       );
     }
@@ -67,7 +68,7 @@ const AddMetrics = async function (
         return errorMessage(res, result.error || "Failed to save SpO2");
       }
 
-      return successMessage(res, "Healthmetric added successfully", {
+      return successMessage(res, "healthmetric_added_successfully", {
         data: result.data,
         rating: result.rating,
         status: result.status,
@@ -96,9 +97,9 @@ const AddMetrics = async function (
       ).catch((err) => console.error("checkStepTarget error:", err));
     }
 
-    return successMessage(res, "Healthmetric added successfully", healthmetric);
+    return successMessage(res, "healthmetric_added_successfully", healthmetric);
   } catch (err) {
-    return errorMessage(res, "Error adding healthmetric");
+    return errorMessage(res, "error_adding_healthmetric");
   }
 };
 
@@ -107,7 +108,7 @@ const saveSpO2 = async (req: Request, res: Response, next: NextFunction) => {
     const { device_id, spo2, measurement_type, unit, recorded_at } = req.body;
 
     if (!device_id || spo2 === undefined || spo2 === null) {
-      return errorMessage(res, "device_id and spo2 are required");
+      return errorMessage(res, "device_id_and_spo2_are_required");
     }
 
     const result = await HealthMetricService.saveSpO2({
@@ -123,14 +124,14 @@ const saveSpO2 = async (req: Request, res: Response, next: NextFunction) => {
       return errorMessage(res, result.error || "Failed to save SpO2");
     }
 
-    return successMessage(res, "SpO2 saved successfully", {
+    return successMessage(res, "spo2_saved_successfully", {
       data: result.data,
       rating: result.rating,
       status: result.status,
     });
   } catch (err) {
     console.error("saveSpO2 error:", err);
-    return errorMessage(res, "Error saving SpO2");
+    return errorMessage(res, "error_saving_spo2");
   }
 };
 
@@ -193,16 +194,16 @@ const getAnalytics = async (
     const { device_id, metric_type, range = "daily", date = null } = req.body;
 
     if (!device_id || !metric_type) {
-      return errorMessage(res, "device_id and metric_type are required");
+      return errorMessage(res, "device_id_and_metric_type_are_required");
     }
     if (!METRIC_TYPES.includes(metric_type)) {
       return errorMessage(
         res,
-        `metric_type must be one of: ${METRIC_TYPES.join(", ")}`
+        t(req, "metric_type_must_be_one_of", [METRIC_TYPES.join(", ")])
       );
     }
     if (!["daily", "weekly", "monthly"].includes(range)) {
-      return errorMessage(res, "range must be one of: daily, weekly, monthly");
+      return errorMessage(res, "range_must_be_one_of_daily_weekly_monthly");
     }
 
     const dbMetricType =
@@ -210,7 +211,7 @@ const getAnalytics = async (
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "device_id does not match any existing device");
+      return errorMessage(res, "device_id_does_not_match_any_existing_device");
     }
 
     const targetDate = date ? new Date(date) : new Date();
@@ -533,7 +534,7 @@ const getAnalytics = async (
       order: [["recorded_at", "DESC"]],
     });
 
-    return successMessage(res, "Analytics fetched successfully", {
+    return successMessage(res, "analytics_fetched_successfully", {
       range,
       chart,
       summary,
@@ -541,7 +542,7 @@ const getAnalytics = async (
     });
   } catch (err) {
     console.error("getAnalytics error:", err);
-    return errorMessage(res, "Error fetching analytics");
+    return errorMessage(res, "error_fetching_analytics");
   }
 };
 
@@ -554,12 +555,12 @@ const getHealthOverview = async (
     const { device_id } = req.params;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id as string);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const metricTypes = [
@@ -656,12 +657,12 @@ const getHealthOverview = async (
 
     return successMessage(
       res,
-      "Health overview fetched successfully",
+      "health_overview_fetched_successfully",
       overview
     );
   } catch (err) {
     console.error("getHealthOverview error:", err);
-    return errorMessage(res, "Error fetching health overview");
+    return errorMessage(res, "error_fetching_health_overview");
   }
 };
 
@@ -674,12 +675,12 @@ const getTodaySteps = async (
     const { device_id } = req.params;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id as string);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const now = new Date();
@@ -731,7 +732,7 @@ const getTodaySteps = async (
       }
     }
 
-    return successMessage(res, "Today's step count fetched successfully", {
+    return successMessage(res, "today_s_step_count_fetched_successfully", {
       device_id,
       total_steps: totalSteps,
       date: now.toISOString().split("T")[0],
@@ -739,7 +740,7 @@ const getTodaySteps = async (
     });
   } catch (err) {
     console.error("getTodaySteps error:", err);
-    return errorMessage(res, "Error fetching today's step count");
+    return errorMessage(res, "error_fetching_today_s_step_count");
   }
 };
 

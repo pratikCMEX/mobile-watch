@@ -197,14 +197,14 @@ async function getAllNotifications(
       });
 
       if (!device || !(await canAccessDevice(req, device.id))) {
-        return errorMessage(res, "Device not found with this IMEI");
+        return errorMessage(res, "device_not_found_with_this_imei");
       }
 
       where.device_id = device.id;
     } else if (device_id) {
       // If device_id is provided directly
       if (!(await canAccessDevice(req, device_id))) {
-        return errorMessage(res, "Device not found");
+        return errorMessage(res, "device_not_found");
       }
       where.device_id = device_id;
     } else {
@@ -305,14 +305,14 @@ async function getAllNotifications(
     // with a NULL `user_id`.
     await attachFallbackRecipients(rows);
 
-    return successPagination(res, "Notifications fetched successfully", rows, {
+    return successPagination(res, "notifications_fetched_successfully", rows, {
       page: Number(page),
       limit: Number(limit),
       total: count,
     });
   } catch (err) {
     console.error("getAllNotifications error:", err);
-    return errorMessage(res, "Error fetching notifications");
+    return errorMessage(res, "error_fetching_notifications");
   }
 }
 

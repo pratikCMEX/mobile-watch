@@ -3,6 +3,7 @@ import db from "../../models";
 import { errorMessage, successMessage } from "../../library/Response";
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
+import { t } from "../../i18n/index";
 
 const SCENE_MODE_DESCRIPTIONS: Record<number, string> = {
   1: "Vibration and ringing",
@@ -20,17 +21,17 @@ const updateSceneMode = async (
     const { serial_number, scene_mode } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (scene_mode === undefined || scene_mode === null) {
-      return errorMessage(res, "scene_mode is required");
+      return errorMessage(res, "scene_mode_is_required");
     }
 
     if (![1, 2, 3, 4].includes(scene_mode)) {
       return errorMessage(
         res,
-        "scene_mode must be 1 (vibration+ringing), 2 (ringing), 3 (vibration), or 4 (silence)"
+        "scene_mode_must_be_1_vibration_ringing_2_ringing_3_vibration_or_4_silence"
       );
     }
 
@@ -40,7 +41,7 @@ const updateSceneMode = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -48,7 +49,7 @@ const updateSceneMode = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -60,7 +61,7 @@ const updateSceneMode = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -106,7 +107,7 @@ const updateSceneMode = async (
       );
     }
 
-    return successMessage(res, "Scene mode command sent successfully", {
+    return successMessage(res, "scene_mode_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -118,7 +119,7 @@ const updateSceneMode = async (
     });
   } catch (err) {
     console.error("updateSceneMode error:", err);
-    return errorMessage(res, "Error sending scene mode command");
+    return errorMessage(res, "error_sending_scene_mode_command");
   }
 };
 
@@ -134,7 +135,7 @@ const getSceneModeStatus = async (
       : serialNumberParam;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -143,7 +144,7 @@ const getSceneModeStatus = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -158,7 +159,7 @@ const getSceneModeStatus = async (
       order: [["createdAt", "DESC"]],
     });
 
-    return successMessage(res, "Scene mode status retrieved", {
+    return successMessage(res, "scene_mode_status_retrieved", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -173,7 +174,7 @@ const getSceneModeStatus = async (
     });
   } catch (err) {
     console.error("getSceneModeStatus error:", err);
-    return errorMessage(res, "Error retrieving scene mode status");
+    return errorMessage(res, "error_retrieving_scene_mode_status");
   }
 };
 
@@ -196,12 +197,12 @@ const listSceneModes = async (
 
     return successMessage(
       res,
-      "Scene modes retrieved successfully",
+      "scene_modes_retrieved_successfully",
       sceneModes
     );
   } catch (err) {
     console.error("listSceneModes error:", err);
-    return errorMessage(res, "Error retrieving scene modes");
+    return errorMessage(res, "error_retrieving_scene_modes");
   }
 };
 

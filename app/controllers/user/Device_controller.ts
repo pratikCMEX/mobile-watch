@@ -12,6 +12,7 @@ import { buildServerPortalCommand } from "../../tcp/protocol";
 import Device from "../../models/Device";
 import DeviceSetting from "../../models/DeviceSetting";
 import { ensureDeviceMember } from "../../helper/WatchAccess";
+import { t } from "../../i18n/index";
 
 /**
  * Country code auto-prepended to 10-digit national numbers on the wire.
@@ -62,12 +63,12 @@ const updateDeviceSettings = async function (
     } = req.body;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     // ── Normalise fall-down fields to booleans ──────────────
@@ -89,9 +90,7 @@ const updateDeviceSettings = async function (
       if (isNaN(levelNum) || levelNum < 1 || levelNum > maxLevel) {
         return errorMessage(
           res,
-          `Invalid fall_down_level ${fall_down_level}. Must be 1–${maxLevel} (${
-            isRtOs ? "RT OS" : "Android"
-          } device).`
+          t(req, "invalid_fall_down_level_must_be_1_device", [fall_down_level, maxLevel, isRtOs ? "RT OS" : "Android"])
         );
       }
     }
@@ -263,12 +262,12 @@ const updateDeviceSettings = async function (
 
     return successMessage(
       res,
-      "Device settings updated successfully",
+      "device_settings_updated_successfully",
       response
     );
   } catch (err) {
     console.error("updateDeviceSettings error:", err);
-    return errorMessage(res, "Error updating device settings");
+    return errorMessage(res, "error_updating_device_settings");
   }
 };
 
@@ -277,17 +276,17 @@ const aboutDevice = async (req: Request, res: Response, next: NextFunction) => {
     const { device_id } = req.params;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const deviceData = device.toJSON();
 
-    return successMessage(res, "Device details fetched successfully", {
+    return successMessage(res, "device_details_fetched_successfully", {
       // Device Info
       id: deviceData.id,
       device_name: deviceData.device_name,
@@ -326,7 +325,7 @@ const aboutDevice = async (req: Request, res: Response, next: NextFunction) => {
     });
   } catch (err) {
     console.error("aboutDevice error:", err);
-    return errorMessage(res, "Error fetching device details");
+    return errorMessage(res, "error_fetching_device_details");
   }
 };
 
@@ -339,12 +338,12 @@ const getDeviceSettings = async (
     const { device_id } = req.params;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     let deviceSetting = await db.DeviceSetting.findOne({
@@ -378,7 +377,7 @@ const getDeviceSettings = async (
       4: "Silence",
     };
 
-    return successMessage(res, "Device settings fetched successfully", {
+    return successMessage(res, "device_settings_fetched_successfully", {
       device_id: device.id,
       device_name: device.device_name,
       serial_number: device.serial_number,
@@ -413,7 +412,7 @@ const getDeviceSettings = async (
     });
   } catch (err) {
     console.error("getDeviceSettings error:", err);
-    return errorMessage(res, "Error fetching device settings");
+    return errorMessage(res, "error_fetching_device_settings");
   }
 };
 
@@ -426,12 +425,12 @@ const getDeviceStatus = async (
     const { device_id } = req.params;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const deviceData = device.toJSON();
@@ -487,7 +486,7 @@ const getDeviceStatus = async (
         `command_sent=${commandSent}`
     );
 
-    return successMessage(res, "Device status fetched successfully", {
+    return successMessage(res, "device_status_fetched_successfully", {
       device_id: deviceData.id,
 
       device_name: deviceData.device_name,
@@ -519,7 +518,7 @@ const getDeviceStatus = async (
     });
   } catch (err) {
     console.error("getDeviceStatus error:", err);
-    return errorMessage(res, "Error fetching device status");
+    return errorMessage(res, "error_fetching_device_status");
   }
 };
 
@@ -532,7 +531,7 @@ const restartDevice = async (
     const { serial_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -541,7 +540,7 @@ const restartDevice = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -550,7 +549,7 @@ const restartDevice = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -559,7 +558,7 @@ const restartDevice = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -567,7 +566,7 @@ const restartDevice = async (
       `Restart command sent to device ${serial_number} (device_id: ${device.id})`
     );
 
-    return successMessage(res, "Restart command sent successfully", {
+    return successMessage(res, "restart_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -578,7 +577,7 @@ const restartDevice = async (
     });
   } catch (err) {
     console.error("restartDevice error:", err);
-    return errorMessage(res, "Error sending restart command");
+    return errorMessage(res, "error_sending_restart_command");
   }
 };
 
@@ -609,11 +608,11 @@ const sendDeviceCommand = async (
     const { serial_number, command } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (command === undefined || command === null) {
-      return errorMessage(res, "command is required");
+      return errorMessage(res, "command_is_required");
     }
 
     // Validate command type
@@ -625,7 +624,7 @@ const sendDeviceCommand = async (
     if (!validCommands.includes(command)) {
       return errorMessage(
         res,
-        "Invalid command. Must be 1 (restart), 2 (shutdown), or 3 (factory_reset)"
+        "invalid_command_must_be_1_restart_2_shutdown_or_3_factory_reset"
       );
     }
 
@@ -635,7 +634,7 @@ const sendDeviceCommand = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -644,7 +643,7 @@ const sendDeviceCommand = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -759,7 +758,7 @@ const sendDeviceCommand = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -769,7 +768,7 @@ const sendDeviceCommand = async (
 
     return successMessage(
       res,
-      `${COMMAND_NAMES[command]} command sent successfully`,
+      t(req, "command_sent_successfully", [COMMAND_NAMES[command]]),
       {
         serial_number,
         device_id: device.id,
@@ -784,7 +783,7 @@ const sendDeviceCommand = async (
     );
   } catch (err) {
     console.error("sendDeviceCommand error:", err);
-    return errorMessage(res, "Error sending command to device");
+    return errorMessage(res, "error_sending_command_to_device");
   }
 };
 
@@ -793,7 +792,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     const { serial_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -802,7 +801,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -811,7 +810,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -835,7 +834,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
       if (!sceneModeCommandSent) {
         return errorMessage(
           res,
-          "Failed to set the device to vibration and ringing mode."
+          "failed_to_set_the_device_to_vibration_and_ringing_mode"
         );
       }
 
@@ -878,7 +877,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -888,7 +887,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
       `Find device command sent to device ${serial_number} (device_id: ${device.id})`
     );
 
-    return successMessage(res, "Find device command sent successfully", {
+    return successMessage(res, "find_device_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -900,7 +899,7 @@ const findDevice = async (req: Request, res: Response, next: NextFunction) => {
     });
   } catch (err) {
     console.error("findDevice error:", err);
-    return errorMessage(res, "Error sending find device command");
+    return errorMessage(res, "error_sending_find_device_command");
   }
 };
 
@@ -959,15 +958,15 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
     const { serial_number, alarms } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (!alarms || !Array.isArray(alarms) || alarms.length === 0) {
-      return errorMessage(res, "alarms array is required (1-3 alarms)");
+      return errorMessage(res, "alarms_array_is_required_1_3_alarms");
     }
 
     if (alarms.length > 3) {
-      return errorMessage(res, "Maximum 3 alarms allowed");
+      return errorMessage(res, "maximum_3_alarms_allowed");
     }
 
     const device = await db.Device.findOne({
@@ -976,7 +975,7 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -985,7 +984,7 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1024,7 +1023,7 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
       }): ${alarms.join(", ")}`
     );
 
-    return successMessage(res, "Alarm set successfully", {
+    return successMessage(res, "alarm_set_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1039,7 +1038,7 @@ const setAlarm = async (req: Request, res: Response, next: NextFunction) => {
     });
   } catch (err) {
     console.error("setAlarm error:", err);
-    return errorMessage(res, "Error sending alarm command");
+    return errorMessage(res, "error_sending_alarm_command");
   }
 };
 
@@ -1052,7 +1051,7 @@ const captureSnapshot = async (
     const { serial_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1061,7 +1060,7 @@ const captureSnapshot = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1070,7 +1069,7 @@ const captureSnapshot = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1079,7 +1078,7 @@ const captureSnapshot = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1089,7 +1088,7 @@ const captureSnapshot = async (
       `Remote snapshot command sent to device ${serial_number} (device_id: ${device.id})`
     );
 
-    return successMessage(res, "Remote snapshot command sent successfully", {
+    return successMessage(res, "remote_snapshot_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1102,7 +1101,7 @@ const captureSnapshot = async (
     });
   } catch (err) {
     console.error("captureSnapshot error:", err);
-    return errorMessage(res, "Error sending snapshot command");
+    return errorMessage(res, "error_sending_snapshot_command");
   }
 };
 
@@ -1137,7 +1136,7 @@ const setAutoAnswer = async (
     const { serial_number, enabled, numbers = [] } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1146,7 +1145,7 @@ const setAutoAnswer = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1155,7 +1154,7 @@ const setAutoAnswer = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1261,7 +1260,7 @@ const setAutoAnswer = async (
         `numbers=${JSON.stringify(enabled ? cleaned.filter((s) => s) : [])})`
     );
 
-    return successMessage(res, "Auto-answer command sent successfully", {
+    return successMessage(res, "auto_answer_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1278,7 +1277,7 @@ const setAutoAnswer = async (
     });
   } catch (err) {
     console.error("setAutoAnswer error:", err);
-    return errorMessage(res, "Error sending auto-answer command");
+    return errorMessage(res, "error_sending_auto_answer_command");
   }
 };
 
@@ -1315,11 +1314,11 @@ const makeOutgoingCall = async (
     const { serial_number, phone_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (!phone_number) {
-      return errorMessage(res, "phone_number is required");
+      return errorMessage(res, "phone_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1328,7 +1327,7 @@ const makeOutgoingCall = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1338,7 +1337,7 @@ const makeOutgoingCall = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1354,7 +1353,7 @@ const makeOutgoingCall = async (
       return customMessage(
         res,
         422,
-        "Failed to send CALL command. Ensure phone_number is 5–20 ASCII digits (no '+')."
+        "failed_to_send_call_command_ensure_phone_number_is_5_20_ascii_digits_no"
       );
     }
 
@@ -1371,7 +1370,7 @@ const makeOutgoingCall = async (
         `(device_id=${device.id}, phone=${digits})`
     );
 
-    return successMessage(res, "Outgoing call command sent successfully", {
+    return successMessage(res, "outgoing_call_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1385,7 +1384,7 @@ const makeOutgoingCall = async (
     });
   } catch (err) {
     console.error("makeOutgoingCall error:", err);
-    return errorMessage(res, "Error sending outgoing call command");
+    return errorMessage(res, "error_sending_outgoing_call_command");
   }
 };
 
@@ -1406,17 +1405,15 @@ const listAutoAnswer = async (
     if (device_id) {
       device = await db.Device.findByPk(device_id);
     } else {
-      return errorMessage(res, "serial_number or device_id is required");
+      return errorMessage(res, "serial_number_or_device_id_is_required");
     }
 
     if (!device) {
       return errorMessage(
         res,
-        `Device with ${
-          device_id
+        t(req, "device_with_id_not_found_generic", [device_id
             ? `id '${device_id}'`
-            : `serial_number '${device.serial_number}'`
-        } not found`
+            : `serial_number '${device.serial_number}'`])
       );
     }
 
@@ -1450,7 +1447,7 @@ const listAutoAnswer = async (
       };
     });
 
-    return successMessage(res, "Auto-answer numbers fetched successfully", {
+    return successMessage(res, "auto_answer_numbers_fetched_successfully", {
       serial_number: device.serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1465,7 +1462,7 @@ const listAutoAnswer = async (
     });
   } catch (err) {
     console.error("listAutoAnswer error:", err);
-    return errorMessage(res, "Error fetching auto-answer numbers");
+    return errorMessage(res, "error_fetching_auto_answer_numbers");
   }
 };
 
@@ -1487,7 +1484,7 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     const { serial_number, enabled } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1496,7 +1493,7 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1505,7 +1502,7 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1528,13 +1525,13 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     );
 
     if (affectedRows === 0) {
-      return errorMessage(res, "Device setting not found for this device");
+      return errorMessage(res, "device_setting_not_found_for_this_device");
     }
 
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1545,7 +1542,7 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
         `(device_id=${device.id}, enabled=${Boolean(enabled)})`
     );
 
-    return successMessage(res, "SOS-SMS command sent successfully", {
+    return successMessage(res, "sos_sms_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1560,7 +1557,7 @@ const setSosSms = async (req: Request, res: Response, next: NextFunction) => {
     });
   } catch (err) {
     console.error("setSosSms error:", err);
-    return errorMessage(res, "Error sending SOS-SMS command");
+    return errorMessage(res, "error_sending_sos_sms_command");
   }
 };
 
@@ -1588,7 +1585,7 @@ const setFallDownAlert = async (
     const { serial_number, alert_enabled, call_center } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1597,7 +1594,7 @@ const setFallDownAlert = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1606,7 +1603,7 @@ const setFallDownAlert = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1622,7 +1619,7 @@ const setFallDownAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1666,7 +1663,7 @@ const setFallDownAlert = async (
         `(device_id=${device.id}, alert_enabled=${alertEnabled}, call_center=${callCenter})`
     );
 
-    return successMessage(res, "Fall-down alarm command sent successfully", {
+    return successMessage(res, "fall_down_alarm_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1682,7 +1679,7 @@ const setFallDownAlert = async (
     });
   } catch (err) {
     console.error("setFallDownAlert error:", err);
-    return errorMessage(res, "Error sending fall-down alarm command");
+    return errorMessage(res, "error_sending_fall_down_alarm_command");
   }
 };
 
@@ -1711,7 +1708,7 @@ const setTakeOffAlert = async (
     const { serial_number, enabled } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1720,7 +1717,7 @@ const setTakeOffAlert = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1729,7 +1726,7 @@ const setTakeOffAlert = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1740,7 +1737,7 @@ const setTakeOffAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1777,7 +1774,7 @@ const setTakeOffAlert = async (
         `(device_id=${device.id}, enabled=${Boolean(enabled)})`
     );
 
-    return successMessage(res, "Take-off alarm command sent successfully", {
+    return successMessage(res, "take_off_alarm_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1792,7 +1789,7 @@ const setTakeOffAlert = async (
     });
   } catch (err) {
     console.error("setTakeOffAlert error:", err);
-    return errorMessage(res, "Error sending take-off alarm command");
+    return errorMessage(res, "error_sending_take_off_alarm_command");
   }
 };
 
@@ -1821,7 +1818,7 @@ const setRemoveSmsAlert = async (
     const { serial_number, enabled } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1830,7 +1827,7 @@ const setRemoveSmsAlert = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1839,7 +1836,7 @@ const setRemoveSmsAlert = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1850,7 +1847,7 @@ const setRemoveSmsAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1887,7 +1884,7 @@ const setRemoveSmsAlert = async (
         `(device_id=${device.id}, enabled=${Boolean(enabled)})`
     );
 
-    return successMessage(res, "Take-off SMS alarm command sent successfully", {
+    return successMessage(res, "take_off_sms_alarm_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1902,7 +1899,7 @@ const setRemoveSmsAlert = async (
     });
   } catch (err) {
     console.error("setRemoveSmsAlert error:", err);
-    return errorMessage(res, "Error sending take-off SMS alarm command");
+    return errorMessage(res, "error_sending_take_off_sms_alarm_command");
   }
 };
 
@@ -1926,11 +1923,11 @@ const setCenterNumber = async (
     const { serial_number, center_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (!center_number) {
-      return errorMessage(res, "center_number is required");
+      return errorMessage(res, "center_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -1939,7 +1936,7 @@ const setCenterNumber = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1948,7 +1945,7 @@ const setCenterNumber = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1960,7 +1957,7 @@ const setCenterNumber = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1981,7 +1978,7 @@ const setCenterNumber = async (
         `(device_id=${device.id}, center=${digits})`
     );
 
-    return successMessage(res, "Center number command sent successfully", {
+    return successMessage(res, "center_number_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1995,7 +1992,7 @@ const setCenterNumber = async (
     });
   } catch (err) {
     console.error("setCenterNumber error:", err);
-    return errorMessage(res, "Error sending center number command");
+    return errorMessage(res, "error_sending_center_number_command");
   }
 };
 
@@ -2023,11 +2020,11 @@ const setPhrasesDisplay = async (
     const { serial_number, phrases } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (!phrases) {
-      return errorMessage(res, "phrases is required");
+      return errorMessage(res, "phrases_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -2036,7 +2033,7 @@ const setPhrasesDisplay = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -2045,7 +2042,7 @@ const setPhrasesDisplay = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2057,7 +2054,7 @@ const setPhrasesDisplay = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2101,7 +2098,7 @@ const setPhrasesDisplay = async (
         `(device_id=${device.id})`
     );
 
-    return successMessage(res, "Phrases display command sent successfully", {
+    return successMessage(res, "phrases_display_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -2116,7 +2113,7 @@ const setPhrasesDisplay = async (
     });
   } catch (err) {
     console.error("setPhrasesDisplay error:", err);
-    return errorMessage(res, "Error sending phrases display command");
+    return errorMessage(res, "error_sending_phrases_display_command");
   }
 };
 
@@ -2141,7 +2138,7 @@ const setLowBatteryAlert = async (
     const { serial_number, enabled } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -2150,7 +2147,7 @@ const setLowBatteryAlert = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -2159,7 +2156,7 @@ const setLowBatteryAlert = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2173,7 +2170,7 @@ const setLowBatteryAlert = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2215,7 +2212,7 @@ const setLowBatteryAlert = async (
         `(device_id=${device.id}, enabled=${alertEnabled})`
     );
 
-    return successMessage(res, "Low-battery alarm command sent successfully", {
+    return successMessage(res, "low_battery_alarm_command_sent_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -2230,7 +2227,7 @@ const setLowBatteryAlert = async (
     });
   } catch (err) {
     console.error("setLowBatteryAlert error:", err);
-    return errorMessage(res, "Error sending low-battery alarm command");
+    return errorMessage(res, "error_sending_low_battery_alarm_command");
   }
 };
 
@@ -2260,11 +2257,11 @@ const setFallDownSensitivity = async (
     const { serial_number, level, device_type } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (level === undefined || level === null) {
-      return errorMessage(res, "level is required");
+      return errorMessage(res, "level_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -2273,7 +2270,7 @@ const setFallDownSensitivity = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -2282,7 +2279,7 @@ const setFallDownSensitivity = async (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2296,9 +2293,7 @@ const setFallDownSensitivity = async (
     if (isNaN(levelNum) || levelNum < 1 || levelNum > maxLevel) {
       return errorMessage(
         res,
-        `Invalid fall-down sensitivity level ${levelNum}. Must be 1–${maxLevel} (${
-          isRtOs ? "RT OS" : "Android"
-        } device).`
+        t(req, "invalid_fall_down_sensitivity_level_must_be_1_device", [levelNum, maxLevel, isRtOs ? "RT OS" : "Android"])
       );
     }
 
@@ -2311,7 +2306,7 @@ const setFallDownSensitivity = async (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2354,7 +2349,7 @@ const setFallDownSensitivity = async (
 
     return successMessage(
       res,
-      "Fall-down sensitivity command sent successfully",
+      "fall_down_sensitivity_command_sent_successfully",
       {
         serial_number,
         device_id: device.id,
@@ -2371,7 +2366,7 @@ const setFallDownSensitivity = async (
     );
   } catch (err) {
     console.error("setFallDownSensitivity error:", err);
-    return errorMessage(res, "Error sending fall-down sensitivity command");
+    return errorMessage(res, "error_sending_fall_down_sensitivity_command");
   }
 };
 
@@ -2401,18 +2396,18 @@ const setLanguageTimezone = async (
     const { serial_number, language, timezone } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
     if (language === undefined && timezone === undefined) {
       return errorMessage(
         res,
-        "Provide exactly one of: language OR timezone (not both, not neither)."
+        "provide_exactly_one_of_language_or_timezone_not_both_not_neither"
       );
     }
     if (language !== undefined && timezone !== undefined) {
       return errorMessage(
         res,
-        "Provide exactly one of: language OR timezone (not both)."
+        "provide_exactly_one_of_language_or_timezone_not_both"
       );
     }
 
@@ -2420,14 +2415,14 @@ const setLanguageTimezone = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2440,7 +2435,7 @@ const setLanguageTimezone = async (
     if (!result.sent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2486,7 +2481,7 @@ const setLanguageTimezone = async (
   } catch (err: any) {
     console.error("setLanguageTimezone error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error sending LZ command: " + msg);
+    return errorMessage(res, t(req, "error_sending_lz_command", [msg]));
   }
 };
 
@@ -2520,27 +2515,27 @@ const setSilenceTime = async (
     const { serial_number, mode, slots, weekdays } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
     if (mode !== "SILENCETIME" && mode !== "SILENCETIME2") {
       return errorMessage(
         res,
-        "mode must be 'SILENCETIME' (daily) or 'SILENCETIME2' (per weekday)"
+        "mode_must_be_silencetime_daily_or_silencetime2_per_weekday"
       );
     }
     if (!Array.isArray(slots) || slots.length < 1 || slots.length > 4) {
-      return errorMessage(res, "slots must be an array of 1 to 4 entries");
+      return errorMessage(res, "slots_must_be_an_array_of_1_to_4_entries");
     }
     if (mode === "SILENCETIME2" && !weekdays) {
       return errorMessage(
         res,
-        "weekdays is required when mode is 'SILENCETIME2' (a 7-char '0'/'1' string, Sun..Sat)"
+        "weekdays_is_required_when_mode_is_silencetime2_a_7_char_0_1_string_sun_sat"
       );
     }
     if (mode === "SILENCETIME" && weekdays !== undefined) {
       return errorMessage(
         res,
-        "weekdays is not allowed when mode is 'SILENCETIME' — the classic protocol has no day-of-week field"
+        "weekdays_is_not_allowed_when_mode_is_silencetime_the_classic_protocol_has_no_day_of_week_field"
       );
     }
 
@@ -2548,14 +2543,14 @@ const setSilenceTime = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2568,7 +2563,7 @@ const setSilenceTime = async (
     if (!result.sent) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2677,7 +2672,7 @@ const setSilenceTime = async (
         `weekdays=${JSON.stringify(weekdays)}, enabled_slots=${filledCount})`
     );
 
-    return successMessage(res, "Do-not-disturb period set successfully", {
+    return successMessage(res, "do_not_disturb_period_set_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -2702,7 +2697,7 @@ const setSilenceTime = async (
   } catch (err: any) {
     console.error("setSilenceTime error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error sending SILENCETIME command: " + msg);
+    return errorMessage(res, t(req, "error_sending_silencetime_command", [msg]));
   }
 };
 
@@ -2741,7 +2736,7 @@ const getDoNotDisturb = async (
     if (!serial_number && !device_id) {
       return errorMessage(
         res,
-        "serial_number (or device_id) is required in the request body"
+        "serial_number_or_device_id_is_required_in_the_request_body"
       );
     }
 
@@ -2750,11 +2745,9 @@ const getDoNotDisturb = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with ${
-          serial_number
-            ? `serial_number '${serial_number}'`
-            : `id '${device_id}'`
-        } not found`
+        t(req, "device_with_id_not_found_generic", [device_id
+            ? `id '${device_id}'`
+            : `serial_number '${device.serial_number}'`])
       );
     }
 
@@ -2767,7 +2760,7 @@ const getDoNotDisturb = async (
     });
 
     if (rows.length === 0) {
-      return successMessage(res, "No Do-Not-Disturb configuration on file", {
+      return successMessage(res, "no_do_not_disturb_configuration_on_file", {
         serial_number: device.serial_number,
         device_id: device.id,
         device_name: device.device_name,
@@ -2808,7 +2801,7 @@ const getDoNotDisturb = async (
 
     return successMessage(
       res,
-      "Do-Not-Disturb configuration fetched successfully",
+      "do_not_disturb_configuration_fetched_successfully",
       {
         configured: true,
         serial_number: device.serial_number,
@@ -2830,8 +2823,7 @@ const getDoNotDisturb = async (
     const msg = (err && err.message) || String(err);
     return errorMessage(
       res,
-      "Error fetching Do-Not-Disturb configuration: " + msg
-    );
+      t(req, "error_fetching_do_not_disturb_configuration", [msg]));
   }
 };
 
@@ -2860,7 +2852,7 @@ const requestBodyTemperature = async function (
     }
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const serialNumber = device.serial_number;
@@ -2868,7 +2860,7 @@ const requestBodyTemperature = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2877,7 +2869,7 @@ const requestBodyTemperature = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2885,10 +2877,10 @@ const requestBodyTemperature = async function (
     const commandSent = tcpServer.requestBodyTemperature(serialNumber);
 
     if (!commandSent) {
-      return errorMessage(res, "Failed to send bodytemp2 command to device");
+      return errorMessage(res, "failed_to_send_bodytemp2_command_to_device");
     }
 
-    return successMessage(res, "Command sent successfully to device.", {
+    return successMessage(res, "command_sent_successfully_to_device", {
       serial_number: serialNumber,
       device_id: device.id,
       device_name: device.device_name,
@@ -2902,7 +2894,7 @@ const requestBodyTemperature = async function (
   } catch (err: any) {
     console.error("requestBodyTemperature error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error requesting body temperature: " + msg);
+    return errorMessage(res, t(req, "error_requesting_body_temperature", [msg]));
   }
 };
 
@@ -2937,7 +2929,7 @@ const requestHeartRate = async function (
     }
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const serialNumber = device.serial_number;
@@ -2945,12 +2937,12 @@ const requestHeartRate = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
     if (start !== 0 && start !== 1) {
-      return errorMessage(res, "start must be 0 (stop) or 1 (single upload)");
+      return errorMessage(res, "start_must_be_0_stop_or_1_single_upload");
     }
 
     // Verify the watch is currently connected via TCP.
@@ -2958,7 +2950,7 @@ const requestHeartRate = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -2969,7 +2961,7 @@ const requestHeartRate = async function (
     );
 
     if (!commandSent) {
-      return errorMessage(res, "Failed to send hrtstart command to device");
+      return errorMessage(res, "failed_to_send_hrtstart_command_to_device");
     }
 
     return successMessage(
@@ -2992,7 +2984,7 @@ const requestHeartRate = async function (
   } catch (err: any) {
     console.error("requestHeartRate error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error requesting heart rate: " + msg);
+    return errorMessage(res, t(req, "error_requesting_heart_rate", [msg]));
   }
 };
 
@@ -3027,7 +3019,7 @@ const requestHeartRateAndBodyTemperature = async function (
     }
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const serialNumber = device.serial_number;
@@ -3035,7 +3027,7 @@ const requestHeartRateAndBodyTemperature = async function (
     if (!serialNumber) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3044,7 +3036,7 @@ const requestHeartRateAndBodyTemperature = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3086,8 +3078,7 @@ const requestHeartRateAndBodyTemperature = async function (
     const msg = (err && err.message) || String(err);
     return errorMessage(
       res,
-      "Error requesting heart rate and body temperature: " + msg
-    );
+      t(req, "error_requesting_heart_rate_and_body_temperature", [msg]));
   }
 };
 
@@ -3110,7 +3101,7 @@ const getHealthResult = async function (
     const { request_id } = req.query;
 
     if (!request_id || typeof request_id !== "string") {
-      return errorMessage(res, "request_id query parameter is required");
+      return errorMessage(res, "request_id_query_parameter_is_required");
     }
 
     const status = tcpServer.getHealthRequestStatus(request_id);
@@ -3118,7 +3109,7 @@ const getHealthResult = async function (
     if (status.status === "completed") {
       return successMessage(
         res,
-        "Heart rate and body temperature data received from device.",
+        "heart_rate_and_body_temperature_data_received_from_device",
         {
           status: "completed",
           request_id: status.requestId,
@@ -3139,7 +3130,7 @@ const getHealthResult = async function (
     }
 
     // Processing
-    return successMessage(res, "Still fetching data from device.", {
+    return successMessage(res, "still_fetching_data_from_device", {
       status: "processing",
       request_id: status.requestId,
       serial_number: status.serialNumber,
@@ -3150,7 +3141,7 @@ const getHealthResult = async function (
   } catch (err: any) {
     console.error("getHealthResult error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error checking health result: " + msg);
+    return errorMessage(res, t(req, "error_checking_health_result", [msg]));
   }
 };
 
@@ -3180,11 +3171,11 @@ const setRejectStranger = async function (
     const { serial_number, enabled } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (typeof enabled !== "boolean") {
-      return errorMessage(res, "enabled must be true or false");
+      return errorMessage(res, "enabled_must_be_true_or_false");
     }
 
     // Find the device
@@ -3193,7 +3184,7 @@ const setRejectStranger = async function (
     });
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     // Verify the watch is currently connected via TCP
@@ -3201,7 +3192,7 @@ const setRejectStranger = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3217,7 +3208,7 @@ const setRejectStranger = async function (
       if (emergencyCount === 0 && phonebookCount === 0) {
         return errorMessage(
           res,
-          "Cannot enable reject stranger calling. Please preset SOS numbers and/or phone book contacts first."
+          "cannot_enable_reject_stranger_calling_please_preset_sos_numbers_and_or_phone_book_contacts_first"
         );
       }
     }
@@ -3231,7 +3222,7 @@ const setRejectStranger = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send DEVREFUSEPHONESWITCH command to device"
+        "failed_to_send_devrefusephoneswitch_command_to_device"
       );
     }
 
@@ -3269,7 +3260,7 @@ const setRejectStranger = async function (
   } catch (err: any) {
     console.error("setRejectStranger error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error setting reject stranger: " + msg);
+    return errorMessage(res, t(req, "error_setting_reject_stranger", [msg]));
   }
 };
 
@@ -3297,11 +3288,11 @@ const setNightPowerSaving = async function (
     const { serial_number, enabled } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (typeof enabled !== "boolean") {
-      return errorMessage(res, "enabled must be true or false");
+      return errorMessage(res, "enabled_must_be_true_or_false");
     }
 
     // Find the device
@@ -3310,7 +3301,7 @@ const setNightPowerSaving = async function (
     });
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     // Verify the watch is currently connected via TCP
@@ -3318,7 +3309,7 @@ const setNightPowerSaving = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3326,7 +3317,7 @@ const setNightPowerSaving = async function (
     const commandSent = tcpServer.sendAppLockCommand(serial_number, enabled);
 
     if (!commandSent) {
-      return errorMessage(res, "Failed to send APPLOCK command to device");
+      return errorMessage(res, "failed_to_send_applock_command_to_device");
     }
 
     // Update the device settings in the database
@@ -3360,7 +3351,7 @@ const setNightPowerSaving = async function (
   } catch (err: any) {
     console.error("setNightPowerSaving error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error setting night power saving: " + msg);
+    return errorMessage(res, t(req, "error_setting_night_power_saving", [msg]));
   }
 };
 
@@ -3388,11 +3379,11 @@ const setDialLock = async function (
     const { serial_number, locked } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (typeof locked !== "boolean") {
-      return errorMessage(res, "locked must be true or false");
+      return errorMessage(res, "locked_must_be_true_or_false");
     }
 
     // Find the device
@@ -3401,7 +3392,7 @@ const setDialLock = async function (
     });
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     // Verify the watch is currently connected via TCP
@@ -3409,7 +3400,7 @@ const setDialLock = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3419,7 +3410,7 @@ const setDialLock = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send APPLOCK (dial lock) command to device"
+        "failed_to_send_applock_dial_lock_command_to_device"
       );
     }
 
@@ -3454,7 +3445,7 @@ const setDialLock = async function (
   } catch (err: any) {
     console.error("setDialLock error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error setting dial lock: " + msg);
+    return errorMessage(res, t(req, "error_setting_dial_lock", [msg]));
   }
 };
 
@@ -3490,11 +3481,11 @@ const voiceMonitor = async function (
     const { serial_number, phone_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (!phone_number) {
-      return errorMessage(res, "phone_number is required");
+      return errorMessage(res, "phone_number_is_required");
     }
 
     // Find the device
@@ -3503,7 +3494,7 @@ const voiceMonitor = async function (
     });
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     // Verify the watch is currently connected via TCP
@@ -3511,7 +3502,7 @@ const voiceMonitor = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3522,12 +3513,12 @@ const voiceMonitor = async function (
     );
 
     if (!commandSent) {
-      return errorMessage(res, "Failed to send MONITOR command to device");
+      return errorMessage(res, "failed_to_send_monitor_command_to_device");
     }
 
     return successMessage(
       res,
-      "Voice monitor command sent. The device will call the monitor number.",
+      "voice_monitor_command_sent_the_device_will_call_the_monitor_number",
       {
         serial_number,
         device_id: device.id,
@@ -3545,7 +3536,7 @@ const voiceMonitor = async function (
   } catch (err: any) {
     console.error("voiceMonitor error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error sending voice monitor: " + msg);
+    return errorMessage(res, t(req, "error_sending_voice_monitor", [msg]));
   }
 };
 
@@ -3583,7 +3574,7 @@ const setUploadInterval = async function (
     const { serial_number, interval_seconds } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (
@@ -3597,7 +3588,7 @@ const setUploadInterval = async function (
     ) {
       return errorMessage(
         res,
-        "interval_seconds must be an integer between 60 and 65535 seconds"
+        "interval_seconds_must_be_an_integer_between_60_and_65535_seconds"
       );
     }
 
@@ -3607,7 +3598,7 @@ const setUploadInterval = async function (
     });
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     // Verify the watch is currently connected via TCP
@@ -3615,7 +3606,7 @@ const setUploadInterval = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3626,7 +3617,7 @@ const setUploadInterval = async function (
     );
 
     if (!commandSent) {
-      return errorMessage(res, "Failed to send UPLOAD command to device");
+      return errorMessage(res, "failed_to_send_upload_command_to_device");
     }
 
     // Mirror the new interval to both the Device row and the
@@ -3671,7 +3662,7 @@ const setUploadInterval = async function (
 
     return successMessage(
       res,
-      "Upload interval command sent. The device will report at this interval while moving.",
+      "upload_interval_command_sent_the_device_will_report_at_this_interval_while_moving",
       {
         serial_number,
         device_id: device.id,
@@ -3694,7 +3685,7 @@ const setUploadInterval = async function (
   } catch (err: any) {
     console.error("setUploadInterval error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error setting upload interval: " + msg);
+    return errorMessage(res, t(req, "error_setting_upload_interval", [msg]));
   }
 };
 
@@ -3750,13 +3741,13 @@ const setWalkTime = async function (
         : Math.max(0, Math.floor(parsedStepTarget));
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     if (sections.length > 3) {
       return errorMessage(
         res,
-        "sections must contain at most 3 entries (max 3 walk-time windows)"
+        "sections_must_contain_at_most_3_entries_max_3_walk_time_windows"
       );
     }
 
@@ -3766,7 +3757,7 @@ const setWalkTime = async function (
     });
 
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     // Verify the watch is currently connected via TCP
@@ -3774,7 +3765,7 @@ const setWalkTime = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3785,7 +3776,7 @@ const setWalkTime = async function (
     if (!commandSent) {
       return errorMessage(
         res,
-        "Failed to send WALKTIME command. Each section must be HH:MM-HH:MM (24h, start<end, max 3 sections)."
+        "failed_to_send_walktime_command_each_section_must_be_hh_mm_hh_mm_24h_start_end_max_3_sections"
       );
     }
 
@@ -3863,7 +3854,7 @@ const setWalkTime = async function (
   } catch (err: any) {
     console.error("setWalkTime error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error setting walk-time: " + msg);
+    return errorMessage(res, t(req, "error_setting_walk_time", [msg]));
   }
 };
 
@@ -3896,14 +3887,14 @@ const setSleepTime = async function (
     const { serial_number, time_section, enabled = true } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const shouldEnable = enabled !== false;
     if (shouldEnable && (!time_section || typeof time_section !== "string")) {
       return errorMessage(
         res,
-        "time_section is required when enabled is true (format: HH:MM-HH:MM; overnight windows are allowed)"
+        "time_section_is_required_when_enabled_is_true_format_hh_mm_hh_mm_overnight_windows_are_allowed"
       );
     }
 
@@ -3913,14 +3904,14 @@ const setSleepTime = async function (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -3931,7 +3922,7 @@ const setSleepTime = async function (
     if (!result.sent) {
       return errorMessage(
         res,
-        "Failed to send SLEEPTIME command. Use a valid HH:MM-HH:MM time section."
+        "failed_to_send_sleeptime_command_use_a_valid_hh_mm_hh_mm_time_section"
       );
     }
 
@@ -3993,7 +3984,7 @@ const setSleepTime = async function (
   } catch (err: any) {
     console.error("setSleepTime error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error setting sleep-time: " + msg);
+    return errorMessage(res, t(req, "error_setting_sleep_time", [msg]));
   }
 };
 
@@ -4017,7 +4008,7 @@ const getSleepTime = async function (
     };
 
     if (!serial_number && !device_id) {
-      return errorMessage(res, "serial_number or device_id is required");
+      return errorMessage(res, "serial_number_or_device_id_is_required");
     }
 
     const device = serial_number
@@ -4027,9 +4018,7 @@ const getSleepTime = async function (
     if (!device) {
       return errorMessage(
         res,
-        `Device ${
-          serial_number ? `with serial_number '${serial_number}'` : ""
-        } not found`
+        t(req, "device_not_found_with_value", [serial_number ? `with serial_number '${serial_number}'` : ""])
       );
     }
 
@@ -4039,7 +4028,7 @@ const getSleepTime = async function (
 
     return successMessage(
       res,
-      "Sleep/body-tumbling detection settings fetched successfully",
+      "sleep_body_tumbling_detection_settings_fetched_successfully",
       {
         serial_number: device.serial_number ?? serial_number,
         device_id: device.id,
@@ -4070,7 +4059,7 @@ const getSleepTime = async function (
   } catch (err: any) {
     console.error("getSleepTime error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error fetching sleep-time: " + msg);
+    return errorMessage(res, t(req, "error_fetching_sleep_time", [msg]));
   }
 };
 
@@ -4092,7 +4081,7 @@ const getWalkTime = async function (
     const { serial_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -4101,7 +4090,7 @@ const getWalkTime = async function (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -4194,7 +4183,7 @@ const getWalkTime = async function (
 
     return successMessage(
       res,
-      "Walk-time settings and step stats fetched successfully",
+      "walk_time_settings_and_step_stats_fetched_successfully",
       {
         serial_number,
         device_id: device.id,
@@ -4226,7 +4215,7 @@ const getWalkTime = async function (
   } catch (err: any) {
     console.error("getWalkTime error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error fetching walk-time: " + msg);
+    return errorMessage(res, t(req, "error_fetching_walk_time", [msg]));
   }
 };
 
@@ -4265,7 +4254,7 @@ const locateDevice = async function (
     const { serial_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -4274,7 +4263,7 @@ const locateDevice = async function (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -4283,7 +4272,7 @@ const locateDevice = async function (
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -4293,7 +4282,7 @@ const locateDevice = async function (
     const commandSent = tcpServer.sendCrCommand(serial_number);
 
     if (!commandSent) {
-      return errorMessage(res, "Failed to send CR command to device");
+      return errorMessage(res, "failed_to_send_cr_command_to_device");
     }
 
     // Snapshot the device's current cached position so the API
@@ -4306,7 +4295,7 @@ const locateDevice = async function (
 
     return successMessage(
       res,
-      "Locate command sent — GPS active for a few minutes.",
+      "locate_command_sent_gps_active_for_a_few_minutes",
       {
         serial_number,
         device_id: device.id,
@@ -4344,7 +4333,7 @@ const locateDevice = async function (
   } catch (err: any) {
     console.error("locateDevice error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error sending locate command: " + msg);
+    return errorMessage(res, t(req, "error_sending_locate_command", [msg]));
   }
 };
 
@@ -4371,7 +4360,7 @@ const getDeviceLocation = async function (
     );
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -4380,7 +4369,7 @@ const getDeviceLocation = async function (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -4415,7 +4404,7 @@ const getDeviceLocation = async function (
       recorded_at: r.recorded_at,
     }));
 
-    return successMessage(res, "Device location fetched successfully", {
+    return successMessage(res, "device_location_fetched_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -4429,7 +4418,7 @@ const getDeviceLocation = async function (
   } catch (err: any) {
     console.error("getDeviceLocation error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error fetching device location: " + msg);
+    return errorMessage(res, t(req, "error_fetching_device_location", [msg]));
   }
 };
 
@@ -4457,14 +4446,14 @@ const registerDeviceByImei = async function (
   try {
     const userId = (req as any)?.userinfo?.payload?.id;
     if (!userId) {
-      return errorMessage(res, "Invalid token payload", 200);
+      return errorMessage(res, "invalid_token_payload", 200);
     }
 
     const user = await db.User.findOne({
       where: { id: userId, deletedAt: null },
     });
     if (!user) {
-      return errorMessage(res, "User not found", 404);
+      return errorMessage(res, "user_not_found", 404);
     }
 
     const {
@@ -4487,7 +4476,7 @@ const registerDeviceByImei = async function (
       imei && /^\d{15}$/.test(imei) ? imei.slice(4, -1) : serial_number ?? null;
 
     if (!imei && !serial_number) {
-      return errorMessage(res, "imei or serial_number is required");
+      return errorMessage(res, "imei_or_serial_number_is_required");
     }
 
     // Membership state of the current user for a device (checked in DeviceMember).
@@ -4513,7 +4502,7 @@ const registerDeviceByImei = async function (
       if (isMember) {
         return successMessage(
           res,
-          "Device already registered",
+          "device_already_registered",
           existingBySerial
         );
       }
@@ -4548,7 +4537,7 @@ const registerDeviceByImei = async function (
 
         return successMessage(
           res,
-          "Device added successfully",
+          "device_added_successfully",
           existingBySerial
         );
       }
@@ -4557,7 +4546,7 @@ const registerDeviceByImei = async function (
       await ensureDeviceMember(existingBySerial.id, userId, "member");
       return successMessage(
         res,
-        "Device registered successfully",
+        "device_registered_successfully",
         existingBySerial
       );
     }
@@ -4574,7 +4563,7 @@ const registerDeviceByImei = async function (
         if (isMember) {
           return successMessage(
             res,
-            "Device already registered",
+            "device_already_registered",
             existingByImei
           );
         }
@@ -4607,7 +4596,7 @@ const registerDeviceByImei = async function (
 
           return successMessage(
             res,
-            "Device added successfully",
+            "device_added_successfully",
             existingByImei
           );
         }
@@ -4616,7 +4605,7 @@ const registerDeviceByImei = async function (
         await ensureDeviceMember(existingByImei.id, userId, "member");
         return successMessage(
           res,
-          "Device registered successfully",
+          "device_registered_successfully",
           existingByImei
         );
       }
@@ -4659,7 +4648,7 @@ const registerDeviceByImei = async function (
         // A concurrent request inserted the row between our checks.
         const { isMember, isFirstMember } = await getMembershipState(device.id);
         if (isMember) {
-          return successMessage(res, "Device already registered", device);
+          return successMessage(res, "device_already_registered", device);
         }
         await ensureDeviceMember(
           device.id,
@@ -4687,11 +4676,11 @@ const registerDeviceByImei = async function (
             where: { serial_number: derivedSerialNumber },
           }));
         if (!device) {
-          return errorMessage(res, "Error registering device: race detected");
+          return errorMessage(res, "error_registering_device_race_detected");
         }
         const { isMember, isFirstMember } = await getMembershipState(device.id);
         if (isMember) {
-          return successMessage(res, "Device already registered", device);
+          return successMessage(res, "device_already_registered", device);
         }
         await ensureDeviceMember(
           device.id,
@@ -4712,11 +4701,11 @@ const registerDeviceByImei = async function (
     // Newly created device — first member is the admin.
     await ensureDeviceMember(device.id, userId, "admin");
 
-    return successMessage(res, "Device registered successfully", device);
+    return successMessage(res, "device_registered_successfully", device);
   } catch (err: any) {
     console.error("registerDeviceByImei error :", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error registering device: " + msg);
+    return errorMessage(res, t(req, "error_registering_device", [msg]));
   }
 };
 
@@ -4729,21 +4718,21 @@ const editDeviceName = async function (
     const { device_id, device_name } = req.body;
 
     if (!device_id || !device_name) {
-      return errorMessage(res, "device_id and device_name are required");
+      return errorMessage(res, "device_id_and_device_name_are_required");
     }
 
     const device = await db.Device.findOne({ where: { id: device_id } });
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     device.device_name = device_name;
     await device.save();
 
-    return successMessage(res, "Device name updated successfully", device);
+    return successMessage(res, "device_name_updated_successfully", device);
   } catch (err: any) {
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error editing device name: " + msg);
+    return errorMessage(res, t(req, "error_editing_device_name", [msg]));
   }
 };
 
@@ -4756,21 +4745,21 @@ const updateDeviceNumber = async function (
     const { device_id, phone_number } = req.body;
 
     if (!device_id || !phone_number) {
-      return errorMessage(res, "device_id, phone_number are required");
+      return errorMessage(res, "device_id_phone_number_are_required");
     }
 
     const device = await db.Device.findOne({ where: { id: device_id } });
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     device.phone_number = phone_number;
     await device.save();
 
-    return successMessage(res, "Device number updated successfully", device);
+    return successMessage(res, "device_number_updated_successfully", device);
   } catch (err: any) {
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error updating device number: " + msg);
+    return errorMessage(res, t(req, "error_updating_device_number", [msg]));
   }
 };
 
@@ -4783,7 +4772,7 @@ const listVoiceMessages = async function (
     const { device_id, page = 1, limit = 20 } = req.body;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     // Verify device exists
@@ -4791,7 +4780,7 @@ const listVoiceMessages = async function (
       where: { id: device_id },
     });
     if (!device) {
-      return errorMessage(res, `Device with id '${device_id}' not found`);
+      return errorMessage(res, t(req, "device_with_id_not_found", [device_id]));
     }
 
     const pageNum = Math.max(1, parseInt(page as string, 10));
@@ -4830,7 +4819,7 @@ const listVoiceMessages = async function (
           : null,
       };
     });
-    return successMessage(res, "Voice messages retrieved successfully", {
+    return successMessage(res, "voice_messages_retrieved_successfully", {
       device_id,
       device_name: device.device_name,
       voice_messages: voiceMessages,
@@ -4845,7 +4834,7 @@ const listVoiceMessages = async function (
     });
   } catch (err) {
     console.error("listVoiceMessages error:", err);
-    return errorMessage(res, "Error retrieving voice messages");
+    return errorMessage(res, "error_retrieving_voice_messages");
   }
 };
 
@@ -4857,19 +4846,19 @@ const getDeviceStep = async (
   try {
     const { device_id } = req.body;
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
     const device = await db.DeviceSetting.findOne({
       where: { device_id: device_id },
       attributes: ["device_id", "walk_time_step_target"],
     });
     if (!device) {
-      return errorMessage(res, `Device with id '${device_id}' not found`);
+      return errorMessage(res, t(req, "device_with_id_not_found", [device_id]));
     }
-    return successMessage(res, "Device step retrieved successfully", device);
+    return successMessage(res, "device_step_retrieved_successfully", device);
   } catch (err) {
     console.error("getDeviceStep error:", err);
-    return errorMessage(res, "Error retrieving device step");
+    return errorMessage(res, "error_retrieving_device_step");
   }
 };
 export default {

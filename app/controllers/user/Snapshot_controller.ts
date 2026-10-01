@@ -6,6 +6,7 @@ import {
   successPagination,
 } from "../../library/Response";
 import { Op } from "sequelize";
+import { t } from "../../i18n/index";
 
 /**
  * Build the FULL public URL for a snapshot file.
@@ -59,11 +60,11 @@ const AddSnapshot = async function (
   try {
     const { device_id } = req.body;
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const files = (req as any).files as { [fieldname: string]: any[] };
@@ -71,7 +72,7 @@ const AddSnapshot = async function (
     if (!uploaded || !uploaded.filename) {
       return errorMessage(
         res,
-        "image file is required (multipart/form-data field 'image')"
+        "image_file_is_required_multipart_form_data_field_image"
       );
     }
 
@@ -90,13 +91,13 @@ const AddSnapshot = async function (
     const responseRow = snapshot.toJSON();
     responseRow.image_url = buildImageUrl(req, responseRow.image_url);
 
-    return successMessage(res, "Snapshot added successfully", responseRow);
+    return successMessage(res, "snapshot_added_successfully", responseRow);
   } catch (err: any) {
     console.error("AddSnapshot error:", err);
     if (err && err.message) {
       return errorMessage(res, err.message);
     }
-    return errorMessage(res, "Error adding snapshot");
+    return errorMessage(res, "error_adding_snapshot");
   }
 };
 
@@ -116,12 +117,12 @@ const ListSnapshots = async (
     } = req.body;
 
     if (!device_id) {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "Device not found");
+      return errorMessage(res, "device_not_found");
     }
 
     const offset = (Number(page) - 1) * Number(limit);
@@ -153,14 +154,14 @@ const ListSnapshots = async (
       return j;
     });
 
-    return successPagination(res, "Snapshots fetched successfully", data, {
+    return successPagination(res, "snapshots_fetched_successfully", data, {
       page: Number(page),
       limit: Number(limit),
       total: count,
     });
   } catch (err) {
     console.error("ListSnapshots error:", err);
-    return errorMessage(res, "Error fetching snapshots");
+    return errorMessage(res, "error_fetching_snapshots");
   }
 };
 
@@ -195,10 +196,10 @@ async function getAllSnapshots(
         });
 
         if (!snapshot) {
-          return errorMessage(res, "Snapshot not found");
+          return errorMessage(res, "snapshot_not_found");
         }
 
-        return successMessage(res, "Snapshot retrieved successfully", snapshot);
+        return successMessage(res, "snapshot_retrieved_successfully", snapshot);
       }
 
       if (imei) {
@@ -208,7 +209,7 @@ async function getAllSnapshots(
         });
 
         if (!device) {
-          return errorMessage(res, "Device not found with this IMEI");
+          return errorMessage(res, "device_not_found_with_this_imei");
         }
 
         const snapshots = await db.Snapshot.findAll({
@@ -224,7 +225,7 @@ async function getAllSnapshots(
           order: [["captured_at", "DESC"]],
         });
 
-        return successMessage(res, "Snapshots retrieved successfully", {
+        return successMessage(res, "snapshots_retrieved_successfully", {
           device: {
             id: device.id,
             imei: device.imei,
@@ -275,7 +276,7 @@ async function getAllSnapshots(
       // offset,
     });
 
-    return successMessage(res, "Snapshots retrieved successfully", {
+    return successMessage(res, "snapshots_retrieved_successfully", {
       snapshots: rows,
       pagination: {
         total: count,
@@ -287,7 +288,7 @@ async function getAllSnapshots(
   } catch (err) {
     console.error("getAllSnapshots error:", err);
     console.error("Error details:", JSON.stringify(err, null, 2));
-    return errorMessage(res, "Error retrieving snapshots");
+    return errorMessage(res, "error_retrieving_snapshots");
   }
 }
 const GetSnapshotsBySerialNumber = async (
@@ -299,7 +300,7 @@ const GetSnapshotsBySerialNumber = async (
     const { serial_number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -309,7 +310,7 @@ const GetSnapshotsBySerialNumber = async (
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -330,7 +331,7 @@ const GetSnapshotsBySerialNumber = async (
       };
     });
 
-    return successMessage(res, "Snapshots fetched successfully", {
+    return successMessage(res, "snapshots_fetched_successfully", {
       serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -339,7 +340,7 @@ const GetSnapshotsBySerialNumber = async (
     });
   } catch (err) {
     console.error("GetSnapshotsBySerialNumber error:", err);
-    return errorMessage(res, "Error fetching snapshots");
+    return errorMessage(res, "error_fetching_snapshots");
   }
 };
 
@@ -352,9 +353,9 @@ const deleteSnapshot = async (
   const snapshot = await db.Snapshot.findByPk(id);
   if (snapshot) {
     await snapshot.destroy();
-    return successMessage(res, "Snapshot deleted successfully", snapshot);
+    return successMessage(res, "snapshot_deleted_successfully", snapshot);
   } else {
-    return errorMessage(res, "Snapshot not found", 404);
+    return errorMessage(res, "snapshot_not_found", 404);
   }
 };
 export default {

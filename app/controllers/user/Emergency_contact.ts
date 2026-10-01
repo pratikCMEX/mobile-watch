@@ -9,6 +9,7 @@ import {
 import Logging from "../../library/Logging";
 import { tcpServer } from "../../app";
 import { log } from "node:console";
+import { t } from "../../i18n/index";
 
 // ─────────────────────────────────────────────────────────────
 // Phone-number normalization + SOS protocol helpers
@@ -200,7 +201,7 @@ async function createOrUpdateEmergencyContact(
     if (lookupId) {
       const existing = await db.EmergencyContact.findByPk(lookupId);
       if (!existing) {
-        return errorMessage(res, "Emergency contact not found", 404);
+        return errorMessage(res, "emergency_contact_not_found", 404);
       }
       device = await db.Device.findByPk(existing.device_id);
     } else if (device_id) {
@@ -214,7 +215,7 @@ async function createOrUpdateEmergencyContact(
     if (!device) {
       return errorMessage(
         res,
-        "Device not found (provide id, device_id or serial_number)"
+        "device_not_found_provide_id_device_id_or_serial_number"
       );
     }
 
@@ -222,7 +223,7 @@ async function createOrUpdateEmergencyContact(
     if (!device.serial_number) {
       return errorMessage(
         res,
-        `Device ${device.id} has no serial_number, cannot push SOS to the watch`
+        t(req, "device_has_no_serial_number_cannot_push_sos_to_the_watch", [device.id])
       );
     }
 
@@ -234,7 +235,7 @@ async function createOrUpdateEmergencyContact(
     if (!tcpServer.getDevice(device.serial_number)) {
       return errorMessage(
         res,
-        "Device is offline. SOS contact NOT saved — try again once the watch is connected.",
+        "device_is_offline_sos_contact_not_saved_try_again_once_the_watch_is_connected",
         503
       );
     }
@@ -249,7 +250,7 @@ async function createOrUpdateEmergencyContact(
         { where: { id } }
       );
       if (affectedCount === 0) {
-        return errorMessage(res, "Emergency contact not found", 404);
+        return errorMessage(res, "emergency_contact_not_found", 404);
       }
       contact = await db.EmergencyContact.findByPk(id);
     } else if (typeof priority === "number" && priority >= 1 && priority <= 3) {
@@ -315,7 +316,7 @@ async function createOrUpdateEmergencyContact(
   } catch (err: any) {
     console.error("createOrUpdateEmergencyContact error:", err);
     const msg = (err && err.message) || String(err);
-    return errorMessage(res, "Error saving emergency contact: " + msg);
+    return errorMessage(res, t(req, "error_saving_emergency_contact", [msg]));
   }
 }
 
@@ -334,7 +335,7 @@ async function deleteEmergencyContact(
     // Load the contact first so we know which device to re-sync
     const existing = await db.EmergencyContact.findByPk(id);
     if (!existing) {
-      return errorMessage(res, "Emergency contact not found", 404);
+      return errorMessage(res, "emergency_contact_not_found", 404);
     }
 
     const deletedCount = await db.EmergencyContact.destroy({
@@ -352,7 +353,7 @@ async function deleteEmergencyContact(
       sync = await syncSosNumbersToDevice(device.id, device.serial_number);
     }
 
-    return successMessage(res, "Emergency contact deleted successfully", {
+    return successMessage(res, "emergency_contact_deleted_successfully", {
       deleted: deletedCount,
       contact: existing.toJSON(),
       device: device
@@ -371,7 +372,7 @@ async function deleteEmergencyContact(
     });
   } catch (err) {
     console.error("deleteEmergencyContact error:", err);
-    return errorMessage(res, "Error deleting emergency contact");
+    return errorMessage(res, "error_deleting_emergency_contact");
   }
 }
 
@@ -447,7 +448,7 @@ const allEmergencyContact = async (
 
     return successPagination(
       res,
-      "Emergency contacts fetched successfully",
+      "emergency_contacts_fetched_successfully",
       rows,
       {
         page: pageNum,
@@ -466,8 +467,7 @@ const allEmergencyContact = async (
         : "";
     return errorMessage(
       res,
-      "Error fetching emergency contacts: " + msg + hint
-    );
+      t(req, "error_fetching_emergency_contacts_2", [msg, hint]));
   }
 };
 
@@ -478,16 +478,16 @@ const getEmergencyContact = async (req: Request, res: Response) => {
       where: { id },
     });
     if (!emergency_contact) {
-      return errorMessage(res, "Emergency contact not found");
+      return errorMessage(res, "emergency_contact_not_found");
     }
     return successMessage(
       res,
-      "Emergency contact fetched successfully",
+      "emergency_contact_fetched_successfully",
       emergency_contact
     );
   } catch (err) {
     console.error("getEmergencyContact error:", err);
-    return errorMessage(res, "Error fetching emergency contact");
+    return errorMessage(res, "error_fetching_emergency_contact");
   }
 };
 
@@ -510,7 +510,7 @@ async function setSosNumbers(req: Request, res: Response, next: NextFunction) {
       const { serial_number, contacts } = req.body;
       const device = await db.Device.findOne({ where: { serial_number } });
       if (!device) {
-        return errorMessage(res, `Device not found`);
+        return errorMessage(res, "device_not_found");
       }
 
       for (const c of contacts) {
@@ -532,7 +532,7 @@ async function setSosNumbers(req: Request, res: Response, next: NextFunction) {
 
       const sync = await syncSosNumbersToDevice(device.id, serial_number);
 
-      return successMessage(res, "SOS numbers set successfully", {
+      return successMessage(res, "sos_numbers_set_successfully", {
         device: {
           id: device.id,
           serial_number: device.serial_number,
@@ -545,7 +545,7 @@ async function setSosNumbers(req: Request, res: Response, next: NextFunction) {
       });
     } catch (err) {
       console.error("setSosNumbers error:", err);
-      return errorMessage(res, "Error setting SOS numbers");
+      return errorMessage(res, "error_setting_sos_numbers");
     }
   }
 
@@ -555,10 +555,10 @@ async function setSosNumbers(req: Request, res: Response, next: NextFunction) {
   const number = sos1 || sos_number;
   const priority = 1;
   if (!serial_number) {
-    return errorMessage(res, "serial_number is required");
+    return errorMessage(res, "serial_number_is_required");
   }
   if (!number) {
-    return errorMessage(res, "sos_number / sos1 is required");
+    return errorMessage(res, "sos_number_sos1_is_required");
   }
 
   req.body = {
@@ -612,31 +612,31 @@ async function saveEmergencyContacts(
     const { serial_number, contacts } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
     if (!Array.isArray(contacts) || contacts.length === 0) {
-      return errorMessage(res, "contacts[] array is required (1-3 entries)");
+      return errorMessage(res, "contacts_array_is_required_1_3_entries");
     }
     if (contacts.length > 3) {
-      return errorMessage(res, "Maximum 3 contacts allowed");
+      return errorMessage(res, "maximum_3_contacts_allowed");
     }
 
     // Validate priorities: must be 1/2/3 and unique across the batch.
     const priorities = contacts.map((c: any) => Number(c.priority));
     if (priorities.some((p) => ![1, 2, 3].includes(p))) {
-      return errorMessage(res, "priority must be 1, 2 or 3 for each contact");
+      return errorMessage(res, "priority_must_be_1_2_or_3_for_each_contact");
     }
     if (new Set(priorities).size !== priorities.length) {
       return errorMessage(
         res,
-        "priority values must be unique (1, 2 and/or 3)"
+        "priority_values_must_be_unique_1_2_and_or_3"
       );
     }
 
     // Validate each contact has a phone_number
     for (const [i, c] of contacts.entries()) {
       if (!c.phone_number) {
-        return errorMessage(res, `contacts[${i}].phone_number is required`);
+        return errorMessage(res, t(req, "contacts_phone_number_is_required", [i]));
       }
     }
 
@@ -645,7 +645,7 @@ async function saveEmergencyContacts(
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -656,7 +656,7 @@ async function saveEmergencyContacts(
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is offline. SOS contacts NOT saved — try again once the watch is connected.",
+        "device_is_offline_sos_contacts_not_saved_try_again_once_the_watch_is_connected",
         503
       );
     }
@@ -693,7 +693,7 @@ async function saveEmergencyContacts(
         if (affected === 0) {
           return errorMessage(
             res,
-            `Contact id ${c.id} not found for this device`
+            t(req, "contact_id_not_found_for_this_device", [c.id])
           );
         }
         const updated = await db.EmergencyContact.findByPk(c.id);
@@ -738,7 +738,7 @@ async function saveEmergencyContacts(
     // Re-sync ALL stored contacts to the watch (in priority order).
     const sync = await syncSosNumbersToDevice(device.id, device.serial_number);
 
-    return successMessage(res, "Emergency contacts saved successfully", {
+    return successMessage(res, "emergency_contacts_saved_successfully", {
       device: {
         id: device.id,
         serial_number: device.serial_number,
@@ -753,7 +753,7 @@ async function saveEmergencyContacts(
     });
   } catch (err) {
     console.error("saveEmergencyContacts error:", err);
-    return errorMessage(res, "Error saving emergency contacts");
+    return errorMessage(res, "error_saving_emergency_contacts");
   }
 }
 
@@ -837,22 +837,22 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
     const { serial_number, contacts } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
     if (!Array.isArray(contacts) || contacts.length === 0) {
-      return errorMessage(res, "contacts[] is required (1-30 entries)");
+      return errorMessage(res, "contacts_is_required_1_30_entries");
     }
     if (contacts.length > 30) {
-      return errorMessage(res, "Maximum 30 phonebook contacts allowed");
+      return errorMessage(res, "maximum_30_phonebook_contacts_allowed");
     }
 
     // Indices must be 1..30 and unique across the batch.
     const indices = contacts.map((c: any) => Number(c.index));
     if (indices.some((i: number) => !Number.isInteger(i) || i < 1 || i > 30)) {
-      return errorMessage(res, "Each contact.index must be an integer 1..30");
+      return errorMessage(res, "each_contact_index_must_be_an_integer_1_30");
     }
     if (new Set(indices).size !== indices.length) {
-      return errorMessage(res, "index values must be unique (1..30)");
+      return errorMessage(res, "index_values_must_be_unique_1_30");
     }
 
     // Look up the device
@@ -860,7 +860,7 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -871,14 +871,14 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
     if (!tcpServer.getDevice(serial_number)) {
       return errorMessage(
         res,
-        "Device is offline. SOS contacts NOT saved — try again once the watch is connected.",
+        "device_is_offline_sos_contacts_not_saved_try_again_once_the_watch_is_connected",
         503
       );
     }
     if (!device.serial_number) {
       return errorMessage(
         res,
-        `Device ${device.id} has no serial_number, cannot push phonebook`
+        t(req, "device_has_no_serial_number_cannot_push_phonebook", [device.id])
       );
     }
 
@@ -887,7 +887,7 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1015,14 +1015,14 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
     if (!allSent) {
       return errorMessage(
         res,
-        "One or more PHBX entries failed to send. Device may be disconnected.",
+        "one_or_more_phbx_entries_failed_to_send_device_may_be_disconnected",
         { wire_results: wireResults, db_results: dbResults }
       );
     }
 
     return successMessage(
       res,
-      `Phonebook pushed successfully (${wireResults.length} entries)`,
+      t(req, "phonebook_pushed_successfully_entries", [wireResults.length]),
       {
         serial_number: device.serial_number,
         device_id: device.id,
@@ -1037,7 +1037,7 @@ async function setPhonebook(req: Request, res: Response, next: NextFunction) {
     );
   } catch (err) {
     console.error("setPhonebook error:", err);
-    return errorMessage(res, "Error pushing phonebook to device");
+    return errorMessage(res, "error_pushing_phonebook_to_device");
   }
 }
 
@@ -1089,7 +1089,7 @@ async function deletePhonebookContact(
     const { serial_number, index, number } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
     if (
       typeof index !== "number" ||
@@ -1097,7 +1097,7 @@ async function deletePhonebookContact(
       index < 1 ||
       index > 30
     ) {
-      return errorMessage(res, "index is required (integer 1..30)");
+      return errorMessage(res, "index_is_required_integer_1_30");
     }
 
     // We accept `number` for caller convenience but do NOT put it on
@@ -1109,13 +1109,13 @@ async function deletePhonebookContact(
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
     if (!device.serial_number) {
       return errorMessage(
         res,
-        `Device ${device.id} has no serial_number, cannot clear phonebook slot`
+        t(req, "device_has_no_serial_number_cannot_clear_phonebook_slot", [device.id])
       );
     }
 
@@ -1123,7 +1123,7 @@ async function deletePhonebookContact(
     if (!tcpClient) {
       return errorMessage(
         res,
-        "Device is offline. Please ensure the device is connected."
+        "device_is_offline_please_ensure_the_device_is_connected"
       );
     }
 
@@ -1136,7 +1136,7 @@ async function deletePhonebookContact(
     if (!sent) {
       return errorMessage(
         res,
-        "Failed to clear PHBX slot. Device may be disconnected."
+        "failed_to_clear_phbx_slot_device_may_be_disconnected"
       );
     }
 
@@ -1175,7 +1175,7 @@ async function deletePhonebookContact(
         `(rows deleted from DB: ${deletedRowCount})`
     );
 
-    return successMessage(res, "Phonebook slot cleared successfully", {
+    return successMessage(res, "phonebook_slot_cleared_successfully", {
       serial_number: device.serial_number,
       device_id: device.id,
       device_name: device.device_name,
@@ -1199,7 +1199,7 @@ async function deletePhonebookContact(
     });
   } catch (err) {
     console.error("deletePhonebookContact error:", err);
-    return errorMessage(res, "Error clearing phonebook slot");
+    return errorMessage(res, "error_clearing_phonebook_slot");
   }
 }
 
@@ -1236,14 +1236,14 @@ async function listPhonebook(req: Request, res: Response, next: NextFunction) {
     } = req.body;
 
     if (!serial_number) {
-      return errorMessage(res, "serial_number is required");
+      return errorMessage(res, "serial_number_is_required");
     }
 
     const device = await db.Device.findOne({ where: { serial_number } });
     if (!device) {
       return errorMessage(
         res,
-        `Device with serial_number '${serial_number}' not found`
+        t(req, "device_with_serial_number_not_found", [serial_number])
       );
     }
 
@@ -1317,7 +1317,7 @@ async function listPhonebook(req: Request, res: Response, next: NextFunction) {
     // Use successMessage so we can include device-level metadata
     // (successPagination's signature only accepts page/limit/total).
     const totalPages = Math.ceil(count / limitNum);
-    return successMessage(res, "Phonebook entries fetched successfully", {
+    return successMessage(res, "phonebook_entries_fetched_successfully", {
       device: {
         id: device.id,
         serial_number: device.serial_number,
@@ -1346,7 +1346,7 @@ async function listPhonebook(req: Request, res: Response, next: NextFunction) {
         msg.toLowerCase().includes("unknown"))
         ? " (Did you run the migration? `npx sequelize-cli db:migrate`)"
         : "";
-    return errorMessage(res, "Error fetching phonebook: " + msg + hint);
+    return errorMessage(res, t(req, "error_fetching_phonebook", [msg, hint]));
   }
 }
 

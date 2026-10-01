@@ -6,6 +6,7 @@ import { pushToUser } from "../../services/notification.service";
 import Logging from "../../library/Logging";
 import { sendNotification } from "../../helper/WebNotification";
 import { getUserDeviceIds } from "../../helper/WatchAccess";
+import { t } from "../../i18n/index";
 
 const sendTestNotification = async (
   req: Request,
@@ -16,7 +17,7 @@ const sendTestNotification = async (
     const { user_id } = req.body;
 
     if (!user_id) {
-      return errorMessage(res, "user_id is required");
+      return errorMessage(res, "user_id_is_required_2");
     }
 
     // Verify user exists and has an FCM token
@@ -26,11 +27,11 @@ const sendTestNotification = async (
     });
 
     if (!user) {
-      return errorMessage(res, "User not found");
+      return errorMessage(res, "user_not_found");
     }
 
     if (!user.fcm_token) {
-      return errorMessage(res, "User does not have an FCM token registered");
+      return errorMessage(res, "user_does_not_have_an_fcm_token_registered");
     }
 
     // Find one of the user's devices so we can persist a notification
@@ -48,7 +49,7 @@ const sendTestNotification = async (
     if (!device) {
       return errorMessage(
         res,
-        "User does not have a device registered; cannot create notification record"
+        "user_does_not_have_a_device_registered_cannot_create_notification_record"
       );
     }
 
@@ -97,7 +98,7 @@ const sendTestNotification = async (
     if (!response) {
       return errorMessage(
         res,
-        "Failed to send test notification (no FCM response)"
+        "failed_to_send_test_notification_no_fcm_response"
       );
     }
 
@@ -112,7 +113,7 @@ const sendTestNotification = async (
       });
     }
 
-    return successMessage(res, "Test notification sent successfully", {
+    return successMessage(res, "test_notification_sent_successfully", {
       user_id: user.id,
       user_name: user.name,
       fcm_token: user.fcm_token,
@@ -125,7 +126,7 @@ const sendTestNotification = async (
     Logging.error(`sendTestNotification error: ${err?.message || err}`);
     return errorMessage(
       res,
-      `Error sending test notification: ${err?.message || "Unknown error"}`
+      t(req, "error_sending_test_notification", [err?.message || "Unknown error"])
     );
   }
 };

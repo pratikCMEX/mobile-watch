@@ -26,10 +26,10 @@ async function createAppUpdate(
       force_update: force_update ?? false,
     });
 
-    return successMessage(res, "App update created successfully", appUpdate);
+    return successMessage(res, "app_update_created_successfully", appUpdate);
   } catch (err) {
     console.error("createAppUpdate error:", err);
-    return errorMessage(res, "Error creating app update");
+    return errorMessage(res, "error_creating_app_update");
   }
 }
 
@@ -71,14 +71,14 @@ async function listAppUpdates(req: Request, res: Response, next: NextFunction) {
       offset,
     });
 
-    return successPagination(res, "App updates fetched successfully", rows, {
+    return successPagination(res, "app_updates_fetched_successfully", rows, {
       page,
       limit,
       total: count,
     });
   } catch (error) {
     console.error("listAppUpdates error:", error);
-    return errorMessage(res, "Error fetching app updates");
+    return errorMessage(res, "error_fetching_app_updates");
   }
 }
 
@@ -98,7 +98,7 @@ async function updateAppUpdate(
     const appUpdate = await db.AppUpdate.findOne({ where: { id } });
 
     if (!appUpdate) {
-      return errorMessage(res, "App update not found");
+      return errorMessage(res, "app_update_not_found");
     }
 
     const updateData: any = {};
@@ -110,10 +110,10 @@ async function updateAppUpdate(
 
     const updated = await db.AppUpdate.findOne({ where: { id } });
 
-    return successMessage(res, "App update updated successfully", updated);
+    return successMessage(res, "app_update_updated_successfully", updated);
   } catch (err) {
     console.error("updateAppUpdate error:", err);
-    return errorMessage(res, "Error updating app update");
+    return errorMessage(res, "error_updating_app_update");
   }
 }
 
@@ -133,15 +133,15 @@ async function deleteAppUpdate(
     const appUpdate = await db.AppUpdate.findOne({ where: { id } });
 
     if (!appUpdate) {
-      return errorMessage(res, "App update not found");
+      return errorMessage(res, "app_update_not_found");
     }
 
     await appUpdate.destroy();
 
-    return successMessage(res, "App update deleted successfully");
+    return successMessage(res, "app_update_deleted_successfully");
   } catch (err) {
     console.error("deleteAppUpdate error:", err);
-    return errorMessage(res, "Error deleting app update");
+    return errorMessage(res, "error_deleting_app_update");
   }
 }
 
@@ -155,19 +155,19 @@ async function getAppUpdate(req: Request, res: Response, next: NextFunction) {
     const { id } = req.body;
 
     if (!id) {
-      return errorMessage(res, "App update ID is required");
+      return errorMessage(res, "app_update_id_is_required");
     }
 
     const appUpdate = await db.AppUpdate.findOne({ where: { id } });
 
     if (!appUpdate) {
-      return errorMessage(res, "App update not found");
+      return errorMessage(res, "app_update_not_found");
     }
 
-    return successMessage(res, "App update fetched successfully", appUpdate);
+    return successMessage(res, "app_update_fetched_successfully", appUpdate);
   } catch (err) {
     console.error("getAppUpdate error:", err);
-    return errorMessage(res, "Error fetching app update");
+    return errorMessage(res, "error_fetching_app_update");
   }
 }
 
@@ -196,13 +196,13 @@ async function checkAppUpdate(req: Request, res: Response, next: NextFunction) {
     });
 
     if (!latest) {
-      return successMessage(res, "No app update found", null);
+      return successMessage(res, "no_app_update_found", null);
     }
 
     // Determine whether the installed version is behind the latest.
     let updateAvailable = false;
 
-    return successMessage(res, "App update checked successfully", {
+    return successMessage(res, "app_update_checked_successfully", {
       update_available: updateAvailable,
       force_update: latest.force_update,
       latest_version: latest.apk_version,
@@ -211,7 +211,7 @@ async function checkAppUpdate(req: Request, res: Response, next: NextFunction) {
     });
   } catch (err) {
     console.error("checkAppUpdate error:", err);
-    return errorMessage(res, "Error checking app update");
+    return errorMessage(res, "error_checking_app_update");
   }
 }
 

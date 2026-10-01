@@ -20,7 +20,7 @@ const saveGeofence = async function (
     if (id && id !== "") {
       const geofence = await db.Geofence.findByPk(id);
       if (!geofence) {
-        return errorMessage(res, "Geofence not found", 404);
+        return errorMessage(res, "geofence_not_found", 404);
       }
 
       if (device_id && device_id !== geofence.device_id) {
@@ -28,7 +28,7 @@ const saveGeofence = async function (
         if (!device) {
           return errorMessage(
             res,
-            "device_id does not match any existing device"
+            "device_id_does_not_match_any_existing_device"
           );
         }
         geofence.device_id = device_id;
@@ -41,14 +41,14 @@ const saveGeofence = async function (
 
       await geofence.save();
 
-      return successMessage(res, "Geofence updated successfully", geofence);
+      return successMessage(res, "geofence_updated_successfully", geofence);
     }
 
     // Create path
 
     const device = await db.Device.findByPk(device_id);
     if (!device) {
-      return errorMessage(res, "device_id does not match any existing device");
+      return errorMessage(res, "device_id_does_not_match_any_existing_device");
     }
 
     const geofence = await db.Geofence.create({
@@ -60,7 +60,7 @@ const saveGeofence = async function (
       is_active: true,
     });
 
-    return successMessage(res, "Geofence created successfully", geofence);
+    return successMessage(res, "geofence_created_successfully", geofence);
   } catch (err: any) {
     console.error("saveGeofence error:", err);
     return errorMessage(
@@ -88,7 +88,7 @@ const listGeofences = async (
     } = req.body;
 
     if (device_id === "") {
-      return errorMessage(res, "device_id is required");
+      return errorMessage(res, "device_id_is_required");
     }
 
     const offset = (Number(page) - 1) * Number(limit);
@@ -120,14 +120,14 @@ const listGeofences = async (
       offset,
     });
 
-    return successPagination(res, "Geofences fetched successfully", rows, {
+    return successPagination(res, "geofences_fetched_successfully", rows, {
       page,
       limit,
       total: count,
     });
   } catch (error) {
     console.error("listGeofences error:", error);
-    return errorMessage(res, "Error fetching geofences");
+    return errorMessage(res, "error_fetching_geofences");
   }
 };
 
@@ -141,15 +141,15 @@ const deleteGeofence = async function (
 
     const geofence = await db.Geofence.findByPk(id);
     if (!geofence) {
-      return errorMessage(res, "Geofence not found", 404);
+      return errorMessage(res, "geofence_not_found", 404);
     }
 
     await geofence.destroy(); // hard delete — no deletedAt column on this table
 
-    return successMessage(res, "Geofence deleted successfully", null);
+    return successMessage(res, "geofence_deleted_successfully", null);
   } catch (err) {
     console.error("deleteGeofence error:", err);
-    return errorMessage(res, "Error deleting geofence");
+    return errorMessage(res, "error_deleting_geofence");
   }
 };
 
@@ -162,12 +162,12 @@ const toggleGeofenceStatus = async function (
     const { is_active, id } = req.body;
 
     if (is_active === undefined) {
-      return errorMessage(res, "is_active is required");
+      return errorMessage(res, "is_active_is_required");
     }
 
     const geofence = await db.Geofence.findByPk(id);
     if (!geofence) {
-      return errorMessage(res, "Geofence not found", 404);
+      return errorMessage(res, "geofence_not_found", 404);
     }
 
     geofence.is_active = is_active;
@@ -175,12 +175,12 @@ const toggleGeofenceStatus = async function (
 
     return successMessage(
       res,
-      "Geofence status updated successfully",
+      "geofence_status_updated_successfully",
       geofence
     );
   } catch (err) {
     console.error("toggleGeofenceStatus error:", err);
-    return errorMessage(res, "Error updating geofence status");
+    return errorMessage(res, "error_updating_geofence_status");
   }
 };
 

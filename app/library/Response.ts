@@ -1,4 +1,15 @@
 import { Response } from "express";
+import { translateForResponse } from "../i18n";
+
+// Every helper routes its `message` through translateForResponse(), which
+// reads the `language` header off the request. The `message` argument is a
+// stable snake_case key (not the English sentence) so re-wording a message
+// or re-indenting a template literal in a controller can never break a
+// lookup. The English text lives in app/i18n/locales/en.json as the value.
+//
+//   errorMessage(res, "device_not_found")
+//   errorMessage(res, t(req, "devices_deleted_successfully", [n]))
+const localize = (res: Response, key: string) => translateForResponse(res, key);
 
 export const successMessage = (
   res: Response,
@@ -7,7 +18,7 @@ export const successMessage = (
 ) => {
   return res.status(200).json({
     success: true,
-    message: message,
+    message: localize(res, message),
     data: resData,
   });
 };
@@ -26,7 +37,7 @@ export const successPagination = (
     const totalPages = Math.ceil(pagination.total / pagination.limit);
     return res.status(200).json({
       success: true,
-      message,
+      message: localize(res, message),
       total: pagination.total,
       totalPages,
       currentPage: pagination.page,
@@ -39,7 +50,7 @@ export const successPagination = (
 
   return res.status(200).json({
     success: true,
-    message,
+    message: localize(res, message),
     data,
   });
 };
@@ -51,7 +62,7 @@ export const waitMessage = (
 ) => {
   return res.status(300).json({
     success: false,
-    message: message,
+    message: localize(res, message),
     data: resData,
   });
 };
@@ -63,7 +74,7 @@ export const errorMessage = (
 ) => {
   return res.status(200).json({
     success: false,
-    message: message,
+    message: localize(res, message),
     data: resData,
   });
 };
@@ -76,7 +87,7 @@ export const customMessage = (
 ) => {
   return res.status(code).json({
     success: false,
-    message: message,
+    message: localize(res, message),
     data: resData,
   });
 };

@@ -9,7 +9,7 @@ async function getDeviceLocation(req: Request, res: Response, next: NextFunction
     const { imei } = req.body;
 
     if (!imei) {
-      return errorMessage(res, "IMEI is required");
+      return errorMessage(res, "imei_is_required");
     }
 
     const device = await db.Device.findOne({
@@ -32,13 +32,13 @@ async function getDeviceLocation(req: Request, res: Response, next: NextFunction
     });
 
     if (!device || !(await canAccessDevice(req, device.id))) {
-      return errorMessage(res, "Device not found with this IMEI");
+      return errorMessage(res, "device_not_found_with_this_imei");
     }
 
-    return successMessage(res, "Device location retrieved successfully", device);
+    return successMessage(res, "device_location_retrieved_successfully", device);
   } catch (err) {
     console.error("getDeviceLocation error:", err);
-    return errorMessage(res, "Error retrieving device location");
+    return errorMessage(res, "error_retrieving_device_location");
   }
 }
 

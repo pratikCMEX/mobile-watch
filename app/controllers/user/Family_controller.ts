@@ -16,7 +16,7 @@ async function addFamilyMember(
     const { name, mobile_no, device_id } = req.body;
 
     if (!name || !mobile_no || !device_id) {
-      return errorMessage(res, "name, mobile_no and device_id are required");
+      return errorMessage(res, "name_mobile_no_and_device_id_are_required");
     }
 
     const familyMember = await db.FamilyMember.create({
@@ -27,12 +27,12 @@ async function addFamilyMember(
 
     return successMessage(
       res,
-      "Family member added successfully",
+      "family_member_added_successfully",
       familyMember
     );
   } catch (err) {
     console.error("addFamilyMember error:", err);
-    return errorMessage(res, "Error adding family member");
+    return errorMessage(res, "error_adding_family_member");
   }
 }
 
@@ -72,14 +72,14 @@ async function listFamilyMembers(
       offset,
     });
 
-    return successPagination(res, "Family members fetched successfully", rows, {
+    return successPagination(res, "family_members_fetched_successfully", rows, {
       page,
       limit,
       total: count,
     });
   } catch (error) {
     console.error("listFamilyMembers error:", error);
-    return errorMessage(res, "Error fetching family members");
+    return errorMessage(res, "error_fetching_family_members");
   }
 }
 
@@ -95,17 +95,17 @@ async function deleteFamilyMember(
     });
 
     if (!familyMember) {
-      return errorMessage(res, "Family member not found");
+      return errorMessage(res, "family_member_not_found");
     }
 
     await db.FamilyMember.destroy({
       where: { id },
     });
 
-    return successMessage(res, "Family member deleted successfully");
+    return successMessage(res, "family_member_deleted_successfully");
   } catch (err) {
     console.error("deleteFamilyMember error:", err);
-    return errorMessage(res, "Error deleting family member");
+    return errorMessage(res, "error_deleting_family_member");
   }
 }
 

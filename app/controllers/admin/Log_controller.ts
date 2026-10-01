@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import fs from "fs";
 import path from "path";
 import { errorMessage } from "../../library/Response";
+import { t } from "../../i18n/index";
 
 const LOGS_DIR = path.join(__dirname, "../../../logs");
 
@@ -33,13 +34,13 @@ const getLog = (req: Request, res: Response) => {
       typeof req.params.filename === "string" ? req.params.filename : "";
 
     if (!ALLOWED_FILES.includes(filename)) {
-      return errorMessage(res, "Unknown log file");
+      return errorMessage(res, "unknown_log_file");
     }
 
     const filePath = path.join(LOGS_DIR, filename);
 
     if (!fs.existsSync(filePath)) {
-      return errorMessage(res, "Log file not found");
+      return errorMessage(res, "log_file_not_found");
     }
 
     if (req.query.clear === "true") {
@@ -63,7 +64,7 @@ const getLog = (req: Request, res: Response) => {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.status(200).send(tail);
   } catch (error: any) {
-    return errorMessage(res, `Failed to read log: ${error.message}`);
+    return errorMessage(res, t(req, "failed_to_read_log", [error.message]));
   }
 };
 

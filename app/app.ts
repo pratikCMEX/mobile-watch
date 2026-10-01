@@ -8,6 +8,7 @@ import path from "path";
 import fs from "fs";
 import { config } from "./config/config";
 import db from "./models";
+import { i18nMiddleware, t } from "./i18n";
 import TcpServer from "./tcp/tcpServer";
 import { Server } from "socket.io";
 export { io };
@@ -41,10 +42,18 @@ app.use(
   cors({
     origin: "*", // Allows all domains
     methods: ["GET", "POST", "PUT", "DELETE"], // Allowed request methods
-    allowedHeaders: ["Content-Type", "Authorization"], // Allowed headers
+    // `language` selects the response language; omit it and replies are
+    // English (the default locale).
+    allowedHeaders: ["Content-Type", "Authorization", "language"],
     credentials: true, // If cookies/auth headers are needed, set this to true
   })
 );
+
+// ─── i18n ───────────────────────────────────────────────────────
+// Resolves the locale from the `language` (or `Accept-Language`) header
+// once per request and exposes it as req.locale / req.t. Mounted before
+// anything that can emit a localized message.
+app.use(i18nMiddleware);
 
 app.use(helmet());
 app.use(express.json());
@@ -73,9 +82,13 @@ const limiter = rateLimit({
   max: 100, // limit each IP to 100 requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
-    success: false,
-    message: "Too many requests, please try again later.",
+  // Localized lazily per request — the limiter is shared across locales,
+  // so the handler resolves the locale instead of baking in one string.
+  handler: (_req: Request, res: Response) => {
+    res.status(429).json({
+      success: false,
+      message: t(_req, "too_many_requests_please_try_again_later"),
+    });
   },
 });
 app.use("/api", limiter);
@@ -147,7 +160,7 @@ app.get("/ping", (req: Request, res: Response) => {
 app.use((req: Request, res: Response) => {
   if (req.url.startsWith("/socket.io")) return;
   Logging.error(`Route not found: ${req.url}`);
-  res.status(404).json({ message: "Route not found" });
+  res.status(404).json({ message: t(req, "route_not_found") });
 });
 
 // ─── Global Error Handler ──────────────────────────────────────
@@ -158,7 +171,9 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   }
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || "Internal Server Error",
+    // err.message is usually a raw internal string, so only surface it as-is
+    // and localize our own fallback text.
+    message: err.message || t(req, "internal_server_error"),
   });
 });
 
